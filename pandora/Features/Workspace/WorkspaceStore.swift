@@ -140,6 +140,29 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    func focusSessionFromSurface(sessionID: String) {
+        guard let session = sessionsByID[sessionID] else { return }
+
+        if let visibleWorkspace,
+           let target = visibleWorkspace.root.leafTarget(forSlotID: session.slotID) {
+            keyboardNavigationArea = .workspace
+            focusedTerminalTarget = target
+            updateWorkspaceFocus(workspaceID: visibleWorkspace.id, paneID: target.paneID, slotID: session.slotID)
+            return
+        }
+
+        guard let workspace = workspaceEntries.first(where: { $0.memberSlotIDs.contains(session.slotID) }),
+              let target = workspace.root.leafTarget(forSlotID: session.slotID) else {
+            return
+        }
+
+        selectedSidebarWorkspaceID = workspace.id
+        visibleWorkspaceID = workspace.id
+        keyboardNavigationArea = .workspace
+        focusedTerminalTarget = target
+        updateWorkspaceFocus(workspaceID: workspace.id, paneID: target.paneID, slotID: session.slotID)
+    }
+
     func navigateSidebarSelection(offset: Int) {
         let visible = filteredWorkspaces
         guard visible.isEmpty == false else { return }

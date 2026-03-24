@@ -13,9 +13,6 @@ struct SidebarShellView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarFocusSink()
-                .frame(width: 0, height: 0)
-
             header
 
             SearchFieldView(text: $store.searchText, placeholder: "Filter workspaces...")
@@ -23,7 +20,15 @@ struct SidebarShellView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 12)
 
-            WorkspaceSidebarListView(store: store)
+            SidebarKeyboardHost(
+                onMoveSelection: { offset in
+                    store.navigateSidebarSelection(offset: offset)
+                },
+                onActivateSelection: {
+                    store.focusVisibleWorkspace()
+                },
+                content: WorkspaceSidebarListView(store: store)
+            )
         }
         .frame(minWidth: 280, idealWidth: 320, maxWidth: 420, maxHeight: .infinity, alignment: .top)
         .background(sidebarBackground)

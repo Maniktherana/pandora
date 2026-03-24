@@ -485,6 +485,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
                     ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
                 }
             }
+
+            if window?.firstResponder === self {
+                surfaceRegistry?.claimFocus(for: self)
+            } else {
+                applyGhosttyFocus(false)
+                surfaceRegistry?.synchronizeFocus(for: self)
+            }
         }
 
         if window?.firstResponder === self {

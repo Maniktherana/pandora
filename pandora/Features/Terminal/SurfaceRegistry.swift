@@ -18,6 +18,7 @@ final class SurfaceRegistry: ObservableObject {
     private var pendingFocusSessionID: String?
     private weak var focusedView: GhosttyNSView?
     weak var daemonClient: DaemonClient?
+    var onFocusSession: ((String) -> Void)?
 
     func configure(daemonClient: DaemonClient?) {
         self.daemonClient = daemonClient
@@ -113,6 +114,9 @@ final class SurfaceRegistry: ObservableObject {
             focusedView = view
         }
         view.applyGhosttyFocus(true)
+        if let sessionID = viewsBySessionID.first(where: { $0.value === view })?.key {
+            onFocusSession?(sessionID)
+        }
     }
 
     func releaseFocus(for view: GhosttyNSView) {

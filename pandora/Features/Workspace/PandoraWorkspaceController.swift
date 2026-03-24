@@ -135,32 +135,31 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         controller: BonsplitController,
         slotsByID: [String: SlotState]
     ) {
-        let slotIDs = content.slotIDs
+        let slotIDs: [String]
+        if case .tabs(let rawSlotIDs, let selectedIndex) = content,
+           rawSlotIDs.indices.contains(selectedIndex) {
+            let selectedSlotID = rawSlotIDs[selectedIndex]
+            slotIDs = rawSlotIDs.enumerated()
+                .filter { $0.offset != selectedIndex }
+                .map(\.element) + [selectedSlotID]
+        } else {
+            slotIDs = content.slotIDs
+        }
         guard slotIDs.isEmpty == false else { return }
 
-        var createdTabIDs: [TabID] = []
         for slotID in slotIDs {
             let title = slotsByID[slotID]?.name ?? "Terminal"
             if let tabID = controller.createTab(title: title, icon: "terminal", inPane: paneID) {
                 remember(tabID: tabID, slotID: slotID)
-                createdTabIDs.append(tabID)
             }
-        }
-
-        guard let selectedSlotID = content.selectedSlotID,
-              let selectedTabID = bonsplitTabIDBySlotID[selectedSlotID] else {
-            return
-        }
-
-        if createdTabIDs.contains(selectedTabID) {
-            controller.selectTab(selectedTabID)
         }
     }
 
     private func syncVisibleSelection(to workspace: WorkspaceEntry) {
         renderedWorkspace = workspace
 
-        if let target = workspace.activeFocusTarget ?? workspace.defaultFocusTarget,
+        if store?.keyboardNavigationArea == .workspace,
+           let target = workspace.activeFocusTarget ?? workspace.defaultFocusTarget,
            let paneID = bonsplitPaneIDByWorkspacePaneID[target.paneID] {
             bonsplitController.focusPane(paneID)
             if let tabID = bonsplitTabIDBySlotID[target.slotID] {

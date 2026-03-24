@@ -48,6 +48,11 @@ struct ContentView: View {
         .onAppear {
             surfaceRegistry.configure(daemonClient: daemonClient)
             workspaceController.bind(store: workspaceStore, surfaceRegistry: surfaceRegistry)
+            surfaceRegistry.onFocusSession = { sessionID in
+                Task { @MainActor in
+                    workspaceStore.focusSessionFromSurface(sessionID: sessionID)
+                }
+            }
             daemonClient.onOutputChunk = { sessionID, data in
                 Task { @MainActor in
                     surfaceRegistry.feedOutput(sessionID: sessionID, data: data)
@@ -55,13 +60,25 @@ struct ContentView: View {
             }
             daemonClient.connect()
             installKeyboardMonitor()
+            DispatchQueue.main.async {
+                if workspaceStore.keyboardNavigationArea == .sidebar {
+                    SidebarFocusBridge.shared.focus()
+                    workspaceController.synchronizeTerminalFocus()
+                }
+            }
         }
         .onDisappear {
+            surfaceRegistry.onFocusSession = nil
             removeKeyboardMonitor()
         }
         .onChange(of: workspaceStore.visibleWorkspace) { _, workspace in
             workspaceController.render(workspace: workspace, slotsByID: workspaceStore.slotsByID)
             workspaceController.synchronizeTerminalFocus()
+            if workspaceStore.keyboardNavigationArea == .sidebar {
+                DispatchQueue.main.async {
+                    SidebarFocusBridge.shared.focus()
+                }
+            }
         }
         .onChange(of: workspaceStore.actualFocusedSession?.id) { _, _ in
             workspaceController.synchronizeTerminalFocus()
@@ -214,22 +231,7 @@ struct ContentView: View {
             return false
         }
 
-        switch event.keyCode {
-        case 125:
-            guard workspaceStore.keyboardNavigationArea == .sidebar else { return false }
-            workspaceStore.navigateSidebarSelection(offset: 1)
-            return true
-        case 126:
-            guard workspaceStore.keyboardNavigationArea == .sidebar else { return false }
-            workspaceStore.navigateSidebarSelection(offset: -1)
-            return true
-        case 36, 76:
-            guard workspaceStore.keyboardNavigationArea == .sidebar else { return false }
-            focusVisibleWorkspace()
-            return true
-        default:
-            return false
-        }
+        return false
     }
 
     private func cycleFocusedTab(forward: Bool) -> Bool {

@@ -112,6 +112,21 @@ indirect enum WorkspaceLayoutNode: Equatable {
         }
     }
 
+    func leafTarget(forSlotID slotID: String) -> WorkspaceLeafTarget? {
+        switch self {
+        case .leaf(let id, let content):
+            guard content.slotIDs.contains(slotID) else { return nil }
+            return WorkspaceLeafTarget(paneID: id, slotID: slotID)
+        case .split(_, _, let children, _):
+            for child in children {
+                if let target = child.leafTarget(forSlotID: slotID) {
+                    return target
+                }
+            }
+            return nil
+        }
+    }
+
     func removing(slotID: String) -> WorkspaceLayoutNode? {
         switch self {
         case .leaf(let id, let content):
