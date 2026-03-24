@@ -44,10 +44,22 @@ struct PandoraWorkspaceView: View {
                 workspaceController.bind(store: store, surfaceRegistry: surfaceRegistry)
                 workspaceController.render(workspace: workspace, slotsByID: store.slotsByID)
                 workspaceController.synchronizeTerminalFocus()
+                if store.keyboardNavigationArea == .sidebar {
+                    DispatchQueue.main.async {
+                        SidebarFocusBridge.shared.focus()
+                        workspaceController.synchronizeTerminalFocus()
+                    }
+                }
             }
             .onChange(of: workspace) { _, newWorkspace in
                 workspaceController.render(workspace: newWorkspace, slotsByID: store.slotsByID)
                 workspaceController.synchronizeTerminalFocus()
+                if store.keyboardNavigationArea == .sidebar {
+                    DispatchQueue.main.async {
+                        SidebarFocusBridge.shared.focus()
+                        workspaceController.synchronizeTerminalFocus()
+                    }
+                }
             }
             .onChange(of: store.keyboardNavigationArea) { _, _ in
                 workspaceController.synchronizeTerminalFocus()
