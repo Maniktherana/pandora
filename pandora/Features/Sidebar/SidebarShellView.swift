@@ -13,6 +13,9 @@ struct SidebarShellView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SidebarFocusSink()
+                .frame(width: 0, height: 0)
+
             header
 
             SearchFieldView(text: $store.searchText, placeholder: "Filter workspaces...")

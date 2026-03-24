@@ -6,6 +6,7 @@
 //
 
 import Bonsplit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -173,7 +174,6 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private func rebuildWorkspaceFromShell() {
         guard isApplyingSnapshot == false,
               let store,
-              let renderedWorkspace,
               let rebuiltRoot = rebuildNode(from: bonsplitController.treeSnapshot()) else {
             return
         }
@@ -264,7 +264,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 }
 
 extension PandoraWorkspaceController: BonsplitDelegate {
-    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Tab, inPane pane: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Bonsplit.Tab, inPane pane: PaneID) {
         guard isApplyingSnapshot == false,
               let store,
               let paneIDString = paneIDString(for: pane),
@@ -282,7 +282,7 @@ extension PandoraWorkspaceController: BonsplitDelegate {
         synchronizeTerminalFocus()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Bonsplit.Tab, fromPane source: PaneID, toPane destination: PaneID) {
         rebuildWorkspaceFromShell()
     }
 

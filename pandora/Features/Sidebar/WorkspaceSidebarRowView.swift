@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct WorkspaceSidebarRowView: View {
     @ObservedObject var store: WorkspaceStore
@@ -79,11 +80,7 @@ struct WorkspaceSidebarRowView: View {
         }
         .buttonStyle(.plain)
         .draggable(workspace.id)
-        .dropDestination(for: String.self) { items, _ in
-            guard let sourceID = items.first else { return false }
-            store.mergeWorkspaces(sourceID: sourceID, into: workspace.id)
-            return true
-        }
+        .onDrop(of: [UTType.text], isTargeted: nil, perform: handleWorkspaceDrop)
         .contextMenu {
             Button("Show Workspace") {
                 openSlot()
@@ -179,10 +176,38 @@ struct WorkspaceSidebarRowView: View {
 
     private func openSlot() {
         store.selectSidebarWorkspace(id: workspace.id)
+        SidebarFocusBridge.shared.focus()
     }
 
     private func removeFromSidebar() {
         store.remove(workspace)
+    }
+
+    private func handleWorkspaceDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
+            let value: String?
+            switch item {
+            case let data as Data:
+                value = String(data: data, encoding: .utf8)
+            case let string as String:
+                value = string
+            case let nsString as NSString:
+                value = nsString as String
+            default:
+                value = nil
+            }
+
+            guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  sourceID.isEmpty == false else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
+            }
+        }
+        return true
     }
 }
 

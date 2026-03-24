@@ -61,6 +61,7 @@ struct ContentView: View {
         }
         .onChange(of: workspaceStore.visibleWorkspace) { _, workspace in
             workspaceController.render(workspace: workspace, slotsByID: workspaceStore.slotsByID)
+            workspaceController.synchronizeTerminalFocus()
         }
         .onChange(of: workspaceStore.actualFocusedSession?.id) { _, _ in
             workspaceController.synchronizeTerminalFocus()
@@ -273,10 +274,12 @@ struct ContentView: View {
     private func unfocusWorkspace() {
         workspaceStore.unfocusWorkspace()
         surfaceRegistry.clearFocus()
+        SidebarFocusBridge.shared.focus()
     }
 
     private func activateSidebarNavigation() {
         workspaceStore.activateSidebarNavigation()
         surfaceRegistry.clearFocus()
+        SidebarFocusBridge.shared.focus()
     }
 }

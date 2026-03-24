@@ -7,6 +7,7 @@
 
 import Bonsplit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PandoraWorkspaceView: View {
     @ObservedObject var store: WorkspaceStore
@@ -36,17 +37,17 @@ struct PandoraWorkspaceView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .dropDestination(for: String.self, isTargeted: $isWorkspaceDropTargeted) { items, _ in
-                guard let sourceID = items.first else { return false }
-                store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
-                return true
+            .onDrop(of: [UTType.text], isTargeted: $isWorkspaceDropTargeted) { providers in
+                handleExternalDrop(providers: providers, into: workspace.id)
             }
             .onAppear {
                 workspaceController.bind(store: store, surfaceRegistry: surfaceRegistry)
                 workspaceController.render(workspace: workspace, slotsByID: store.slotsByID)
+                workspaceController.synchronizeTerminalFocus()
             }
             .onChange(of: workspace) { _, newWorkspace in
                 workspaceController.render(workspace: newWorkspace, slotsByID: store.slotsByID)
+                workspaceController.synchronizeTerminalFocus()
             }
             .onChange(of: store.keyboardNavigationArea) { _, _ in
                 workspaceController.synchronizeTerminalFocus()
@@ -74,8 +75,35 @@ struct PandoraWorkspaceView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    private func handleExternalDrop(providers: [NSItemProvider], into workspaceID: String) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
+            let value: String?
+            switch item {
+            case let data as Data:
+                value = String(data: data, encoding: .utf8)
+            case let string as String:
+                value = string
+            case let nsString as NSString:
+                value = nsString as String
+            default:
+                value = nil
+            }
+
+            guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  sourceID.isEmpty == false else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                store.mergeWorkspaces(sourceID: sourceID, into: workspaceID, mode: .tabs)
+            }
+        }
+        return true
+    }
+
     @ViewBuilder
-    private func workspaceTabContent(for tab: Tab) -> some View {
+    private func workspaceTabContent(for tab: Bonsplit.Tab) -> some View {
         if let slotID = workspaceController.slotID(for: tab.id),
            let slot = store.slotsByID[slotID],
            let session = slot.primarySession(using: store.sessionsByID) {

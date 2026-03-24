@@ -76,15 +76,12 @@ struct WorkspaceLayoutView: View {
                 onSelectPane(paneID, selectedSlotID, false)
             }
         }
-        .dropDestination(for: String.self, isTargeted: Binding(
-            get: { targetedPaneID == paneID },
-            set: { isTargeted in
-                targetedPaneID = isTargeted ? paneID : (targetedPaneID == paneID ? nil : targetedPaneID)
-            }
-        )) { items, _ in
+        .dropDestination(for: String.self) { items, _ in
             guard let sourceID = items.first else { return false }
             onMergeWorkspace(sourceID)
             return true
+        } isTargeted: { isTargeted in
+            targetedPaneID = isTargeted ? paneID : (targetedPaneID == paneID ? nil : targetedPaneID)
         }
     }
 

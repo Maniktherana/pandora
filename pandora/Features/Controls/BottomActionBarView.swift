@@ -56,7 +56,7 @@ struct BottomActionBarView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
 
-            if store.keyboardNavigationArea == .sidebar, let session {
+            if store.keyboardNavigationArea == .sidebar, session != nil {
                 Text("Target")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
