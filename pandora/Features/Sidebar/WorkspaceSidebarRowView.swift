@@ -79,7 +79,10 @@ struct WorkspaceSidebarRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .draggable(workspace.id)
+        .onDrag {
+            WorkspaceDragBridge.shared.beginDragging(workspaceID: workspace.id)
+            return NSItemProvider(object: workspace.id as NSString)
+        }
         .onDrop(of: [UTType.text], isTargeted: nil, perform: handleWorkspaceDrop)
         .contextMenu {
             Button("Show Workspace") {

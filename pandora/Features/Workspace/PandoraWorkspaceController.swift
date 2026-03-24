@@ -103,6 +103,10 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         return slotIDByBonsplitTabID[bonsplitTabID]
     }
 
+    func slotID(forDragTabIdentifier identifier: String) -> String? {
+        slotIDByBonsplitTabID[identifier.lowercased()]
+    }
+
     private func materialize(
         node: WorkspaceLayoutNode,
         in paneID: PaneID,

@@ -13,6 +13,14 @@ enum WorkspaceNavigationArea {
     case workspace
 }
 
+enum WorkspaceDropIntent: Equatable {
+    case tabs
+    case splitLeft
+    case splitRight
+    case splitUp
+    case splitDown
+}
+
 enum WorkspaceLayoutAxis: Equatable {
     case horizontal
     case vertical
@@ -179,6 +187,15 @@ indirect enum WorkspaceLayoutNode: Equatable {
             id: UUID(),
             axis: axis,
             children: [self, node],
+            ratios: [0.5, 0.5]
+        )
+    }
+
+    func splitPrepending(_ node: WorkspaceLayoutNode, axis: WorkspaceLayoutAxis) -> WorkspaceLayoutNode {
+        .split(
+            id: UUID(),
+            axis: axis,
+            children: [node, self],
             ratios: [0.5, 0.5]
         )
     }

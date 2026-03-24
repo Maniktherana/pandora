@@ -30,7 +30,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                SidebarShellView(store: workspaceStore)
+                SidebarShellView(store: workspaceStore, workspaceController: workspaceController)
                     .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
 
                 mainArea

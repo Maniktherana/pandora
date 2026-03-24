@@ -230,6 +230,17 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func mergeWorkspaces(sourceID: String, into targetID: String, mode: SlotPresentationMode = .tabs) {
+        let intent: WorkspaceDropIntent
+        switch mode {
+        case .tabs:
+            intent = .tabs
+        case .single, .split:
+            intent = .splitRight
+        }
+        mergeWorkspaces(sourceID: sourceID, into: targetID, intent: intent)
+    }
+
+    func mergeWorkspaces(sourceID: String, into targetID: String, intent: WorkspaceDropIntent) {
         guard sourceID != targetID else { return }
         guard let sourceIndex = workspaceEntries.firstIndex(where: { $0.id == sourceID }),
               let targetIndex = workspaceEntries.firstIndex(where: { $0.id == targetID }) else {
@@ -240,7 +251,7 @@ final class WorkspaceStore: ObservableObject {
         let target = workspaceEntries[targetIndex]
 
         let mergedRoot: WorkspaceLayoutNode
-        switch mode {
+        switch intent {
         case .tabs:
             let sourceSlotIDs = source.memberSlotIDs
             let targetPaneID = target.activeFocusTarget?.paneID ?? target.defaultFocusTarget?.paneID
@@ -248,8 +259,14 @@ final class WorkspaceStore: ObservableObject {
             mergedRoot = sourceSlotIDs.reduce(target.root) { partial, slotID in
                 partial.addingTab(slotID: slotID, toPaneID: targetPaneID)
             }
-        case .single, .split:
+        case .splitLeft:
+            mergedRoot = target.root.splitPrepending(source.root, axis: .horizontal)
+        case .splitRight:
             mergedRoot = target.root.splitAppending(source.root, axis: .horizontal)
+        case .splitUp:
+            mergedRoot = target.root.splitPrepending(source.root, axis: .vertical)
+        case .splitDown:
+            mergedRoot = target.root.splitAppending(source.root, axis: .vertical)
         }
 
         let merged = WorkspaceEntry(
@@ -295,6 +312,37 @@ final class WorkspaceStore: ObservableObject {
         }
         focusedTerminalTarget = nil
         keyboardNavigationArea = .sidebar
+    }
+
+    func detachSlotToSidebar(slotID: String) {
+        guard let workspaceIndex = workspaceEntries.firstIndex(where: { $0.memberSlotIDs.contains(slotID) }) else { return }
+
+        let workspace = workspaceEntries[workspaceIndex]
+        guard workspace.memberSlotIDs.count > 1,
+              let updatedRoot = workspace.root.removing(slotID: slotID),
+              let slot = slotsByID[slotID] else {
+            return
+        }
+
+        workspaceEntries[workspaceIndex].root = updatedRoot
+        if updatedRoot.leafTarget(for: workspaceEntries[workspaceIndex].focusedPaneID ?? UUID()) == nil {
+            workspaceEntries[workspaceIndex].focusedPaneID = updatedRoot.defaultLeafTarget?.paneID
+        }
+
+        if workspaceEntries.contains(where: { $0.id == slotID }) == false {
+            workspaceEntries.append(.standalone(for: slot))
+        }
+
+        workspaceEntries.sort { lhs, rhs in
+            if lhs.sortOrder == rhs.sortOrder {
+                return lhs.title(using: slotsByID).localizedCaseInsensitiveCompare(rhs.title(using: slotsByID)) == .orderedAscending
+            }
+            return lhs.sortOrder < rhs.sortOrder
+        }
+
+        selectedSidebarWorkspaceID = slotID
+        keyboardNavigationArea = .sidebar
+        focusedTerminalTarget = nil
     }
 
     func remove(_ workspace: WorkspaceEntry) {
