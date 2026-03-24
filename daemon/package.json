@@ -1,0 +1,14 @@
+{
+  "name": "pandorad",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "smoke:pty": "bun run src/smoke-pty.ts",
+    "test": "bun test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}
