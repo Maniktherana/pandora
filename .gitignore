@@ -1,0 +1,6 @@
+.planning/
+.claude*/
+.codex/
+node_modules/
+.DS_Store
+**/xcuserdata/
