@@ -617,6 +617,20 @@ class GhosttyNSView: NSView, NSTextInputClient {
         refreshGhosttyFocus()
     }
 
+    /// Unconditionally tells ghostty this surface is unfocused, bypassing the
+    /// `isGhosttyFocused` guard. Called by `SurfaceRegistry.clearFocus()` so that
+    /// transitioning to sidebar mode always stops cursor blinking even when our
+    /// tracked focus state diverges from ghostty's internal state.
+    func forceGhosttyUnfocus() {
+        isRegistryFocusTarget = false
+        guard let surface else {
+            isGhosttyFocused = false
+            return
+        }
+        ghostty_surface_set_focus(surface, false)
+        isGhosttyFocused = false
+    }
+
     private func refreshGhosttyFocus() {
         guard let surface else {
             isGhosttyFocused = false
@@ -695,6 +709,14 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 GhosttyApp.shared.removeBridge(bridge)
             }
         }
+    }
+
+    /// Silently consume all selector-based commands dispatched by interpretKeyEvents.
+    /// Without this, AppKit propagates commands like insertNewline: up the responder chain
+    /// for keys such as Enter, which ends at the window and triggers NSBeep when unhandled.
+    /// The terminal handles all key input via ghostty_surface_key, so these dispatches are always spurious.
+    override func doCommand(by selector: Selector) {
+        // intentionally a no-op — swallow without beeping
     }
 }
 
@@ -784,6 +806,7 @@ extension GhosttyNSView {
     func characterIndex(for point: NSPoint) -> Int {
         NSNotFound
     }
+
 }
 
 private extension GhosttyNSView {

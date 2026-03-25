@@ -123,7 +123,10 @@ final class SurfaceRegistry: ObservableObject {
     func clearFocus() {
         pendingFocusSessionID = nil
         focusedSessionID = nil
-        viewsBySessionID.values.forEach { $0.applyRegistryFocus(false) }
+        // Force-tell ghostty that every surface is unfocused, bypassing the
+        // `isGhosttyFocused` guard. This ensures cursor blinking stops when entering
+        // sidebar mode even if our tracked state diverged from ghostty's internal state.
+        viewsBySessionID.values.forEach { $0.forceGhosttyUnfocus() }
         NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
