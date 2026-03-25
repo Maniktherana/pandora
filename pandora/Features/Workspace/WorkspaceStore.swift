@@ -293,6 +293,121 @@ final class WorkspaceStore: ObservableObject {
         keyboardNavigationArea = .sidebar
     }
 
+    func mergeWorkspace(
+        sourceID: String,
+        into targetID: String,
+        targetPaneID: UUID,
+        intent: WorkspaceDropIntent
+    ) {
+        guard sourceID != targetID else { return }
+        guard let source = workspaceEntries.first(where: { $0.id == sourceID }),
+              let targetIndex = workspaceEntries.firstIndex(where: { $0.id == targetID }) else {
+            return
+        }
+
+        var target = workspaceEntries[targetIndex]
+        guard target.root.leafTarget(for: targetPaneID) != nil else { return }
+
+        let sourceSlotIDs = source.memberSlotIDs
+        guard sourceSlotIDs.isEmpty == false else { return }
+
+        switch intent {
+        case .tabs:
+            let preferredSlotID = source.activeFocusTarget?.slotID ?? source.defaultFocusTarget?.slotID ?? sourceSlotIDs[0]
+            let mergedRoot = sourceSlotIDs.reduce(target.root) { partial, slotID in
+                partial.addingTab(slotID: slotID, toPaneID: targetPaneID)
+            }
+            target.root = mergedRoot.selecting(slotID: preferredSlotID)
+            target.focusedPaneID = targetPaneID
+            focusedTerminalTarget = WorkspaceLeafTarget(paneID: targetPaneID, slotID: preferredSlotID)
+
+        case .splitLeft, .splitRight, .splitUp, .splitDown:
+            let targetLeaf = target.root.replacingLeafSubtree(for: targetPaneID)
+            guard let targetLeaf else { return }
+
+            let replacement: WorkspaceLayoutNode
+            switch intent {
+            case .splitLeft:
+                replacement = targetLeaf.splitPrepending(source.root, axis: .horizontal)
+            case .splitRight:
+                replacement = targetLeaf.splitAppending(source.root, axis: .horizontal)
+            case .splitUp:
+                replacement = targetLeaf.splitPrepending(source.root, axis: .vertical)
+            case .splitDown:
+                replacement = targetLeaf.splitAppending(source.root, axis: .vertical)
+            case .tabs:
+                replacement = targetLeaf
+            }
+
+            target.root = target.root.replacingLeaf(paneID: targetPaneID, with: replacement)
+            let preferredTarget = source.activeFocusTarget ?? source.defaultFocusTarget ?? target.root.defaultLeafTarget
+            target.focusedPaneID = preferredTarget?.paneID
+            focusedTerminalTarget = preferredTarget
+        }
+
+        workspaceEntries.removeAll { $0.id == sourceID }
+        if let updatedTargetIndex = workspaceEntries.firstIndex(where: { $0.id == targetID }) {
+            workspaceEntries[updatedTargetIndex] = target
+        } else {
+            workspaceEntries.append(target)
+        }
+
+        sortWorkspaceEntries()
+        selectedSidebarWorkspaceID = targetID
+        visibleWorkspaceID = targetID
+        keyboardNavigationArea = .workspace
+    }
+
+    func moveSlotToWorkspace(slotID: String, targetWorkspaceID: String) {
+        guard let targetIndex = workspaceEntries.firstIndex(where: { $0.id == targetWorkspaceID }) else {
+            return
+        }
+
+        var targetWorkspace = workspaceEntries[targetIndex]
+        guard targetWorkspace.memberSlotIDs.contains(slotID) == false else {
+            if let target = targetWorkspace.root.leafTarget(forSlotID: slotID) {
+                targetWorkspace.focusedPaneID = target.paneID
+                workspaceEntries[targetIndex] = targetWorkspace
+                selectedSidebarWorkspaceID = targetWorkspaceID
+                visibleWorkspaceID = targetWorkspaceID
+                focusedTerminalTarget = target
+                keyboardNavigationArea = .workspace
+            }
+            return
+        }
+
+        guard let targetPaneID = targetWorkspace.activeFocusTarget?.paneID ?? targetWorkspace.defaultFocusTarget?.paneID else {
+            return
+        }
+
+        if let sourceIndex = workspaceEntries.firstIndex(where: { $0.memberSlotIDs.contains(slotID) }) {
+            let sourceWorkspace = workspaceEntries[sourceIndex]
+            if sourceWorkspace.memberSlotIDs.count == 1 {
+                workspaceEntries.removeAll { $0.id == sourceWorkspace.id }
+            } else if let updatedRoot = sourceWorkspace.root.removing(slotID: slotID) {
+                workspaceEntries[sourceIndex].root = updatedRoot
+                if updatedRoot.leafTarget(for: workspaceEntries[sourceIndex].focusedPaneID ?? UUID()) == nil {
+                    workspaceEntries[sourceIndex].focusedPaneID = updatedRoot.defaultLeafTarget?.paneID
+                }
+            }
+        }
+
+        targetWorkspace.root = targetWorkspace.root.addingTab(slotID: slotID, toPaneID: targetPaneID).selecting(slotID: slotID)
+        targetWorkspace.focusedPaneID = targetPaneID
+
+        if let refreshedTargetIndex = workspaceEntries.firstIndex(where: { $0.id == targetWorkspaceID }) {
+            workspaceEntries[refreshedTargetIndex] = targetWorkspace
+        } else {
+            workspaceEntries.append(targetWorkspace)
+        }
+
+        sortWorkspaceEntries()
+        selectedSidebarWorkspaceID = targetWorkspaceID
+        visibleWorkspaceID = targetWorkspaceID
+        focusedTerminalTarget = WorkspaceLeafTarget(paneID: targetPaneID, slotID: slotID)
+        keyboardNavigationArea = .workspace
+    }
+
     func splitWorkspaceIntoStandaloneEntries(_ workspace: WorkspaceEntry) {
         guard workspace.memberSlotIDs.count > 1 else { return }
 
@@ -457,12 +572,7 @@ final class WorkspaceStore: ObservableObject {
             .map(WorkspaceEntry.standalone(for:))
 
         workspaceEntries.append(contentsOf: standaloneEntries)
-        workspaceEntries.sort { lhs, rhs in
-            if lhs.sortOrder == rhs.sortOrder {
-                return lhs.title(using: currentSlotsByID).localizedCaseInsensitiveCompare(rhs.title(using: currentSlotsByID)) == .orderedAscending
-            }
-            return lhs.sortOrder < rhs.sortOrder
-        }
+        sortWorkspaceEntries()
 
         if let pendingStandaloneSelectionSlotID,
            let workspace = workspaceEntries.first(where: { $0.memberSlotIDs.contains(pendingStandaloneSelectionSlotID) }) {
@@ -525,6 +635,15 @@ final class WorkspaceStore: ObservableObject {
         workspaceEntries[index].root = workspaceEntries[index].root.selecting(slotID: slotID)
     }
 
+    private func sortWorkspaceEntries() {
+        workspaceEntries.sort { lhs, rhs in
+            if lhs.sortOrder == rhs.sortOrder {
+                return lhs.title(using: slotsByID).localizedCaseInsensitiveCompare(rhs.title(using: slotsByID)) == .orderedAscending
+            }
+            return lhs.sortOrder < rhs.sortOrder
+        }
+    }
+
     func replaceVisibleWorkspaceLayout(root: WorkspaceLayoutNode, focusedPaneID: UUID?) {
         guard let visibleWorkspaceID,
               let index = workspaceEntries.firstIndex(where: { $0.id == visibleWorkspaceID }) else {
@@ -534,10 +653,13 @@ final class WorkspaceStore: ObservableObject {
         workspaceEntries[index].root = root
         workspaceEntries[index].focusedPaneID = focusedPaneID ?? root.defaultLeafTarget?.paneID
 
-        if let focusedTerminalTarget,
-           root.memberSlotIDs.contains(focusedTerminalTarget.slotID) == false {
-            self.focusedTerminalTarget = nil
-            keyboardNavigationArea = .sidebar
+        if let focusedTerminalTarget {
+            if let updatedTarget = root.leafTarget(forSlotID: focusedTerminalTarget.slotID) {
+                self.focusedTerminalTarget = updatedTarget
+            } else {
+                self.focusedTerminalTarget = nil
+                keyboardNavigationArea = .sidebar
+            }
         }
     }
 
@@ -562,6 +684,20 @@ final class WorkspaceStore: ObservableObject {
 }
 
 private extension WorkspaceLayoutNode {
+    func replacingLeafSubtree(for paneID: UUID) -> WorkspaceLayoutNode? {
+        switch self {
+        case .leaf(let id, _):
+            return id == paneID ? self : nil
+        case .split(_, _, let children, _):
+            for child in children {
+                if let match = child.replacingLeafSubtree(for: paneID) {
+                    return match
+                }
+            }
+            return nil
+        }
+    }
+
     func removingMissingSlots(available: Set<String>) -> WorkspaceLayoutNode? {
         let missingSlotIDs = Set(memberSlotIDs).subtracting(available)
         return missingSlotIDs.reduce(Optional(self)) { partial, slotID in

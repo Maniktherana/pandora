@@ -30,7 +30,7 @@ struct SidebarShellView: View {
                 onActivateSelection: {
                     store.focusVisibleWorkspace()
                 },
-                content: WorkspaceSidebarListView(store: store)
+                content: WorkspaceSidebarListView(store: store, workspaceController: workspaceController)
             )
         }
         .frame(minWidth: 280, idealWidth: 320, maxWidth: 420, maxHeight: .infinity, alignment: .top)
@@ -133,7 +133,7 @@ struct SidebarShellView: View {
     }
 }
 
-private struct ExternalTabTransfer: Decodable {
+struct ExternalTabTransfer: Decodable {
     struct TabPayload: Decodable {
         let id: String
     }

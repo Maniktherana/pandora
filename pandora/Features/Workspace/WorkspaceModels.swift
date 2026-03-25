@@ -21,9 +21,28 @@ enum WorkspaceDropIntent: Equatable {
     case splitDown
 }
 
+struct WorkspaceDropTarget: Equatable {
+    let paneID: UUID
+    let intent: WorkspaceDropIntent
+    let previewFrame: CGRect
+}
+
 enum WorkspaceLayoutAxis: Equatable {
     case horizontal
     case vertical
+}
+
+extension WorkspaceDropIntent {
+    var splitAxis: WorkspaceLayoutAxis? {
+        switch self {
+        case .tabs:
+            return nil
+        case .splitLeft, .splitRight:
+            return .horizontal
+        case .splitUp, .splitDown:
+            return .vertical
+        }
+    }
 }
 
 enum WorkspaceLeafContent: Equatable {

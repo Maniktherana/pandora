@@ -2,7 +2,7 @@
 //  SidebarFocusBridge.swift
 //  pandora
 //
-//  Created by Codex on 25/03/26.
+//  Created by Manik Rana on 25/03/26.
 //
 
 import AppKit

@@ -53,6 +53,9 @@ struct ContentView: View {
                     workspaceStore.focusSessionFromSurface(sessionID: sessionID)
                 }
             }
+            surfaceRegistry.onCycleTabs = { forward in
+                cycleFocusedTab(forward: forward)
+            }
             daemonClient.onOutputChunk = { sessionID, data in
                 Task { @MainActor in
                     surfaceRegistry.feedOutput(sessionID: sessionID, data: data)
@@ -69,6 +72,7 @@ struct ContentView: View {
         }
         .onDisappear {
             surfaceRegistry.onFocusSession = nil
+            surfaceRegistry.onCycleTabs = nil
             removeKeyboardMonitor()
         }
         .onChange(of: workspaceStore.visibleWorkspace) { _, workspace in
@@ -219,11 +223,11 @@ struct ContentView: View {
             }
         }
 
-        if modifiers.contains(.command), event.charactersIgnoringModifiers == "[" {
+        if modifiers.contains(.command), (event.keyCode == 33 || event.charactersIgnoringModifiers == "[") {
             return cycleFocusedTab(forward: false)
         }
 
-        if modifiers.contains(.command), event.charactersIgnoringModifiers == "]" {
+        if modifiers.contains(.command), (event.keyCode == 30 || event.charactersIgnoringModifiers == "]") {
             return cycleFocusedTab(forward: true)
         }
 
@@ -235,18 +239,19 @@ struct ContentView: View {
     }
 
     private func cycleFocusedTab(forward: Bool) -> Bool {
-        guard workspaceStore.keyboardNavigationArea == .workspace else {
+        guard workspaceStore.visibleWorkspace != nil,
+              workspaceStore.keyboardNavigationArea == .workspace || NSApp.keyWindow?.firstResponder is GhosttyNSView else {
             return false
         }
-        guard workspaceController.selectAdjacentTab(forward: forward),
-              let sessionID = workspaceStore.actualFocusedSession?.id else {
-            return false
+        guard let sessionID = workspaceController.selectAdjacentTab(forward: forward) else {
+            return true
         }
-        return surfaceRegistry.focus(sessionID: sessionID)
+        _ = surfaceRegistry.focus(sessionID: sessionID)
+        return true
     }
 
     private func navigatePane(_ direction: NavigationDirection) -> Bool {
-        guard workspaceStore.keyboardNavigationArea == .workspace,
+        guard workspaceStore.keyboardNavigationArea == .workspace || isTerminalFocused,
               workspaceController.focusDirection(direction),
               let sessionID = workspaceStore.actualFocusedSession?.id else {
             return false
@@ -264,6 +269,10 @@ struct ContentView: View {
         }
 
         return !(responder is NSTextView)
+    }
+
+    private var isTerminalFocused: Bool {
+        NSApp.keyWindow?.firstResponder is GhosttyNSView
     }
 
     private func focusVisibleWorkspace() {

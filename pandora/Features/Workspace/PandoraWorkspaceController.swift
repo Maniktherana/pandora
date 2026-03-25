@@ -2,7 +2,7 @@
 //  PandoraWorkspaceController.swift
 //  pandora
 //
-//  Created by Codex on 25/03/26.
+//  Created by Manik Rana on 25/03/26.
 //
 
 import Bonsplit
@@ -42,12 +42,28 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
             return
         }
 
-        guard renderedWorkspace != workspace else {
+        // Only rebuild the BonsplitController when the structural layout changes:
+        // which panes exist, how they're split, and which slots are in each pane.
+        // Focus changes (focusedPaneID) and tab selection changes (selectedIndex) must
+        // NOT trigger a rebuild — doing so resets every split's dividerPosition back to
+        // 1.0→0.5 and tears down terminal NSViews mid-mouseDown (causing stuck clicks).
+        let structurallyChanged = renderedWorkspace?.id != workspace.id
+            || renderedWorkspace.map { !structurallyEqual($0.root, workspace.root) } ?? true
+        guard structurallyChanged else {
+            renderedWorkspace = workspace
             syncVisibleSelection(to: workspace)
             return
         }
 
         isApplyingSnapshot = true
+
+        // Preserve the current container frame so the new controller has valid geometry
+        // immediately. SplitViewContainer.onAppear only fires once (when the view first
+        // appears) and won't re-fire when the controller object is swapped out. Without
+        // this, layoutSnapshot() returns zero-sized pane frames on the second drag.
+        let pr = bonsplitController.layoutSnapshot().containerFrame
+        let preservedFrame = CGRect(x: pr.x, y: pr.y, width: pr.width, height: pr.height)
+
         let controller = PandoraWorkspaceController.makeController()
         controller.delegate = self
         clearWelcomeTab(in: controller)
@@ -59,6 +75,10 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 
         if let rootPane = controller.allPaneIds.first {
             materialize(node: workspace.root, in: rootPane, controller: controller, slotsByID: slotsByID)
+        }
+
+        if preservedFrame.width > 0 && preservedFrame.height > 0 {
+            controller.setContainerFrame(preservedFrame)
         }
 
         bonsplitController = controller
@@ -75,16 +95,48 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     }
 
     @discardableResult
-    func selectAdjacentTab(forward: Bool) -> Bool {
-        guard let paneID = bonsplitController.focusedPaneId else { return false }
-        let tabs = bonsplitController.tabs(inPane: paneID)
-        guard tabs.count > 1 else { return false }
-        if forward {
-            bonsplitController.selectNextTab()
-        } else {
-            bonsplitController.selectPreviousTab()
+    func selectAdjacentTab(forward: Bool) -> String? {
+        let paneIDs = bonsplitController.allPaneIds
+        guard paneIDs.isEmpty == false else { return nil }
+
+        let focusedPaneID = bonsplitController.focusedPaneId ?? paneIDs[0]
+        guard let paneIndex = paneIDs.firstIndex(of: focusedPaneID) else { return nil }
+
+        let tabs = bonsplitController.tabs(inPane: focusedPaneID)
+        let selectedTabID = bonsplitController.selectedTab(inPane: focusedPaneID)?.id
+        let selectedIndex = selectedTabID.flatMap { id in
+            tabs.firstIndex(where: { $0.id == id })
+        } ?? 0
+
+        if forward, tabs.indices.contains(selectedIndex + 1) {
+            let tabID = tabs[selectedIndex + 1].id
+            bonsplitController.selectTab(tabID)
+            return sessionID(for: tabID)
         }
-        return true
+
+        if !forward {
+            let previousIndex = selectedIndex - 1
+            if tabs.indices.contains(previousIndex) {
+                let tabID = tabs[previousIndex].id
+                bonsplitController.selectTab(tabID)
+                return sessionID(for: tabID)
+            }
+        }
+
+        let paneStep = forward ? 1 : -1
+        let paneCount = paneIDs.count
+        for offset in 1...paneCount {
+            let nextPaneIndex = (paneIndex + (offset * paneStep) + paneCount) % paneCount
+            let nextPaneID = paneIDs[nextPaneIndex]
+            let nextPaneTabs = bonsplitController.tabs(inPane: nextPaneID)
+            guard nextPaneTabs.isEmpty == false else { continue }
+            let targetTab = forward ? nextPaneTabs[0] : nextPaneTabs[nextPaneTabs.count - 1]
+            bonsplitController.focusPane(nextPaneID)
+            bonsplitController.selectTab(targetTab.id)
+            return sessionID(for: targetTab.id)
+        }
+
+        return nil
     }
 
     func synchronizeTerminalFocus() {
@@ -92,9 +144,13 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 
         if store.keyboardNavigationArea == .workspace,
            let sessionID = store.actualFocusedSession?.id {
-            _ = surfaceRegistry.focus(sessionID: sessionID)
+            DispatchQueue.main.async {
+                _ = surfaceRegistry.focus(sessionID: sessionID)
+            }
         } else {
-            surfaceRegistry.clearFocus()
+            DispatchQueue.main.async {
+                surfaceRegistry.clearFocus()
+            }
         }
     }
 
@@ -103,8 +159,47 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         return slotIDByBonsplitTabID[bonsplitTabID]
     }
 
+    func sessionID(for tabID: TabID) -> String? {
+        guard let slotID = slotID(for: tabID),
+              let store,
+              let slot = store.slotsByID[slotID] else {
+            return nil
+        }
+        return slot.primarySession(using: store.sessionsByID)?.id
+    }
+
     func slotID(forDragTabIdentifier identifier: String) -> String? {
         slotIDByBonsplitTabID[identifier.lowercased()]
+    }
+
+    func dropTarget(at location: CGPoint) -> WorkspaceDropTarget? {
+        let snapshot = bonsplitController.layoutSnapshot()
+        let panes = snapshot.panes.compactMap { pane -> (workspacePaneID: UUID, frame: CGRect)? in
+            guard let workspacePaneID = workspacePaneIDByBonsplitPaneID[pane.paneId.lowercased()] else {
+                return nil
+            }
+
+            let localFrame = CGRect(
+                x: pane.frame.x - snapshot.containerFrame.x,
+                y: pane.frame.y - snapshot.containerFrame.y,
+                width: pane.frame.width,
+                height: pane.frame.height
+            )
+            return (workspacePaneID, localFrame)
+        }
+
+        let hoveredPane = panes.first(where: { $0.frame.contains(location) })
+            ?? panes.min(by: { distance(from: location, to: $0.frame) < distance(from: location, to: $1.frame) })
+        guard let hoveredPane else {
+            return nil
+        }
+
+        let intent = dropIntent(for: location, within: hoveredPane.frame)
+        return WorkspaceDropTarget(
+            paneID: hoveredPane.workspacePaneID,
+            intent: intent,
+            previewFrame: previewFrame(for: intent, within: hoveredPane.frame)
+        )
     }
 
     private func materialize(
@@ -124,7 +219,11 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 
             var splitBasePaneID = paneID
             for child in children.dropFirst() {
-                guard let newPaneID = controller.splitPane(splitBasePaneID, orientation: axis.bonsplitOrientation) else {
+                // animated: false avoids the 1.0→0.5 divider animation during a programmatic
+                // rebuild. Without this, updateNSView's syncPosition(1.0) moves the outer
+                // split to full width, making all newly added panes invisible (totalSize = 0
+                // in the deferred makeNSView block, the guard fails, pane stays hidden).
+                guard let newPaneID = controller.splitPane(splitBasePaneID, orientation: axis.bonsplitOrientation, animated: false) else {
                     continue
                 }
                 materialize(node: child, in: newPaneID, controller: controller, slotsByID: slotsByID)
@@ -241,6 +340,50 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         }
     }
 
+    private func dropIntent(for location: CGPoint, within frame: CGRect) -> WorkspaceDropIntent {
+        let localX = location.x - frame.minX
+        let localY = location.y - frame.minY
+        let horizontalEdge = max(72, frame.width * 0.18)
+        let verticalEdge = max(64, frame.height * 0.18)
+
+        if localX < horizontalEdge {
+            return .splitLeft
+        }
+        if localX > frame.width - horizontalEdge {
+            return .splitRight
+        }
+        if localY < verticalEdge {
+            return .splitUp
+        }
+        if localY > frame.height - verticalEdge {
+            return .splitDown
+        }
+        return .tabs
+    }
+
+    private func previewFrame(for intent: WorkspaceDropIntent, within frame: CGRect) -> CGRect {
+        switch intent {
+        case .tabs:
+            let insetX = max(24, frame.width * 0.12)
+            let insetY = max(18, frame.height * 0.1)
+            return frame.insetBy(dx: insetX, dy: insetY)
+        case .splitLeft:
+            return CGRect(x: frame.minX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
+        case .splitRight:
+            return CGRect(x: frame.midX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
+        case .splitUp:
+            return CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height * 0.5)
+        case .splitDown:
+            return CGRect(x: frame.minX, y: frame.midY, width: frame.width, height: frame.height * 0.5)
+        }
+    }
+
+    private func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return sqrt(dx * dx + dy * dy)
+    }
+
     private static func makeController() -> BonsplitController {
         let configuration = BonsplitConfiguration(
             allowSplits: true,
@@ -289,6 +432,14 @@ extension PandoraWorkspaceController: BonsplitDelegate {
         rebuildWorkspaceFromShell()
     }
 
+    func splitTabBar(_ controller: BonsplitController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {
+        rebuildWorkspaceFromShell()
+    }
+
+    func splitTabBar(_ controller: BonsplitController, didClosePane paneId: PaneID) {
+        rebuildWorkspaceFromShell()
+    }
+
     func splitTabBar(_ controller: BonsplitController, didFocusPane pane: PaneID) {
         guard isApplyingSnapshot == false,
               let store,
@@ -309,7 +460,24 @@ extension PandoraWorkspaceController: BonsplitDelegate {
     }
 
     func splitTabBar(_ controller: BonsplitController, shouldSplitPane pane: PaneID, orientation: SplitOrientation) -> Bool {
-        false
+        true
+    }
+
+    func splitTabBar(_ controller: BonsplitController, didChangeGeometry snapshot: LayoutSnapshot) {}
+}
+
+// Compares two layout nodes structurally: same pane IDs, same slot membership, same
+// split shape. Intentionally ignores selectedIndex (tab selection) and ratios (divider
+// positions) so that focus/selection changes don't trigger a full controller rebuild.
+private func structurallyEqual(_ lhs: WorkspaceLayoutNode, _ rhs: WorkspaceLayoutNode) -> Bool {
+    switch (lhs, rhs) {
+    case (.leaf(let lID, let lContent), .leaf(let rID, let rContent)):
+        return lID == rID && lContent.slotIDs == rContent.slotIDs
+    case (.split(let lID, let lAxis, let lChildren, _), .split(let rID, let rAxis, let rChildren, _)):
+        guard lID == rID, lAxis == rAxis, lChildren.count == rChildren.count else { return false }
+        return zip(lChildren, rChildren).allSatisfy { structurallyEqual($0, $1) }
+    default:
+        return false
     }
 }
 

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct WorkspaceSidebarListView: View {
     @ObservedObject var store: WorkspaceStore
+    @ObservedObject var workspaceController: PandoraWorkspaceController
 
     var body: some View {
         ScrollView {
@@ -20,6 +21,7 @@ struct WorkspaceSidebarListView: View {
                         ForEach(store.filteredWorkspaces) { workspace in
                             WorkspaceSidebarRowView(
                                 store: store,
+                                workspaceController: workspaceController,
                                 workspace: workspace,
                                 isSelected: store.selectedSidebarWorkspaceID == workspace.id
                             )

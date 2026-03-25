@@ -6,19 +6,21 @@
 //
 
 import AppKit
-import Foundation
 import Combine
+import Foundation
 
 @MainActor
 final class SurfaceRegistry: ObservableObject {
     static let shared = SurfaceRegistry()
+    let objectWillChange = ObservableObjectPublisher()
 
     private var viewsBySessionID: [String: GhosttyNSView] = [:]
     private var pendingOutput: [String: [Data]] = [:]
     private var pendingFocusSessionID: String?
-    private weak var focusedView: GhosttyNSView?
+    private(set) var focusedSessionID: String?
     weak var daemonClient: DaemonClient?
     var onFocusSession: ((String) -> Void)?
+    var onCycleTabs: ((Bool) -> Bool)?
 
     func configure(daemonClient: DaemonClient?) {
         self.daemonClient = daemonClient
@@ -45,8 +47,11 @@ final class SurfaceRegistry: ObservableObject {
         if let sessionID {
             viewsBySessionID[sessionID] = view
             flushPendingOutput(for: sessionID)
-            if pendingFocusSessionID == sessionID {
-                focus(sessionID: sessionID)
+            if pendingFocusSessionID == sessionID || focusedSessionID == sessionID {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    _ = self.focus(sessionID: sessionID)
+                }
             }
         }
 
@@ -58,12 +63,21 @@ final class SurfaceRegistry: ObservableObject {
     func register(_ view: GhosttyNSView, for sessionID: String) {
         viewsBySessionID[sessionID] = view
         flushPendingOutput(for: sessionID)
-        synchronizeFocus(for: view)
+        if pendingFocusSessionID == sessionID || focusedSessionID == sessionID {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                _ = self.focus(sessionID: sessionID)
+            }
+        } else {
+            synchronizeFocus(for: view)
+        }
     }
 
     func unregister(sessionID: String) {
-        if let view = viewsBySessionID.removeValue(forKey: sessionID), focusedView === view {
-            focusedView = nil
+        if viewsBySessionID.removeValue(forKey: sessionID) != nil, focusedSessionID == sessionID {
+            focusedSessionID = nil
+            pendingFocusSessionID = nil
+            applyFocusState()
         }
     }
 
@@ -92,45 +106,60 @@ final class SurfaceRegistry: ObservableObject {
     @discardableResult
     func focus(sessionID: String) -> Bool {
         guard let view = viewsBySessionID[sessionID] else {
+            focusedSessionID = sessionID
             pendingFocusSessionID = sessionID
             return false
         }
+        focusedSessionID = sessionID
         pendingFocusSessionID = nil
         view.window?.makeFirstResponder(view)
-        claimFocus(for: view)
+        applyFocusState()
+        DispatchQueue.main.async { [weak self] in
+            self?.onFocusSession?(sessionID)
+        }
         return true
     }
 
     func clearFocus() {
         pendingFocusSessionID = nil
-        guard let focusedView else { return }
-        focusedView.window?.makeFirstResponder(nil)
-        releaseFocus(for: focusedView)
+        focusedSessionID = nil
+        viewsBySessionID.values.forEach { $0.applyRegistryFocus(false) }
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     func claimFocus(for view: GhosttyNSView) {
-        if focusedView !== view {
-            focusedView?.applyGhosttyFocus(false)
-            focusedView = view
-        }
-        view.applyGhosttyFocus(true)
         if let sessionID = viewsBySessionID.first(where: { $0.value === view })?.key {
-            onFocusSession?(sessionID)
+            focusedSessionID = sessionID
+            pendingFocusSessionID = nil
+            applyFocusState()
+            DispatchQueue.main.async { [weak self] in
+                self?.onFocusSession?(sessionID)
+            }
+        } else {
+            applyFocusState()
         }
     }
 
     func releaseFocus(for view: GhosttyNSView) {
-        if focusedView === view {
-            focusedView = nil
+        if let sessionID = viewsBySessionID.first(where: { $0.value === view })?.key,
+           focusedSessionID == sessionID {
+            focusedSessionID = nil
+            pendingFocusSessionID = nil
         }
-        view.applyGhosttyFocus(false)
+        applyFocusState()
     }
 
     func synchronizeFocus(for view: GhosttyNSView) {
-        if focusedView === view {
-            view.applyGhosttyFocus(true)
-        } else {
-            view.applyGhosttyFocus(false)
+        applyFocusState()
+    }
+
+    func handleCommandBracket(forward: Bool) -> Bool {
+        onCycleTabs?(forward) ?? false
+    }
+
+    private func applyFocusState() {
+        for (sessionID, view) in viewsBySessionID {
+            view.applyRegistryFocus(sessionID == focusedSessionID)
         }
     }
 }

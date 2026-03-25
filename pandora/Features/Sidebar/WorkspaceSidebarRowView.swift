@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 
 struct WorkspaceSidebarRowView: View {
     @ObservedObject var store: WorkspaceStore
+    @ObservedObject var workspaceController: PandoraWorkspaceController
     let workspace: WorkspaceEntry
     let isSelected: Bool
 
@@ -207,7 +208,12 @@ struct WorkspaceSidebarRowView: View {
             }
 
             DispatchQueue.main.async {
-                store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
+                if let transfer = ExternalTabTransfer.decode(from: sourceID),
+                   let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
+                    store.moveSlotToWorkspace(slotID: slotID, targetWorkspaceID: workspace.id)
+                } else {
+                    store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
+                }
             }
         }
         return true

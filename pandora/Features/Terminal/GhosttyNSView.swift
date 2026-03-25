@@ -56,6 +56,9 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Tracks whether ghostty currently considers this surface focused.
     private var isGhosttyFocused = false
 
+    /// Tracks whether the workspace controller currently wants this session focused.
+    private var isRegistryFocusTarget = false
+
     /// Window notifications used to keep ghostty focus aligned with AppKit key-window state.
     private var windowObservers: [NSObjectProtocol] = []
 
@@ -207,7 +210,12 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleOwnedShortcut(event) {
+            return
+        }
+
         guard let surface = surface else { return }
+        surfaceRegistry?.claimFocus(for: self)
 
         let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
 
@@ -344,6 +352,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
         keyEvent.composing = false
         keyEvent.unshifted_codepoint = unshiftedCodepoint(from: event)
         _ = ghostty_surface_key(surface, keyEvent)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleOwnedShortcut(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -489,9 +504,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
             if window?.firstResponder === self {
                 surfaceRegistry?.claimFocus(for: self)
             } else {
-                applyGhosttyFocus(false)
+                applyRegistryFocus(false)
                 surfaceRegistry?.synchronizeFocus(for: self)
             }
+        }
+
+        if surfaceRegistry?.focusedSessionID == sessionID {
+            window?.makeFirstResponder(self)
         }
 
         if window?.firstResponder === self {
@@ -593,14 +612,22 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
     }
 
-    func applyGhosttyFocus(_ focused: Bool) {
+    func applyRegistryFocus(_ focused: Bool) {
+        isRegistryFocusTarget = focused
+        refreshGhosttyFocus()
+    }
+
+    private func refreshGhosttyFocus() {
         guard let surface else {
             isGhosttyFocused = false
             return
         }
-        guard isGhosttyFocused != focused else { return }
-        ghostty_surface_set_focus(surface, focused)
-        isGhosttyFocused = focused
+        let shouldFocus = isRegistryFocusTarget
+            && window?.isKeyWindow == true
+            && window?.firstResponder === self
+        guard isGhosttyFocused != shouldFocus else { return }
+        ghostty_surface_set_focus(surface, shouldFocus)
+        isGhosttyFocused = shouldFocus
     }
 
     private func installWindowObservers() {
@@ -638,7 +665,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.surfaceRegistry?.releaseFocus(for: self)
+                    self.surfaceRegistry?.synchronizeFocus(for: self)
                 }
             }
         )
@@ -756,5 +783,25 @@ extension GhosttyNSView {
 
     func characterIndex(for point: NSPoint) -> Int {
         NSNotFound
+    }
+}
+
+private extension GhosttyNSView {
+    func handleOwnedShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command),
+              modifiers.subtracting(.command).isEmpty else {
+            return false
+        }
+
+        if event.keyCode == 33 || event.charactersIgnoringModifiers == "[" {
+            return surfaceRegistry?.handleCommandBracket(forward: false) ?? false
+        }
+
+        if event.keyCode == 30 || event.charactersIgnoringModifiers == "]" {
+            return surfaceRegistry?.handleCommandBracket(forward: true) ?? false
+        }
+
+        return false
     }
 }
