@@ -444,6 +444,21 @@ final class WorkspaceStore: ObservableObject {
             workspaceEntries[workspaceIndex].focusedPaneID = updatedRoot.defaultLeafTarget?.paneID
         }
 
+        // re-key the workspace to the first remaining slot so the IDs stay consistent.
+        if workspaceEntries[workspaceIndex].id == slotID,
+           let remainingSlotID = updatedRoot.memberSlotIDs.first,
+           let remainingSlot = slotsByID[remainingSlotID] {
+            let reKeyedEntry = WorkspaceEntry(
+                id: remainingSlotID,
+                root: updatedRoot,
+                focusedPaneID: workspaceEntries[workspaceIndex].focusedPaneID,
+                sortOrder: remainingSlot.sortOrder,
+                titleOverride: workspaceEntries[workspaceIndex].titleOverride
+            )
+            workspaceEntries.remove(at: workspaceIndex)
+            workspaceEntries.append(reKeyedEntry)
+        }
+
         if workspaceEntries.contains(where: { $0.id == slotID }) == false {
             workspaceEntries.append(.standalone(for: slot))
         }
