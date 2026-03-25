@@ -195,17 +195,36 @@ struct ContentView: View {
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        // Unmodified keys in sidebar mode — mode-based, not focus-based.
+        if modifiers.isEmpty, workspaceStore.keyboardNavigationArea == .sidebar {
+            switch event.keyCode {
+            case 125:
+                workspaceStore.navigateSidebarSelection(offset: 1)
+                return true
+            case 126:
+                workspaceStore.navigateSidebarSelection(offset: -1)
+                return true
+            case 36, 76: // Return / numpad Enter
+                if workspaceStore.visibleWorkspace != nil {
+                    focusVisibleWorkspace()
+                    return true
+                }
+            default:
+                break
+            }
+        }
+
         if modifiers.contains(.command) {
             switch event.keyCode {
-            case 123:
+            case 123: // Cmd+Left
                 activateSidebarNavigation()
                 return true
-            case 124:
+            case 124: // Cmd+Right
                 if workspaceStore.keyboardNavigationArea == .sidebar {
                     focusVisibleWorkspace()
                     return true
                 }
-                return navigatePane(.right)
+                return false
             case 125:
                 if workspaceStore.keyboardNavigationArea == .sidebar {
                     workspaceStore.navigateSidebarSelection(offset: 1)

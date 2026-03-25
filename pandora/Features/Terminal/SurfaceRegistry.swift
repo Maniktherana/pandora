@@ -127,7 +127,10 @@ final class SurfaceRegistry: ObservableObject {
         // `isGhosttyFocused` guard. This ensures cursor blinking stops when entering
         // sidebar mode even if our tracked state diverged from ghostty's internal state.
         viewsBySessionID.values.forEach { $0.forceGhosttyUnfocus() }
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        // Only resign first responder if a terminal currently holds it.
+        if NSApp.keyWindow?.firstResponder is GhosttyNSView {
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
     }
 
     func claimFocus(for view: GhosttyNSView) {
