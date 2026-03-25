@@ -16,6 +16,8 @@ struct PandoraWorkspaceView: View {
     let surfaceRegistry: SurfaceRegistry
     @State private var activeDropTarget: WorkspaceDropTarget?
 
+    private let dropPreviewAnimation = Animation.spring(duration: 0.25, bounce: 0.15)
+
     var body: some View {
         if let workspace = store.visibleWorkspace {
             BonsplitView(controller: workspaceController.bonsplitController) { tab, _ in
@@ -44,7 +46,9 @@ struct PandoraWorkspaceView: View {
                                 },
                                 currentTarget: { activeDropTarget },
                                 setActiveTarget: { target in
-                                    activeDropTarget = target
+                                    withAnimation(dropPreviewAnimation) {
+                                        activeDropTarget = target
+                                    }
                                 },
                                 onPerformDrop: { providers, target in
                                     handleExternalDrop(providers: providers, into: workspace.id, target: target)
@@ -54,36 +58,11 @@ struct PandoraWorkspaceView: View {
                     }
                 }
             }
-            .onAppear {
-                workspaceController.bind(store: store, surfaceRegistry: surfaceRegistry)
-                workspaceController.render(workspace: workspace, slotsByID: store.slotsByID)
-                workspaceController.synchronizeTerminalFocus()
-                if store.keyboardNavigationArea == .sidebar {
-                    DispatchQueue.main.async {
-                        SidebarFocusBridge.shared.focus()
-                        workspaceController.synchronizeTerminalFocus()
-                    }
-                }
-            }
-            .onChange(of: workspace) { _, newWorkspace in
-                workspaceController.render(workspace: newWorkspace, slotsByID: store.slotsByID)
-                workspaceController.synchronizeTerminalFocus()
-                if store.keyboardNavigationArea == .sidebar {
-                    DispatchQueue.main.async {
-                        SidebarFocusBridge.shared.focus()
-                        workspaceController.synchronizeTerminalFocus()
-                    }
-                }
-            }
-            .onChange(of: store.keyboardNavigationArea) { _, _ in
-                workspaceController.synchronizeTerminalFocus()
-            }
-            .onChange(of: store.focusedTerminalTarget) { _, _ in
-                workspaceController.synchronizeTerminalFocus()
-            }
             .onChange(of: dragBridge.draggedWorkspaceID) { _, newValue in
                 if newValue == nil {
-                    activeDropTarget = nil
+                    withAnimation(dropPreviewAnimation) {
+                        activeDropTarget = nil
+                    }
                 }
             }
         } else {
@@ -131,7 +110,9 @@ struct PandoraWorkspaceView: View {
             }
 
             DispatchQueue.main.async {
-                activeDropTarget = nil
+                withAnimation(dropPreviewAnimation) {
+                    activeDropTarget = nil
+                }
                 dragBridge.endDragging()
                 store.mergeWorkspace(
                     sourceID: sourceID,
@@ -170,25 +151,45 @@ struct PandoraWorkspaceView: View {
 
 private struct DynamicWorkspaceDropPreview: View {
     let previewFrame: CGRect?
+    @State private var renderedFrame: CGRect = .zero
+    @State private var isVisible = false
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [10, 6]))
-                .padding(12)
-
-            if let frame = previewFrame {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.22))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.accentColor, lineWidth: 3)
-                    }
-                    .frame(width: frame.width, height: frame.height)
-                    .position(x: frame.midX, y: frame.midY)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.accentColor.opacity(0.25))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.accentColor, lineWidth: 2)
+            }
+            .frame(width: renderedFrame.width, height: renderedFrame.height)
+            .position(x: renderedFrame.midX, y: renderedFrame.midY)
+            .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(false)
+        .onAppear {
+            if let previewFrame {
+                renderedFrame = previewFrame
+                isVisible = true
             }
         }
-        .allowsHitTesting(false)
+        .onChange(of: previewFrame) { oldValue, newValue in
+            switch (oldValue, newValue) {
+            case (.none, .some(let frame)):
+                renderedFrame = frame
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isVisible = true
+                }
+            case (.some, .some(let frame)):
+                withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
+                    renderedFrame = frame
+                }
+            case (.some, .none):
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isVisible = false
+                }
+            case (.none, .none):
+                break
+            }
+        }
     }
 }
 

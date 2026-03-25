@@ -265,7 +265,7 @@ struct ContentView: View {
         guard let sessionID = workspaceController.selectAdjacentTab(forward: forward) else {
             return true
         }
-        _ = surfaceRegistry.focus(sessionID: sessionID)
+        _ = surfaceRegistry.focus(sessionID: sessionID, notifyFocusChange: false)
         return true
     }
 
@@ -275,7 +275,7 @@ struct ContentView: View {
               let sessionID = workspaceStore.actualFocusedSession?.id else {
             return false
         }
-        return surfaceRegistry.focus(sessionID: sessionID)
+        return surfaceRegistry.focus(sessionID: sessionID, notifyFocusChange: false)
     }
 
     private var shouldHandleUnmodifiedNavigation: Bool {
@@ -297,7 +297,7 @@ struct ContentView: View {
     private func focusVisibleWorkspace() {
         workspaceStore.focusVisibleWorkspace()
         if let sessionID = workspaceStore.focusedSession?.id {
-            _ = surfaceRegistry.focus(sessionID: sessionID)
+            _ = surfaceRegistry.focus(sessionID: sessionID, notifyFocusChange: false)
         }
     }
 

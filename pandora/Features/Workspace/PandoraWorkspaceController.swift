@@ -22,6 +22,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private var slotIDByBonsplitTabID: [String: String] = [:]
     private var bonsplitTabIDBySlotID: [String: TabID] = [:]
     private var isApplyingSnapshot = false
+    private var isSynchronizingSelection = false
 
     override init() {
         let controller = PandoraWorkspaceController.makeController()
@@ -145,7 +146,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         if store.keyboardNavigationArea == .workspace,
            let sessionID = store.actualFocusedSession?.id {
             DispatchQueue.main.async {
-                _ = surfaceRegistry.focus(sessionID: sessionID)
+                _ = surfaceRegistry.focus(sessionID: sessionID, notifyFocusChange: false)
             }
         } else {
             DispatchQueue.main.async {
@@ -264,6 +265,8 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         if store?.keyboardNavigationArea == .workspace,
            let target = workspace.activeFocusTarget ?? workspace.defaultFocusTarget,
            let paneID = bonsplitPaneIDByWorkspacePaneID[target.paneID] {
+            isSynchronizingSelection = true
+            defer { isSynchronizingSelection = false }
             bonsplitController.focusPane(paneID)
             if let tabID = bonsplitTabIDBySlotID[target.slotID] {
                 bonsplitController.selectTab(tabID)
@@ -364,9 +367,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private func previewFrame(for intent: WorkspaceDropIntent, within frame: CGRect) -> CGRect {
         switch intent {
         case .tabs:
-            let insetX = max(24, frame.width * 0.12)
-            let insetY = max(18, frame.height * 0.1)
-            return frame.insetBy(dx: insetX, dy: insetY)
+            return frame
         case .splitLeft:
             return CGRect(x: frame.minX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
         case .splitRight:
@@ -412,6 +413,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 extension PandoraWorkspaceController: BonsplitDelegate {
     func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Bonsplit.Tab, inPane pane: PaneID) {
         guard isApplyingSnapshot == false,
+              isSynchronizingSelection == false,
               let store,
               let paneIDString = paneIDString(for: pane),
               let workspacePaneID = workspacePaneIDByBonsplitPaneID[paneIDString],
@@ -442,6 +444,7 @@ extension PandoraWorkspaceController: BonsplitDelegate {
 
     func splitTabBar(_ controller: BonsplitController, didFocusPane pane: PaneID) {
         guard isApplyingSnapshot == false,
+              isSynchronizingSelection == false,
               let store,
               let selectedTab = controller.selectedTab(inPane: pane),
               let paneIDString = paneIDString(for: pane),

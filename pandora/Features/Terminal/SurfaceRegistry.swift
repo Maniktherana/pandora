@@ -50,7 +50,7 @@ final class SurfaceRegistry: ObservableObject {
             if pendingFocusSessionID == sessionID || focusedSessionID == sessionID {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    _ = self.focus(sessionID: sessionID)
+                    _ = self.focus(sessionID: sessionID, notifyFocusChange: false)
                 }
             }
         }
@@ -66,7 +66,7 @@ final class SurfaceRegistry: ObservableObject {
         if pendingFocusSessionID == sessionID || focusedSessionID == sessionID {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                _ = self.focus(sessionID: sessionID)
+                _ = self.focus(sessionID: sessionID, notifyFocusChange: false)
             }
         } else {
             synchronizeFocus(for: view)
@@ -104,7 +104,7 @@ final class SurfaceRegistry: ObservableObject {
     }
 
     @discardableResult
-    func focus(sessionID: String) -> Bool {
+    func focus(sessionID: String, notifyFocusChange: Bool = true) -> Bool {
         guard let view = viewsBySessionID[sessionID] else {
             focusedSessionID = sessionID
             pendingFocusSessionID = sessionID
@@ -114,8 +114,10 @@ final class SurfaceRegistry: ObservableObject {
         pendingFocusSessionID = nil
         view.window?.makeFirstResponder(view)
         applyFocusState()
-        DispatchQueue.main.async { [weak self] in
-            self?.onFocusSession?(sessionID)
+        if notifyFocusChange {
+            DispatchQueue.main.async { [weak self] in
+                self?.onFocusSession?(sessionID)
+            }
         }
         return true
     }
