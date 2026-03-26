@@ -63,6 +63,9 @@ struct ContentView: View {
                 }
             }
             daemonClient.connect()
+            WorkspaceCloseTabBridge.shared.onCloseFocusedTab = {
+                workspaceController.closeFocusedTab()
+            }
             installKeyboardMonitor()
             DispatchQueue.main.async {
                 if workspaceStore.keyboardNavigationArea == .sidebar {
@@ -74,6 +77,7 @@ struct ContentView: View {
         .onDisappear {
             surfaceRegistry.onFocusSession = nil
             surfaceRegistry.onCycleTabs = nil
+            WorkspaceCloseTabBridge.shared.onCloseFocusedTab = nil
             removeKeyboardMonitor()
         }
         .onChange(of: workspaceStore.visibleWorkspace) { _, workspace in
@@ -278,6 +282,11 @@ struct ContentView: View {
 
         if modifiers.contains(.command) {
             switch event.keyCode {
+            case 13: // Cmd+W
+                return closeFocusedTab()
+            case 12: // Cmd+Q
+                NSApp.terminate(nil)
+                return true
             case 123: // Cmd+Left
                 activateSidebarNavigation()
                 return true
@@ -373,5 +382,11 @@ struct ContentView: View {
         workspaceStore.activateSidebarNavigation()
         surfaceRegistry.clearFocus()
         SidebarFocusBridge.shared.focus()
+    }
+
+    @discardableResult
+    private func closeFocusedTab() -> Bool {
+        guard workspaceStore.visibleWorkspace != nil else { return false }
+        return workspaceController.closeFocusedTab()
     }
 }

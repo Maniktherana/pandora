@@ -75,7 +75,7 @@ struct TabItemView: View {
             if isSelected {
                 Rectangle()
                     .fill(Color.accentColor)
-                    .frame(height: TabBarMetrics.activeIndicatorHeight)
+                    .frame(height: 2)
             }
 
             // Right border separator

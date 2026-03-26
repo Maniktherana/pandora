@@ -176,6 +176,21 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         return nil
     }
 
+    @discardableResult
+    func closeFocusedTab() -> Bool {
+        let paneIDs = bonsplitController.allPaneIds
+        guard paneIDs.isEmpty == false else { return false }
+        let targetPaneID = bonsplitController.focusedPaneId ?? paneIDs[0]
+
+        if let selectedTab = bonsplitController.selectedTab(inPane: targetPaneID) {
+            return bonsplitController.closeTab(selectedTab.id, inPane: targetPaneID)
+        }
+
+        let tabs = bonsplitController.tabs(inPane: targetPaneID)
+        guard let fallback = tabs.last else { return false }
+        return bonsplitController.closeTab(fallback.id, inPane: targetPaneID)
+    }
+
     func synchronizeTerminalFocus() {
         guard let store, let surfaceRegistry else { return }
 

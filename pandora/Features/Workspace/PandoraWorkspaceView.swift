@@ -136,6 +136,11 @@ struct PandoraWorkspaceView: View {
             )
             .id(session.id)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                Rectangle()
+                    .fill(Color.black.opacity(isSessionActive(session.id) ? 0.0 : 0.22))
+                    .allowsHitTesting(false)
+            }
             .contentShape(Rectangle())
             .onTapGesture {
                 if store.keyboardNavigationArea == .workspace {
@@ -145,6 +150,11 @@ struct PandoraWorkspaceView: View {
         } else {
             emptyPane
         }
+    }
+
+    private func isSessionActive(_ sessionID: String) -> Bool {
+        guard store.keyboardNavigationArea == .workspace else { return false }
+        return store.actualFocusedSession?.id == sessionID
     }
 }
 

@@ -962,6 +962,15 @@ private extension GhosttyNSView {
             return surfaceRegistry?.handleCommandBracket(forward: true) ?? false
         }
 
+        if event.keyCode == 13 || event.charactersIgnoringModifiers?.lowercased() == "w" {
+            return WorkspaceCloseTabBridge.shared.closeFocusedTab()
+        }
+
+        if event.keyCode == 12 || event.charactersIgnoringModifiers?.lowercased() == "q" {
+            NSApp.terminate(nil)
+            return true
+        }
+
         return false
     }
 }

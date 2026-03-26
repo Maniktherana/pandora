@@ -13,7 +13,8 @@ import Network
 @MainActor
 final class DaemonClient: ObservableObject {
     private static let initialConnectionTimeoutNanoseconds: UInt64 = 12_000_000_000
-    private static let reconnectDelayNanoseconds: UInt64 = 400_000_000
+    private static let initialReconnectDelayNanoseconds: UInt64 = 500_000_000
+    private static let maxReconnectDelayNanoseconds: UInt64 = 4_000_000_000
 
     @Published private(set) var slots: [SlotState] = []
     @Published private(set) var sessions: [SessionState] = []
@@ -28,6 +29,7 @@ final class DaemonClient: ObservableObject {
     private var connection: NWConnection?
     private var connectionTimeoutTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var currentReconnectDelayNanoseconds: UInt64 = 500_000_000
     private var shouldMaintainConnection = false
     private var receiveBuffer = Data()
     private let debugLogStore = DebugLogStore.shared
@@ -43,6 +45,7 @@ final class DaemonClient: ObservableObject {
     func connect() {
         guard connection == nil else { return }
         shouldMaintainConnection = true
+        currentReconnectDelayNanoseconds = Self.initialReconnectDelayNanoseconds
         connectionState = .connecting
         debugLogStore.append("Connecting to \(socketPath)", source: "client")
         reconnectTask?.cancel()
@@ -155,6 +158,7 @@ final class DaemonClient: ObservableObject {
             connectionTimeoutTask = nil
             reconnectTask?.cancel()
             reconnectTask = nil
+            currentReconnectDelayNanoseconds = Self.initialReconnectDelayNanoseconds
             isConnected = true
             connectionState = .connected
             lastErrorMessage = nil
@@ -251,12 +255,21 @@ final class DaemonClient: ObservableObject {
         guard shouldMaintainConnection, connection == nil, reconnectTask == nil else { return }
 
         reconnectTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.reconnectDelayNanoseconds)
+            let delay = self?.currentReconnectDelayNanoseconds ?? Self.initialReconnectDelayNanoseconds
+            try? await Task.sleep(nanoseconds: delay)
             guard let self else { return }
             self.reconnectTask = nil
             guard self.shouldMaintainConnection, self.connection == nil, self.connectionState == .connecting else { return }
-            self.debugLogStore.append("Retrying daemon connection", source: "client")
+            let delaySeconds = Double(delay) / 1_000_000_000.0
+            self.debugLogStore.append(
+                "Retrying daemon connection (delay \(String(format: "%.2f", delaySeconds))s)",
+                source: "client"
+            )
             self.beginConnectionAttempt()
+            self.currentReconnectDelayNanoseconds = min(
+                self.currentReconnectDelayNanoseconds * 2,
+                Self.maxReconnectDelayNanoseconds
+            )
         }
     }
 

@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Darwin
 import Foundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -34,6 +35,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         openInitialProject()
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        stopDaemonIfNeeded()
     }
 
     // Open the current project window.
@@ -129,6 +134,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let devPandoraHome = (NSTemporaryDirectory() as NSString).appendingPathComponent("pandora-dev-home")
         var environment = ProcessInfo.processInfo.environment
         environment["PANDORA_HOME"] = devPandoraHome
+        environment["PANDORA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
         #endif
         process.standardOutput = Pipe()
@@ -172,5 +178,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("AppDelegate: failed to launch pandorad: %@", error.localizedDescription)
             debugLogStore.append("Failed to launch pandorad: \(error.localizedDescription)", source: "app")
         }
+    }
+
+    private func stopDaemonIfNeeded() {
+        guard let daemonProcess else { return }
+        if daemonProcess.isRunning {
+            daemonProcess.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                if daemonProcess.isRunning {
+                    kill(daemonProcess.processIdentifier, SIGKILL)
+                }
+            }
+        }
+        self.daemonProcess = nil
     }
 }
