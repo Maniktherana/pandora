@@ -186,7 +186,7 @@ public final class SplitPaneController {
         _ paneId: PaneID? = nil,
         orientation: SplitOrientation,
         withTab tab: Tab? = nil,
-        animated: Bool = true
+        animated: Bool = false
     ) -> PaneID? {
         guard configuration.allowSplits else { return nil }
 

@@ -16,6 +16,7 @@ struct ContentView: View {
     @StateObject private var workspaceController = PandoraWorkspaceController()
     @StateObject private var debugLogStore = DebugLogStore.shared
     @State private var keyMonitor: Any?
+    @State private var isShowingDiagnostics = false
 
     init(projectPath: String) {
         self.projectPath = projectPath
@@ -40,7 +41,8 @@ struct ContentView: View {
             BottomActionBarView(
                 store: workspaceStore,
                 onFocusVisible: focusVisibleWorkspace,
-                onUnfocus: unfocusWorkspace
+                onUnfocus: unfocusWorkspace,
+                onShowDiagnostics: { isShowingDiagnostics = true }
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -86,6 +88,47 @@ struct ContentView: View {
         .onChange(of: workspaceStore.actualFocusedSession?.id) { _, _ in
             workspaceController.synchronizeTerminalFocus()
         }
+        .sheet(isPresented: $isShowingDiagnostics) {
+            diagnosticsSheet
+        }
+    }
+
+    private var diagnosticsSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Diagnostics")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Done") {
+                    isShowingDiagnostics = false
+                }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.bordered)
+                Button("Copy") {
+                    copyStartupDiagnosticsToClipboard()
+                }
+                .buttonStyle(.borderless)
+            }
+
+            Text("Socket: \(daemonClient.debugSocketPath)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(debugLogStore.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(10)
+            }
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .padding(16)
+        .frame(minWidth: 720, minHeight: 520)
     }
 
     @ViewBuilder
@@ -125,8 +168,17 @@ struct ContentView: View {
 
     private var diagnosticsPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Startup Diagnostics")
-                .font(.system(size: 12, weight: .semibold))
+            HStack {
+                Text("Startup Diagnostics")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Copy") {
+                    copyStartupDiagnosticsToClipboard()
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11, weight: .semibold))
+                .help("Copy startup diagnostics to clipboard")
+            }
 
             Text("Socket: \(daemonClient.debugSocketPath)")
                 .font(.system(size: 11, design: .monospaced))
@@ -150,6 +202,17 @@ struct ContentView: View {
         .frame(width: 560, alignment: .leading)
         .padding(14)
         .background(Color(nsColor: .underPageBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func copyStartupDiagnosticsToClipboard() {
+        let lines = debugLogStore.lines.suffix(12)
+        var payload = "Socket: \(daemonClient.debugSocketPath)\n"
+        if lines.isEmpty == false {
+            payload += "\nRecent logs:\n" + lines.joined(separator: "\n")
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(payload, forType: .string)
     }
 
     private var startupTitle: String {

@@ -58,7 +58,7 @@ final class SplitViewController {
     // MARK: - Split Operations
 
     /// Split the specified pane in the given orientation
-    func splitPane(_ paneId: PaneID, orientation: SplitOrientation, with newTab: TabItem? = nil, animated: Bool = true) {
+    func splitPane(_ paneId: PaneID, orientation: SplitOrientation, with newTab: TabItem? = nil, animated: Bool = false) {
         rootNode = splitNodeRecursively(
             node: rootNode,
             targetPaneId: paneId,
@@ -73,7 +73,7 @@ final class SplitViewController {
         targetPaneId: PaneID,
         orientation: SplitOrientation,
         newTab: TabItem?,
-        animated: Bool = true
+        animated: Bool = false
     ) -> SplitNode {
         switch node {
         case .pane(let paneState):
@@ -86,16 +86,14 @@ final class SplitViewController {
                     newPane = PaneState(tabs: [])
                 }
 
-                // When animated, start at the edge so there's no flash before the slide-in.
-                // When not animated (e.g. programmatic rebuild), start at 0.5 immediately so
-                // that updateNSView's syncPosition does not force the divider to the edge and
-                // make newly-created panes invisible.
+                // Splits are always created at 50/50. We intentionally avoid 0.0/1.0
+                // divider start positions because they create transient zero-size panes.
                 let splitState = SplitState(
                     orientation: orientation,
                     first: .pane(paneState),
                     second: .pane(newPane),
-                    dividerPosition: animated ? 1.0 : 0.5,
-                    animationOrigin: animated ? .fromSecond : nil
+                    dividerPosition: 0.5,
+                    animationOrigin: nil
                 )
 
                 // Focus the new pane
@@ -148,27 +146,13 @@ final class SplitViewController {
                 // Create new pane with the tab
                 let newPane = PaneState(tabs: [tab])
 
-                // Start with divider at the edge so there's no flash before animation
-                let splitState: SplitState
-                if insertFirst {
-                    // New pane goes first (left or top) - starts at 0, animates to 0.5
-                    splitState = SplitState(
-                        orientation: orientation,
-                        first: .pane(newPane),
-                        second: .pane(paneState),
-                        dividerPosition: 0.0,
-                        animationOrigin: .fromFirst
-                    )
-                } else {
-                    // New pane goes second (right or bottom) - starts at 1, animates to 0.5
-                    splitState = SplitState(
-                        orientation: orientation,
-                        first: .pane(paneState),
-                        second: .pane(newPane),
-                        dividerPosition: 1.0,
-                        animationOrigin: .fromSecond
-                    )
-                }
+                let splitState = SplitState(
+                    orientation: orientation,
+                    first: insertFirst ? .pane(newPane) : .pane(paneState),
+                    second: insertFirst ? .pane(paneState) : .pane(newPane),
+                    dividerPosition: 0.5,
+                    animationOrigin: nil
+                )
 
                 // Focus the new pane
                 focusedPaneId = newPane.id

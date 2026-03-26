@@ -11,6 +11,7 @@ struct BottomActionBarView: View {
     @ObservedObject var store: WorkspaceStore
     let onFocusVisible: () -> Void
     let onUnfocus: () -> Void
+    let onShowDiagnostics: () -> Void
 
     var body: some View {
         let session = store.actionSession
@@ -51,6 +52,10 @@ struct BottomActionBarView: View {
             }
 
             Spacer()
+
+            action("Diagnostics", "doc.text.magnifyingglass", true) {
+                onShowDiagnostics()
+            }
 
             Text(store.visibleWorkspaceTitle)
                 .font(.system(size: 12))
