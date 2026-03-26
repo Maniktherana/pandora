@@ -19,7 +19,7 @@ struct PandoraWorkspaceView: View {
 
     var body: some View {
         if let workspace = store.visibleWorkspace {
-            BonsplitView(controller: workspaceController.bonsplitController) { tab, _ in
+            SplitPaneView(controller: workspaceController.bonsplitController) { tab, _ in
                 workspaceTabContent(for: tab)
             } emptyPane: { _ in
                 emptyPane

@@ -384,7 +384,6 @@
 			package = A1B2C3D4E5F601230000AC01 /* XCRemoteSwiftPackageReference "libghostty-spm" */;
 			productName = GhosttyKit;
 		};
-
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9CACECE62F72866B00565244 /* Project object */;

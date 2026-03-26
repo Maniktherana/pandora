@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// Tab bar view with scrollable tabs, drag/drop support, and split buttons
 struct TabBarView: View {
-    @Environment(BonsplitController.self) private var controller
+    @Environment(SplitPaneController.self) private var controller
     @Environment(SplitViewController.self) private var splitViewController
     
     @Bindable var pane: PaneState

@@ -5,10 +5,10 @@ import SwiftUI
 /// Usage:
 /// ```swift
 /// struct MyApp: View {
-///     @State private var controller = BonsplitController()
+///     @State private var controller = SplitPaneController()
 ///
 ///     var body: some View {
-///         BonsplitView(controller: controller) { tab, paneId in
+///         SplitPaneView(controller: controller) { tab, paneId in
 ///             MyContentView(for: tab)
 ///                 .onTapGesture { controller.focusPane(paneId) }
 ///         } emptyPane: { paneId in
@@ -17,18 +17,18 @@ import SwiftUI
 ///     }
 /// }
 /// ```
-public struct BonsplitView<Content: View, EmptyContent: View>: View {
-    @Bindable private var controller: BonsplitController
+public struct SplitPaneView<Content: View, EmptyContent: View>: View {
+    @Bindable private var controller: SplitPaneController
     private let contentBuilder: (Tab, PaneID) -> Content
     private let emptyPaneBuilder: (PaneID) -> EmptyContent
 
     /// Initialize with a controller, content builder, and empty pane builder
     /// - Parameters:
-    ///   - controller: The BonsplitController managing the tab state
+    ///   - controller: The SplitPaneController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
     public init(
-        controller: BonsplitController,
+        controller: SplitPaneController,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content,
         @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
     ) {
@@ -38,7 +38,7 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
     }
 
     public var body: some View {
-        SplitViewContainer(
+        SplitTreeView(
             contentBuilder: { tabItem, paneId in
                 contentBuilder(Tab(from: tabItem), PaneID(id: paneId.id))
             },
@@ -58,13 +58,13 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
 
 // MARK: - Convenience initializer with default empty view
 
-extension BonsplitView where EmptyContent == DefaultEmptyPaneView {
+extension SplitPaneView where EmptyContent == DefaultEmptyPaneView {
     /// Initialize with a controller and content builder, using the default empty pane view
     /// - Parameters:
-    ///   - controller: The BonsplitController managing the tab state
+    ///   - controller: The SplitPaneController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     public init(
-        controller: BonsplitController,
+        controller: SplitPaneController,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content
     ) {
         self.controller = controller

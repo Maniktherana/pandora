@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Main container view that renders the entire split tree (internal implementation)
-struct SplitViewContainer<Content: View, EmptyContent: View>: View {
+struct SplitTreeView<Content: View, EmptyContent: View>: View {
     @Environment(SplitViewController.self) private var controller
     
     let contentBuilder: (TabItem, PaneID) -> Content

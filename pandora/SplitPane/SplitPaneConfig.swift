@@ -25,7 +25,7 @@ public enum NewTabPosition: Sendable {
 }
 
 /// Configuration for the split tab bar appearance and behavior
-public struct BonsplitConfiguration: Sendable {
+public struct SplitPaneConfig: Sendable {
 
     // MARK: - Behavior
 
@@ -60,14 +60,14 @@ public struct BonsplitConfiguration: Sendable {
 
     // MARK: - Presets
 
-    public static let `default` = BonsplitConfiguration()
+    public static let `default` = SplitPaneConfig()
 
-    public static let singlePane = BonsplitConfiguration(
+    public static let singlePane = SplitPaneConfig(
         allowSplits: false,
         allowCloseLastPane: false
     )
 
-    public static let readOnly = BonsplitConfiguration(
+    public static let readOnly = SplitPaneConfig(
         allowSplits: false,
         allowCloseTabs: false,
         allowTabReordering: false,
@@ -101,7 +101,7 @@ public struct BonsplitConfiguration: Sendable {
 
 // MARK: - Appearance Configuration
 
-extension BonsplitConfiguration {
+extension SplitPaneConfig {
     public struct Appearance: Sendable {
         // MARK: - Tab Bar
 

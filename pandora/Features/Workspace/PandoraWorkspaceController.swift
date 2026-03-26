@@ -10,7 +10,7 @@ import SwiftUI
 
 @MainActor
 final class PandoraWorkspaceController: NSObject, ObservableObject {
-    @Published private(set) var bonsplitController: BonsplitController
+    @Published private(set) var bonsplitController: SplitPaneController
 
     weak var store: WorkspaceStore?
     weak var surfaceRegistry: SurfaceRegistry?
@@ -42,7 +42,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
             return
         }
 
-        // Only rebuild the BonsplitController when the structural layout changes:
+        // Only rebuild the SplitPaneController when the structural layout changes:
         // which panes exist, how they're split, and which slots are in each pane.
         // Focus changes (focusedPaneID) and tab selection changes (selectedIndex) must
         // NOT trigger a rebuild — doing so resets every split's dividerPosition back to
@@ -58,7 +58,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         isApplyingSnapshot = true
 
         // Preserve the current container frame so the new controller has valid geometry
-        // immediately. SplitViewContainer.onAppear only fires once (when the view first
+        // immediately. SplitTreeView.onAppear only fires once (when the view first
         // appears) and won't re-fire when the controller object is swapped out. Without
         // this, layoutSnapshot() returns zero-sized pane frames on the second drag.
         let pr = bonsplitController.layoutSnapshot().containerFrame
@@ -205,7 +205,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private func materialize(
         node: WorkspaceLayoutNode,
         in paneID: PaneID,
-        controller: BonsplitController,
+        controller: SplitPaneController,
         slotsByID: [String: SlotState]
     ) {
         switch node {
@@ -235,7 +235,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private func populate(
         content: WorkspaceLeafContent,
         in paneID: PaneID,
-        controller: BonsplitController,
+        controller: SplitPaneController,
         slotsByID: [String: SlotState]
     ) {
         let slotIDs: [String]
@@ -336,7 +336,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         bonsplitTabIDBySlotID[slotID] = tabID
     }
 
-    private func clearWelcomeTab(in controller: BonsplitController) {
+    private func clearWelcomeTab(in controller: SplitPaneController) {
         for tabID in controller.allTabIds {
             _ = controller.closeTab(tabID)
         }
@@ -384,8 +384,8 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         return sqrt(dx * dx + dy * dy)
     }
 
-    private static func makeController() -> BonsplitController {
-        let configuration = BonsplitConfiguration(
+    private static func makeController() -> SplitPaneController {
+        let configuration = SplitPaneConfig(
             allowSplits: true,
             allowCloseTabs: false,
             allowCloseLastPane: false,
@@ -397,7 +397,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
             appearance: .init(showSplitButtons: false)
         )
 
-        return BonsplitController(configuration: configuration)
+        return SplitPaneController(configuration: configuration)
     }
 
     private func paneIDString(for paneID: PaneID) -> String? {
@@ -409,8 +409,8 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     }
 }
 
-extension PandoraWorkspaceController: BonsplitDelegate {
-    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Tab, inPane pane: PaneID) {
+extension PandoraWorkspaceController: SplitPaneDelegate {
+    func splitTabBar(_ controller: SplitPaneController, didSelectTab tab: Tab, inPane pane: PaneID) {
         guard isApplyingSnapshot == false,
               isSynchronizingSelection == false,
               let store,
@@ -429,19 +429,19 @@ extension PandoraWorkspaceController: BonsplitDelegate {
         synchronizeTerminalFocus()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {
+    func splitTabBar(_ controller: SplitPaneController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {
         rebuildWorkspaceFromShell()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {
+    func splitTabBar(_ controller: SplitPaneController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {
         rebuildWorkspaceFromShell()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didClosePane paneId: PaneID) {
+    func splitTabBar(_ controller: SplitPaneController, didClosePane paneId: PaneID) {
         rebuildWorkspaceFromShell()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didFocusPane pane: PaneID) {
+    func splitTabBar(_ controller: SplitPaneController, didFocusPane pane: PaneID) {
         guard isApplyingSnapshot == false,
               isSynchronizingSelection == false,
               let store,
@@ -461,11 +461,11 @@ extension PandoraWorkspaceController: BonsplitDelegate {
         synchronizeTerminalFocus()
     }
 
-    func splitTabBar(_ controller: BonsplitController, shouldSplitPane pane: PaneID, orientation: SplitOrientation) -> Bool {
+    func splitTabBar(_ controller: SplitPaneController, shouldSplitPane pane: PaneID, orientation: SplitOrientation) -> Bool {
         true
     }
 
-    func splitTabBar(_ controller: BonsplitController, didChangeGeometry snapshot: LayoutSnapshot) {}
+    func splitTabBar(_ controller: SplitPaneController, didChangeGeometry snapshot: LayoutSnapshot) {}
 }
 
 // Compares two layout nodes structurally: same pane IDs, same slot membership, same
