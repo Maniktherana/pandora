@@ -10,13 +10,37 @@ async function main(): Promise<void> {
   const server = new DaemonServer(projectPath);
   await server.start();
 
-  const shutdown = async () => {
+  let shuttingDown = false;
+  const shutdown = async (reason?: string) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    if (reason) {
+      console.log(reason);
+    }
     await server.stop();
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    void shutdown("pandorad received SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("pandorad received SIGTERM");
+  });
+
+  const parentPIDRaw = process.env.PANDORA_PARENT_PID;
+  const parentPID = parentPIDRaw ? Number(parentPIDRaw) : null;
+  if (parentPID && Number.isFinite(parentPID) && parentPID > 1) {
+    setInterval(() => {
+      try {
+        process.kill(parentPID, 0);
+      } catch {
+        void shutdown(`pandorad shutting down: parent process ${parentPID} exited`);
+      }
+    }, 1_000);
+  }
 }
 
 void main().catch((error) => {

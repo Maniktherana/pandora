@@ -47,10 +47,30 @@ export class DaemonServer {
 
   async start(): Promise<void> {
     if (existsSync(this.socketPath)) {
+      const alreadyListening = await new Promise<boolean>((resolve) => {
+        const client = net.createConnection(this.socketPath);
+        const done = (value: boolean) => {
+          client.removeAllListeners();
+          client.destroy();
+          resolve(value);
+        };
+        client.once("connect", () => done(true));
+        client.once("error", () => done(false));
+      });
+
+      if (alreadyListening) {
+        console.log(`pandorad already running on ${this.socketPath}`);
+        return;
+      }
+
       unlinkSync(this.socketPath);
     }
-
-    await this.processManager.autostartSlots();
+    try {
+      await this.processManager.autostartSlots();
+    } catch (error) {
+      this.processManager.closeAllSessions();
+      throw error;
+    }
 
     this.server = net.createServer((socket) => this.handleConnection(socket));
     await new Promise<void>((resolve, reject) => {
@@ -62,6 +82,8 @@ export class DaemonServer {
   }
 
   async stop(): Promise<void> {
+    this.processManager.closeAllSessions();
+
     for (const client of this.clients) {
       client.destroy();
     }

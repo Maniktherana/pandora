@@ -101,10 +101,33 @@ export class ProcessManager {
     }
   }
 
+  closeAllSessions(): void {
+    for (const session of this.sessions.values()) {
+      if (session.stopTimer) {
+        clearTimeout(session.stopTimer);
+        session.stopTimer = null;
+      }
+      session.process?.kill("SIGKILL");
+      session.process?.terminal?.close();
+      session.process = null;
+      session.instance.status = "stopped";
+      session.instance.pid = null;
+      session.instance.exitCode = null;
+    }
+    this.sessions.clear();
+  }
+
   startSlot(slotID: string): void {
     const definitions = this.sessionDefinitionsForSlot(slotID);
     for (const definition of definitions) {
-      this.openSessionInstance(definition.id);
+      try {
+        this.openSessionInstance(definition.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[process-manager] failed to start session ${definition.id} (${definition.name}) for slot ${slotID}: ${message}`
+        );
+      }
     }
   }
 
@@ -256,8 +279,9 @@ export class ProcessManager {
       TERM: "xterm-256color"
     };
 
+    const normalizedCwd = session.definition.cwd?.trim();
     const subprocess = Bun.spawn([shell, "-lc", session.definition.command], {
-      cwd: session.definition.cwd ?? process.cwd(),
+      cwd: normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : process.cwd(),
       env,
       terminal: {
         cols: 120,
