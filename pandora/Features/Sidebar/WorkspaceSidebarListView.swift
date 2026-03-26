@@ -178,11 +178,13 @@ struct SidebarSlotDropDelegate: DropDelegate {
             return false
         }
         let insertBefore = appendAtEnd ? nil : insertBeforeID
-        withAnimation(.spring(duration: 0.22, bounce: 0.1)) {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
             reorderState.clear()
             store.reorderWorkspace(movingID: sourceID, insertBeforeID: insertBefore)
+            WorkspaceDragBridge.shared.endDragging()
         }
-        WorkspaceDragBridge.shared.endDragging()
         return true
     }
 }
@@ -226,11 +228,13 @@ struct SidebarRowDropDelegate: DropDelegate {
             return false
         }
         let insertBefore = capturedAppendAtEnd ? nil : capturedInsertBeforeID
-        withAnimation(.spring(duration: 0.22, bounce: 0.1)) {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
             reorderState.clear()
             store.reorderWorkspace(movingID: sourceID, insertBeforeID: insertBefore)
+            WorkspaceDragBridge.shared.endDragging()
         }
-        WorkspaceDragBridge.shared.endDragging()
         return true
     }
 
