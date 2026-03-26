@@ -159,6 +159,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try process.run()
             daemonProcess = process
+            process.terminationHandler = { [weak self] terminatedProcess in
+                Task { @MainActor in
+                    if self?.daemonProcess === terminatedProcess {
+                        self?.daemonProcess = nil
+                    }
+                }
+            }
             NSLog("AppDelegate: launched pandorad via %@", executableURL.path)
             debugLogStore.append("Launched pandorad via \(executableURL.path)", source: "app")
         } catch {

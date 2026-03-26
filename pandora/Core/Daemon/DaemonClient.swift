@@ -12,7 +12,7 @@ import Network
 
 @MainActor
 final class DaemonClient: ObservableObject {
-    private static let initialConnectionTimeoutNanoseconds: UInt64 = 8_000_000_000
+    private static let initialConnectionTimeoutNanoseconds: UInt64 = 12_000_000_000
     private static let reconnectDelayNanoseconds: UInt64 = 400_000_000
 
     @Published private(set) var slots: [SlotState] = []
@@ -218,15 +218,15 @@ final class DaemonClient: ObservableObject {
         connectionTimeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.initialConnectionTimeoutNanoseconds)
             guard let self, self.connectionState == .connecting else { return }
-            self.shouldMaintainConnection = false
-            self.connectionState = .failed("Daemon unavailable")
-            self.lastErrorMessage = "Pandorad is not reachable yet."
+            // Soft timeout: daemon startup can be slow; keep retrying instead of giving up.
+            self.connectionState = .connecting
+            self.lastErrorMessage = "Pandorad is still starting. Retrying…"
             self.connection?.cancel()
             self.connection = nil
             self.isConnected = false
-            self.reconnectTask?.cancel()
-            self.reconnectTask = nil
-            self.debugLogStore.append("Daemon connection timed out", source: "client")
+            self.debugLogStore.append("Daemon connection still pending; continuing retries", source: "client")
+            self.scheduleReconnectIfNeeded()
+            self.scheduleConnectionTimeout()
         }
     }
 
