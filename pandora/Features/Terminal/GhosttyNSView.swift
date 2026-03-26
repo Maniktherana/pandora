@@ -963,7 +963,11 @@ private extension GhosttyNSView {
         }
 
         if event.keyCode == 13 || event.charactersIgnoringModifiers?.lowercased() == "w" {
-            return WorkspaceCloseTabBridge.shared.closeFocusedTab()
+            if WorkspaceCloseTabBridge.shared.closeFocusedTab() {
+                return true
+            }
+            NSApp.keyWindow?.performClose(nil)
+            return true
         }
 
         if event.keyCode == 12 || event.charactersIgnoringModifiers?.lowercased() == "q" {

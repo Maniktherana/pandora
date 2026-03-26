@@ -283,7 +283,7 @@ struct ContentView: View {
         if modifiers.contains(.command) {
             switch event.keyCode {
             case 13: // Cmd+W
-                return closeFocusedTab()
+                return closeFocusedTabOrWindow()
             case 12: // Cmd+Q
                 NSApp.terminate(nil)
                 return true
@@ -388,5 +388,14 @@ struct ContentView: View {
     private func closeFocusedTab() -> Bool {
         guard workspaceStore.visibleWorkspace != nil else { return false }
         return workspaceController.closeFocusedTab()
+    }
+
+    @discardableResult
+    private func closeFocusedTabOrWindow() -> Bool {
+        if closeFocusedTab() {
+            return true
+        }
+        NSApp.keyWindow?.performClose(nil)
+        return true
     }
 }
