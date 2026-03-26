@@ -6,7 +6,6 @@
 //
 
 import AppKit
-import Bonsplit
 import SwiftUI
 
 struct ContentView: View {

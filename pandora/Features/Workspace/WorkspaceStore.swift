@@ -6,7 +6,6 @@
 //
 
 import Combine
-import Bonsplit
 import Foundation
 
 @MainActor
@@ -26,6 +25,7 @@ final class WorkspaceStore: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var pendingStandaloneSelectionSlotID: String?
+    private var userDefinedOrder: [String] = []
 
     init(daemonClient: DaemonClient? = nil) {
         self.daemonClient = daemonClient
@@ -414,12 +414,7 @@ final class WorkspaceStore: ObservableObject {
         workspaceEntries.removeAll { $0.id == workspace.id }
         let standalone = workspace.memberSlotIDs.compactMap { slotsByID[$0] }.map(WorkspaceEntry.standalone(for:))
         workspaceEntries.append(contentsOf: standalone)
-        workspaceEntries.sort { lhs, rhs in
-            if lhs.sortOrder == rhs.sortOrder {
-                return lhs.title(using: slotsByID).localizedCaseInsensitiveCompare(rhs.title(using: slotsByID)) == .orderedAscending
-            }
-            return lhs.sortOrder < rhs.sortOrder
-        }
+        sortWorkspaceEntries()
 
         if let first = standalone.first {
             selectedSidebarWorkspaceID = first.id
@@ -463,12 +458,7 @@ final class WorkspaceStore: ObservableObject {
             workspaceEntries.append(.standalone(for: slot))
         }
 
-        workspaceEntries.sort { lhs, rhs in
-            if lhs.sortOrder == rhs.sortOrder {
-                return lhs.title(using: slotsByID).localizedCaseInsensitiveCompare(rhs.title(using: slotsByID)) == .orderedAscending
-            }
-            return lhs.sortOrder < rhs.sortOrder
-        }
+        sortWorkspaceEntries()
 
         selectedSidebarWorkspaceID = slotID
         keyboardNavigationArea = .sidebar
@@ -652,11 +642,34 @@ final class WorkspaceStore: ObservableObject {
 
     private func sortWorkspaceEntries() {
         workspaceEntries.sort { lhs, rhs in
+            let lhsIdx = userDefinedOrder.firstIndex(of: lhs.id)
+            let rhsIdx = userDefinedOrder.firstIndex(of: rhs.id)
+            if let l = lhsIdx, let r = rhsIdx { return l < r }
+            if lhsIdx != nil { return true }
+            if rhsIdx != nil { return false }
             if lhs.sortOrder == rhs.sortOrder {
                 return lhs.title(using: slotsByID).localizedCaseInsensitiveCompare(rhs.title(using: slotsByID)) == .orderedAscending
             }
             return lhs.sortOrder < rhs.sortOrder
         }
+    }
+
+    /// Move `movingID` so it appears immediately before `insertBeforeID`.
+    /// Pass `insertBeforeID: nil` to append at the end.
+    func reorderWorkspace(movingID: String, insertBeforeID: String?) {
+        guard workspaceEntries.contains(where: { $0.id == movingID }) else { return }
+
+        var ordered = workspaceEntries.map(\.id)
+        ordered.removeAll { $0 == movingID }
+
+        if let beforeID = insertBeforeID, let idx = ordered.firstIndex(of: beforeID) {
+            ordered.insert(movingID, at: idx)
+        } else {
+            ordered.append(movingID)
+        }
+
+        userDefinedOrder = ordered
+        sortWorkspaceEntries()
     }
 
     func replaceVisibleWorkspaceLayout(root: WorkspaceLayoutNode, focusedPaneID: UUID?) {

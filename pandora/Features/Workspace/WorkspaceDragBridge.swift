@@ -8,30 +8,52 @@
 import Combine
 import AppKit
 
+enum DragKind: Equatable {
+    case workspaceRow(id: String)
+    case contentTab
+}
+
 @MainActor
 final class WorkspaceDragBridge: ObservableObject {
     static let shared = WorkspaceDragBridge()
 
-    @Published private(set) var draggedWorkspaceID: String?
+    @Published private(set) var dragKind: DragKind? = nil
     private(set) var enteredMainWorkspace = false
     private var localMouseUpMonitor: Any?
     private var localKeyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
 
+    /// Backward-compat computed property used by existing observers
+    var draggedWorkspaceID: String? {
+        if case .workspaceRow(let id) = dragKind { return id }
+        return nil
+    }
+
+    var isWorkspaceRowDrag: Bool {
+        if case .workspaceRow = dragKind { return true }
+        return false
+    }
+
+    var isContentTabDrag: Bool {
+        dragKind == .contentTab
+    }
+
     func beginDragging(workspaceID: String) {
         enteredMainWorkspace = false
+        dragKind = .workspaceRow(id: workspaceID)
         installCleanupHooks()
-        DispatchQueue.main.async { [weak self] in
-            self?.draggedWorkspaceID = workspaceID
-        }
+    }
+
+    func beginTabDragging() {
+        enteredMainWorkspace = false
+        dragKind = .contentTab
+        installCleanupHooks()
     }
 
     func endDragging() {
         enteredMainWorkspace = false
         removeCleanupHooks()
-        DispatchQueue.main.async { [weak self] in
-            self?.draggedWorkspaceID = nil
-        }
+        dragKind = nil
     }
 
     func markEnteredMainWorkspace() {

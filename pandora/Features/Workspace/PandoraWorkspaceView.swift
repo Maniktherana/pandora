@@ -5,7 +5,6 @@
 //  Created by Manik Rana on 25/03/26.
 //
 
-import Bonsplit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -126,7 +125,7 @@ struct PandoraWorkspaceView: View {
     }
 
     @ViewBuilder
-    private func workspaceTabContent(for tab: Bonsplit.Tab) -> some View {
+    private func workspaceTabContent(for tab: Tab) -> some View {
         if let slotID = workspaceController.slotID(for: tab.id),
            let slot = store.slotsByID[slotID],
            let session = slot.primarySession(using: store.sessionsByID) {

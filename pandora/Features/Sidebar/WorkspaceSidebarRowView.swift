@@ -6,12 +6,10 @@
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct WorkspaceSidebarRowView: View {
     @ObservedObject var store: WorkspaceStore
     @ObservedObject var workspaceController: PandoraWorkspaceController
-    @ObservedObject private var dragBridge = WorkspaceDragBridge.shared
     let workspace: WorkspaceEntry
     let isSelected: Bool
 
@@ -85,7 +83,6 @@ struct WorkspaceSidebarRowView: View {
             WorkspaceDragBridge.shared.beginDragging(workspaceID: workspace.id)
             return NSItemProvider(object: workspace.id as NSString)
         }
-        .onDrop(of: [UTType.text], isTargeted: nil, perform: handleWorkspaceDrop)
         .contextMenu {
             Button("Show Workspace") {
                 openSlot()
@@ -188,38 +185,6 @@ struct WorkspaceSidebarRowView: View {
         store.remove(workspace)
     }
 
-    private func handleWorkspaceDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            let value: String?
-            switch item {
-            case let data as Data:
-                value = String(data: data, encoding: .utf8)
-            case let string as String:
-                value = string
-            case let nsString as NSString:
-                value = nsString as String
-            default:
-                value = nil
-            }
-
-            guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  sourceID.isEmpty == false else {
-                return
-            }
-
-            DispatchQueue.main.async {
-                if let transfer = ExternalTabTransfer.decode(from: sourceID),
-                   let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
-                    store.moveSlotToWorkspace(slotID: slotID, targetWorkspaceID: workspace.id)
-                } else if dragBridge.enteredMainWorkspace == false {
-                    store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
-                }
-                WorkspaceDragBridge.shared.endDragging()
-            }
-        }
-        return true
-    }
 }
 
 private extension AggregateStatus {

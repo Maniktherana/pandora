@@ -52,7 +52,11 @@ struct SidebarShellView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onDrop(of: [UTType.text], isTargeted: $isSidebarDropTargeted, perform: handleSidebarDrop)
+        .onDrop(of: [UTType.text], delegate: SidebarShellDropDelegate(
+            store: store,
+            workspaceController: workspaceController,
+            isTargeted: $isSidebarDropTargeted
+        ))
         .sheet(isPresented: $isPresentingAddTerminal) {
             AddTerminalSheet(store: store)
         }
@@ -99,9 +103,42 @@ struct SidebarShellView: View {
             endPoint: .bottom
         )
     }
+}
 
-    private func handleSidebarDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
+// MARK: - Shell Drop Delegate
+
+/// Handles tab-to-sidebar drops (detach slot from workspace back to sidebar).
+/// Only activates for Bonsplit tab drags — workspace row drags are filtered out
+/// by checking draggedWorkspaceID directly in AppKit's synchronous call stack.
+struct SidebarShellDropDelegate: DropDelegate {
+    let store: WorkspaceStore
+    let workspaceController: PandoraWorkspaceController
+    @Binding var isTargeted: Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        // validateDrop is called synchronously in AppKit's drag machinery.
+        // beginTabDragging() is set synchronously before any drag events fire.
+        guard WorkspaceDragBridge.shared.isContentTabDrag else { return false }
+        return info.hasItemsConforming(to: [UTType.text])
+    }
+
+    func dropEntered(info: DropInfo) {
+        isTargeted = true
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        guard WorkspaceDragBridge.shared.isContentTabDrag,
+              let provider = info.itemProviders(for: [UTType.text]).first else { return false }
+
         provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
             let value: String?
             switch item {
@@ -116,13 +153,10 @@ struct SidebarShellView: View {
             }
 
             guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  rawValue.isEmpty == false else {
-                return
-            }
+                  rawValue.isEmpty == false else { return }
 
             DispatchQueue.main.async {
                 WorkspaceDragBridge.shared.endDragging()
-
                 if let transfer = ExternalTabTransfer.decode(from: rawValue),
                    let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
                     store.detachSlotToSidebar(slotID: slotID)
@@ -132,6 +166,8 @@ struct SidebarShellView: View {
         return true
     }
 }
+
+// MARK: - External Tab Transfer
 
 struct ExternalTabTransfer: Decodable {
     struct TabPayload: Decodable {

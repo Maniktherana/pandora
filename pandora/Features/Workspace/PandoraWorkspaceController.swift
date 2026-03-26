@@ -5,7 +5,6 @@
 //  Created by Manik Rana on 25/03/26.
 //
 
-import Bonsplit
 import Combine
 import SwiftUI
 
@@ -411,7 +410,7 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 }
 
 extension PandoraWorkspaceController: BonsplitDelegate {
-    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Bonsplit.Tab, inPane pane: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Tab, inPane pane: PaneID) {
         guard isApplyingSnapshot == false,
               isSynchronizingSelection == false,
               let store,
@@ -430,7 +429,7 @@ extension PandoraWorkspaceController: BonsplitDelegate {
         synchronizeTerminalFocus()
     }
 
-    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Bonsplit.Tab, fromPane source: PaneID, toPane destination: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {
         rebuildWorkspaceFromShell()
     }
 
