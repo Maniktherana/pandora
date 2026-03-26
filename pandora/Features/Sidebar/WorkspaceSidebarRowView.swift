@@ -82,6 +82,8 @@ struct WorkspaceSidebarRowView: View {
         .onDrag {
             WorkspaceDragBridge.shared.beginDragging(workspaceID: workspace.id)
             return NSItemProvider(object: workspace.id as NSString)
+        } preview: {
+            dragPreview
         }
         .contextMenu {
             Button("Show Workspace") {
@@ -185,6 +187,44 @@ struct WorkspaceSidebarRowView: View {
         store.remove(workspace)
     }
 
+    private var dragPreview: some View {
+        HStack(alignment: .center, spacing: 12) {
+            statusDot
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(workspaceTitle)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+
+                    Text(memberSlots.count > 1 ? "WORKSPACE" : "PROCESS")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                }
+
+                Text(detailText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 10)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .frame(width: 280, alignment: .leading)
+        .opacity(0.35)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.94))
+        )
+    }
 }
 
 private extension AggregateStatus {

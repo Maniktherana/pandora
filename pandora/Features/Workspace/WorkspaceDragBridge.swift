@@ -52,8 +52,8 @@ final class WorkspaceDragBridge: ObservableObject {
 
     func endDragging() {
         enteredMainWorkspace = false
-        removeCleanupHooks()
         dragKind = nil
+        removeCleanupHooks()
     }
 
     func markEnteredMainWorkspace() {

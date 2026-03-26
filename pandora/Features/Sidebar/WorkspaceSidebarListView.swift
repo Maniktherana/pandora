@@ -98,7 +98,6 @@ struct WorkspaceSidebarListView: View {
                     .padding(.bottom, 2)
                     .animation(.spring(duration: 0.22, bounce: 0.1), value: reorderState.insertBeforeID)
                     .animation(.spring(duration: 0.22, bounce: 0.1), value: reorderState.appendAtEnd)
-                    .animation(.spring(duration: 0.22, bounce: 0.1), value: dragBridge.isWorkspaceRowDrag)
                 }
             }
             .padding(.horizontal, 12)
@@ -106,7 +105,13 @@ struct WorkspaceSidebarListView: View {
             .padding(.bottom, 14)
         }
         .onChange(of: dragBridge.dragKind) { _, newValue in
-            if newValue == nil { reorderState.clear() }
+            if newValue == nil {
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) {
+                    reorderState.clear()
+                }
+            }
         }
     }
 
@@ -147,10 +152,6 @@ private struct RowInsertionPlaceholder: View {
                     )
             )
             .frame(height: 64)
-            .transition(.asymmetric(
-                insertion: .scale(scale: 0.96, anchor: .center).combined(with: .opacity),
-                removal: .opacity.animation(.linear(duration: 0))
-            ))
     }
 }
 
@@ -206,17 +207,26 @@ struct SidebarRowDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
+        guard WorkspaceDragBridge.shared.isWorkspaceRowDrag else { return }
         updateSlot(y: info.location.y)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard WorkspaceDragBridge.shared.isWorkspaceRowDrag else {
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) {
+                reorderState.clear()
+            }
+            return nil
+        }
         updateSlot(y: info.location.y)
         return DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
-        // Intentionally not clearing — the placeholder steals the drop zone causing
-        // rapid enter/exit flicker if we clear here. Slot clears on drop or drag end.
+        // Do not clear here: placeholder can steal drop focus and cause flicker.
+        // Teardown is handled atomically on drop commit/end-drag.
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -231,9 +241,9 @@ struct SidebarRowDropDelegate: DropDelegate {
         var t = Transaction()
         t.disablesAnimations = true
         withTransaction(t) {
+            WorkspaceDragBridge.shared.endDragging()
             reorderState.clear()
             store.reorderWorkspace(movingID: sourceID, insertBeforeID: insertBefore)
-            WorkspaceDragBridge.shared.endDragging()
         }
         return true
     }
