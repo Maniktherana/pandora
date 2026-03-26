@@ -26,6 +26,29 @@ import GhosttyKit
 /// One instance per terminal process. In Phase 1 there is exactly one instance.
 @MainActor
 class GhosttyNSView: NSView, NSTextInputClient {
+    private struct ScrollbarState {
+        let total: UInt64
+        let offset: UInt64
+        let visibleLength: UInt64
+
+        var maxOffset: UInt64 {
+            total > visibleLength ? total - visibleLength : 0
+        }
+
+        var hasScrollableContent: Bool {
+            total > visibleLength && visibleLength > 0
+        }
+
+        var knobProportion: CGFloat {
+            guard total > 0 else { return 1 }
+            return CGFloat(visibleLength) / CGFloat(total)
+        }
+
+        var doubleValue: Double {
+            guard maxOffset > 0 else { return 0 }
+            return Double(offset) / Double(maxOffset)
+        }
+    }
 
     // MARK: - Properties
 
@@ -62,6 +85,19 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Window notifications used to keep ghostty focus aligned with AppKit key-window state.
     private var windowObservers: [NSObjectProtocol] = []
 
+    /// Overlay scrollbar driven by libghostty's viewport callbacks.
+    private lazy var scrollbar: NSScroller = {
+        let scroller = NSScroller()
+        scroller.target = self
+        scroller.action = #selector(handleScrollbarAction(_:))
+        scroller.controlSize = .small
+        scroller.scrollerStyle = .legacy
+        scroller.isHidden = true
+        return scroller
+    }()
+
+    private var scrollbarState: ScrollbarState?
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -85,6 +121,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
         metalLayer.frame = bounds
         layer = metalLayer
+        addSubview(scrollbar)
     }
 
     // MARK: - Surface Lifecycle
@@ -459,13 +496,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
     override func layout() {
         super.layout()
+        layoutScrollbar()
         refreshSurfaceLayout()
     }
 
     private func refreshSurfaceLayout() {
-        let backingSize = convertToBacking(NSRect(origin: .zero, size: bounds.size)).size
+        let contentBounds = terminalContentBounds()
+        let backingSize = convertToBacking(contentBounds).size
         if let metalLayer = layer as? CAMetalLayer {
-            metalLayer.frame = bounds
+            metalLayer.frame = contentBounds
             metalLayer.drawableSize = backingSize
         }
         guard let surface = surface,
@@ -474,6 +513,30 @@ class GhosttyNSView: NSView, NSTextInputClient {
         else { return }
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
         ghostty_surface_refresh(surface)
+    }
+
+    private func layoutScrollbar() {
+        let width = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        scrollbar.frame = NSRect(
+            x: bounds.maxX - width,
+            y: bounds.minY,
+            width: width,
+            height: bounds.height
+        )
+    }
+
+    private func terminalContentBounds() -> NSRect {
+        guard let state = scrollbarState, state.hasScrollableContent else {
+            return bounds
+        }
+
+        let scrollbarWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        return NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: max(bounds.width - scrollbarWidth, 0),
+            height: bounds.height
+        )
     }
 
     override func viewDidMoveToWindow() {
@@ -528,6 +591,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 let title = String(cString: titlePtr)
                 window?.title = title
             }
+        } else if action.tag == GHOSTTY_ACTION_SCROLLBAR {
+            let scrollbarAction = action.action.scrollbar
+            updateScrollbar(
+                ScrollbarState(
+                    total: scrollbarAction.total,
+                    offset: scrollbarAction.offset,
+                    visibleLength: scrollbarAction.len
+                )
+            )
         }
     }
 
@@ -595,13 +667,78 @@ class GhosttyNSView: NSView, NSTextInputClient {
             surface,
             event.scrollingDeltaX,
             event.scrollingDeltaY,
-            Int32(event.hasPreciseScrollingDeltas ? 1 : 0)
+            scrollModifiers(from: event)
         )
     }
 
     private func convertedMousePoint(from event: NSEvent) -> NSPoint {
         let point = convert(event.locationInWindow, from: nil)
         return NSPoint(x: point.x, y: bounds.height - point.y)
+    }
+
+    private func updateScrollbar(_ state: ScrollbarState) {
+        scrollbarState = state
+        scrollbar.knobProportion = max(0.05, min(state.knobProportion, 1))
+        scrollbar.doubleValue = min(max(state.doubleValue, 0), 1)
+        scrollbar.isEnabled = state.hasScrollableContent
+        scrollbar.isHidden = !state.hasScrollableContent
+        layoutScrollbar()
+        refreshSurfaceLayout()
+    }
+
+    @objc
+    private func handleScrollbarAction(_ sender: NSScroller) {
+        guard let state = scrollbarState else { return }
+
+        switch sender.hitPart {
+        case .decrementPage:
+            _ = performBindingAction("scroll_page_up")
+        case .incrementPage:
+            _ = performBindingAction("scroll_page_down")
+        case .decrementLine:
+            scrollToRow(max(Int64(state.offset) - 3, 0))
+        case .incrementLine:
+            scrollToRow(min(Int64(state.offset) + 3, Int64(state.maxOffset)))
+        case .knob, .knobSlot:
+            let target = UInt64((sender.doubleValue * Double(state.maxOffset)).rounded())
+            scrollToRow(Int64(target))
+        default:
+            break
+        }
+    }
+
+    @discardableResult
+    private func performBindingAction(_ action: String) -> Bool {
+        guard let surface else { return false }
+        return action.withCString { cString in
+            ghostty_surface_binding_action(surface, cString, UInt(action.utf8.count))
+        }
+    }
+
+    private func scrollToRow(_ row: Int64) {
+        let clampedRow = max(row, 0)
+        _ = performBindingAction("scroll_to_row:\(clampedRow)")
+    }
+
+    private func scrollModifiers(from event: NSEvent) -> ghostty_input_scroll_mods_t {
+        var value: Int32 = 0
+        if event.hasPreciseScrollingDeltas {
+            value |= 1
+        }
+
+        let momentum: Int32
+        if event.momentumPhase.contains(.began) {
+            momentum = 1
+        } else if event.momentumPhase.contains(.stationary) {
+            momentum = 2
+        } else if event.momentumPhase.contains(.changed) {
+            momentum = 3
+        } else {
+            momentum = 0
+        }
+
+        value |= momentum << 1
+        return value
     }
 
     func feedOutput(_ data: Data) {
