@@ -32,6 +32,7 @@ final class WorkspaceStore: ObservableObject {
     private var desiredSessionsByID: [String: SessionDefinition] = [:]
     private var bootstrappedFromCache = false
     private var hasReconciledRuntimeForCurrentConnection = false
+    private var shouldAutoActivateFirstWorkspace = true
 
     init(daemonClient: DaemonClient? = nil) {
         self.daemonClient = daemonClient
@@ -206,7 +207,8 @@ final class WorkspaceStore: ObservableObject {
            let currentIndex = visible.firstIndex(where: { $0.id == selectedSidebarWorkspaceID }) {
             nextIndex = (currentIndex + offset + visible.count) % visible.count
         } else {
-            nextIndex = offset < 0 ? visible.count - 1 : 0
+            // When nothing is active, any arrow key should activate the first row.
+            nextIndex = 0
         }
 
         selectSidebarWorkspace(workspace: visible[nextIndex])
@@ -527,12 +529,14 @@ final class WorkspaceStore: ObservableObject {
 
         // Single-slot workspace: keep the sidebar entry, but clear the visible workspace so
         // the main area is no longer "connected" to any terminal.
-        selectedSidebarWorkspaceID = workspace.id
+        selectedSidebarWorkspaceID = nil
         if visibleWorkspaceID == workspace.id {
             visibleWorkspaceID = nil
         }
         keyboardNavigationArea = .sidebar
         focusedTerminalTarget = nil
+        // User explicitly cleared the active workspace; don't auto-reactivate.
+        shouldAutoActivateFirstWorkspace = false
     }
 
     func remove(_ workspace: WorkspaceEntry) {
@@ -760,15 +764,22 @@ final class WorkspaceStore: ObservableObject {
         }
 
         if let visibleWorkspaceID, workspaceEntries.contains(where: { $0.id == visibleWorkspaceID }) == false {
-            self.visibleWorkspaceID = filteredWorkspaces.first?.id
+            self.visibleWorkspaceID = nil
         }
 
-        if self.selectedSidebarWorkspaceID == nil {
-            self.selectedSidebarWorkspaceID = filteredWorkspaces.first?.id
+        // Startup/bootstrap behavior: keep the first process open while daemon is still loading.
+        if shouldAutoActivateFirstWorkspace,
+           self.visibleWorkspaceID == nil,
+           let firstID = filteredWorkspaces.first?.id {
+            self.selectedSidebarWorkspaceID = firstID
+            self.visibleWorkspaceID = firstID
+            shouldAutoActivateFirstWorkspace = false
+            return
         }
 
-        if self.visibleWorkspaceID == nil {
-            self.visibleWorkspaceID = self.selectedSidebarWorkspaceID ?? filteredWorkspaces.first?.id
+        if let selectedSidebarWorkspaceID,
+           visibleIDs.contains(selectedSidebarWorkspaceID) == false {
+            self.selectedSidebarWorkspaceID = nil
         }
     }
 

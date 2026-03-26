@@ -32,32 +32,30 @@ struct PandoraWorkspaceView: View {
                     .frame(height: 2)
             }
             .overlay {
-                if dragBridge.draggedWorkspaceID != nil {
-                    GeometryReader { _ in
-                        DynamicWorkspaceDropPreview(
-                            previewFrame: activeDropTarget?.previewFrame
-                        )
-                        .onDrop(
-                            of: [UTType.text],
-                            delegate: WorkspaceSurfaceDropDelegate(
-                                resolveTarget: { location in
-                                    workspaceController.dropTarget(at: location)
-                                },
-                                currentTarget: { activeDropTarget },
-                                setActiveTarget: { target in
-                                    withAnimation(dropPreviewAnimation) {
-                                        activeDropTarget = target
-                                    }
-                                },
-                                onPerformDrop: { providers, target in
-                                    handleExternalDrop(providers: providers, into: workspace.id, target: target)
+                GeometryReader { _ in
+                    DynamicWorkspaceDropPreview(
+                        previewFrame: dragBridge.isWorkspaceRowDrag ? activeDropTarget?.previewFrame : nil
+                    )
+                    .onDrop(
+                        of: [UTType.text],
+                        delegate: WorkspaceSurfaceDropDelegate(
+                            resolveTarget: { location in
+                                workspaceController.dropTarget(at: location)
+                            },
+                            currentTarget: { activeDropTarget },
+                            setActiveTarget: { target in
+                                withAnimation(dropPreviewAnimation) {
+                                    activeDropTarget = target
                                 }
-                            )
+                            },
+                            onPerformDrop: { providers, target in
+                                handleExternalDrop(providers: providers, into: workspace.id, target: target)
+                            }
                         )
-                    }
+                    )
                 }
             }
-            .onChange(of: dragBridge.draggedWorkspaceID) { _, newValue in
+            .onChange(of: dragBridge.dragKind) { _, newValue in
                 if newValue == nil {
                     withAnimation(dropPreviewAnimation) {
                         activeDropTarget = nil
@@ -66,6 +64,17 @@ struct PandoraWorkspaceView: View {
             }
         } else {
             emptyPane
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: EmptyWorkspaceDropDelegate(
+                        isValidWorkspaceID: { id in
+                            store.workspaceEntries.contains(where: { $0.id == id })
+                        },
+                        onActivateWorkspace: { sourceID in
+                            store.selectSidebarWorkspace(id: sourceID)
+                        }
+                    )
+                )
         }
     }
 
@@ -104,7 +113,8 @@ struct PandoraWorkspaceView: View {
             }
 
             guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  sourceID.isEmpty == false else {
+                  sourceID.isEmpty == false,
+                  store.workspaceEntries.contains(where: { $0.id == sourceID }) else {
                 return
             }
 
@@ -127,24 +137,27 @@ struct PandoraWorkspaceView: View {
     @ViewBuilder
     private func workspaceTabContent(for tab: Tab) -> some View {
         if let slotID = workspaceController.slotID(for: tab.id),
-           let slot = store.slotsByID[slotID],
-           let session = slot.primarySession(using: store.sessionsByID) {
+           let slot = store.slotsByID[slotID] {
+            let session = slot.primarySession(using: store.sessionsByID)
             TerminalSurfaceView(
-                sessionID: session.id,
+                sessionID: session?.id,
                 presentationMode: slot.presentationMode,
                 surfaceRegistry: surfaceRegistry
             )
-            .id(session.id)
+            .id(session?.id ?? "pending-\(slot.id)")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
-                Rectangle()
-                    .fill(Color.black.opacity(isSessionActive(session.id) ? 0.0 : 0.22))
-                    .allowsHitTesting(false)
+                if let sessionID = session?.id {
+                    Rectangle()
+                        .fill(Color.black.opacity(isSessionActive(sessionID) ? 0.0 : 0.22))
+                        .allowsHitTesting(false)
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                if store.keyboardNavigationArea == .workspace {
-                    _ = surfaceRegistry.focus(sessionID: session.id)
+                if store.keyboardNavigationArea == .workspace,
+                   let sessionID = session?.id {
+                    _ = surfaceRegistry.focus(sessionID: sessionID)
                 }
             }
         } else {
@@ -155,6 +168,56 @@ struct PandoraWorkspaceView: View {
     private func isSessionActive(_ sessionID: String) -> Bool {
         guard store.keyboardNavigationArea == .workspace else { return false }
         return store.actualFocusedSession?.id == sessionID
+    }
+}
+
+private struct EmptyWorkspaceDropDelegate: DropDelegate {
+    let isValidWorkspaceID: (String) -> Bool
+    let onActivateWorkspace: (String) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.text])
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.text]).first else {
+            WorkspaceDragBridge.shared.endDragging()
+            return false
+        }
+
+        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
+            let value: String?
+            switch item {
+            case let data as Data:
+                value = String(data: data, encoding: .utf8)
+            case let string as String:
+                value = string
+            case let nsString as NSString:
+                value = nsString as String
+            default:
+                value = nil
+            }
+
+            guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  sourceID.isEmpty == false,
+                  isValidWorkspaceID(sourceID) else {
+                DispatchQueue.main.async {
+                    WorkspaceDragBridge.shared.endDragging()
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                onActivateWorkspace(sourceID)
+                WorkspaceDragBridge.shared.endDragging()
+            }
+        }
+
+        return true
     }
 }
 

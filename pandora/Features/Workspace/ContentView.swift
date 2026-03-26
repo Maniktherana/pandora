@@ -49,6 +49,11 @@ struct ContentView: View {
         .onAppear {
             surfaceRegistry.configure(daemonClient: daemonClient)
             workspaceController.bind(store: workspaceStore, surfaceRegistry: surfaceRegistry)
+            workspaceController.render(
+                workspace: workspaceStore.visibleWorkspace,
+                slotsByID: workspaceStore.slotsByID
+            )
+            workspaceController.synchronizeTerminalFocus()
             surfaceRegistry.onFocusSession = { sessionID in
                 Task { @MainActor in
                     workspaceStore.focusSessionFromSurface(sessionID: sessionID)
