@@ -5,27 +5,27 @@
 - Native macOS app in Swift/AppKit/SwiftUI
 - Background daemon in Bun/TypeScript
 - Terminal rendering through libghostty
-- Main workspace UI powered by vendored Bonsplit
+- Main workspace UI powered by SplitPane (unvendored, lives in Core)
 
 ## Current Architecture
 
 - `pandora/Features/Workspace/`
-  - workspace model, Bonsplit bridge, drag/drop, keyboard navigation
+  - workspace model, SplitPane bridge, drag/drop, keyboard navigation
 - `pandora/Features/Sidebar/`
   - sidebar workspace list and sidebar interactions
 - `pandora/Features/Terminal/`
   - Ghostty view, surface reuse, focus routing
 - `pandora/Core/Daemon/`
   - socket client and app-side daemon integration
+- `pandora/Core/SplitPane/`
+  - split pane/tab engine; see CLAUDE.md inside for architecture
 - `daemon/src/`
   - Bun daemon, PTY ownership, socket server, persistence
-- `pandora/Vendor/Bonsplit/`
-  - vendored pane/tab engine; patch here when pane behavior belongs to the library layer
 
 ## Important Truths
 
 - `WorkspaceStore` is the canonical workspace model.
-- `PandoraWorkspaceController` translates between `WorkspaceStore` and Bonsplit.
+- `PandoraWorkspaceController` translates between `WorkspaceStore` and SplitPane.
 - `PandoraWorkspaceView` owns sidebar-to-workspace drag/drop.
 - `SurfaceRegistry` owns terminal focus.
 - `GhosttyNSView` is the terminal boundary; app-owned shortcuts may need to be intercepted here.
