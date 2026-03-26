@@ -13,13 +13,14 @@ import Network
 @MainActor
 final class DaemonClient: ObservableObject {
     private static let initialConnectionTimeoutNanoseconds: UInt64 = 12_000_000_000
-    private static let initialReconnectDelayNanoseconds: UInt64 = 500_000_000
-    private static let maxReconnectDelayNanoseconds: UInt64 = 4_000_000_000
+    private static let initialReconnectDelayNanoseconds: UInt64 = 50_000_000
+    private static let maxReconnectDelayNanoseconds: UInt64 = 300_000_000
 
     @Published private(set) var slots: [SlotState] = []
     @Published private(set) var sessions: [SessionState] = []
     @Published private(set) var connectionState: ConnectionState = .disconnected
     @Published private(set) var isConnected = false
+    @Published private(set) var hasReceivedInitialSnapshot = false
     @Published var lastErrorMessage: String?
 
     var onOutputChunk: ((String, Data) -> Void)?
@@ -29,9 +30,11 @@ final class DaemonClient: ObservableObject {
     private var connection: NWConnection?
     private var connectionTimeoutTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
-    private var currentReconnectDelayNanoseconds: UInt64 = 500_000_000
+    private var currentReconnectDelayNanoseconds: UInt64 = 50_000_000
     private var shouldMaintainConnection = false
     private var receiveBuffer = Data()
+    private var hasReceivedSlotSnapshot = false
+    private var hasReceivedSessionSnapshot = false
     private let debugLogStore = DebugLogStore.shared
 
     init(projectPath: String) {
@@ -62,6 +65,9 @@ final class DaemonClient: ObservableObject {
         connection?.cancel()
         connection = nil
         isConnected = false
+        hasReceivedInitialSnapshot = false
+        hasReceivedSlotSnapshot = false
+        hasReceivedSessionSnapshot = false
         connectionState = .disconnected
     }
 
@@ -297,9 +303,17 @@ final class DaemonClient: ObservableObject {
         switch message {
         case .slotSnapshot(let slots):
             self.slots = slots
+            hasReceivedSlotSnapshot = true
+            if hasReceivedSessionSnapshot {
+                hasReceivedInitialSnapshot = true
+            }
             debugLogStore.append("Received slot snapshot (\(slots.count) slots)", source: "client")
         case .sessionSnapshot(let sessions):
             self.sessions = sessions
+            hasReceivedSessionSnapshot = true
+            if hasReceivedSlotSnapshot {
+                hasReceivedInitialSnapshot = true
+            }
             debugLogStore.append("Received session snapshot (\(sessions.count) sessions)", source: "client")
         case .slotStateChanged(let slot), .slotAdded(let slot):
             upsert(slot: slot)

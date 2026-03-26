@@ -26,20 +26,54 @@ final class WorkspaceStore: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var pendingStandaloneSelectionSlotID: String?
     private var userDefinedOrder: [String] = []
+    private let appStateCache = AppStateCache.shared
+    private let cacheNamespace: String
+    private var desiredSlotsByID: [String: SlotDefinition] = [:]
+    private var desiredSessionsByID: [String: SessionDefinition] = [:]
+    private var bootstrappedFromCache = false
+    private var hasReconciledRuntimeForCurrentConnection = false
 
     init(daemonClient: DaemonClient? = nil) {
         self.daemonClient = daemonClient
+        self.cacheNamespace = daemonClient?.debugSocketPath ?? "default"
 
         guard let daemonClient else {
             return
         }
 
+        if let cached = appStateCache.load(namespace: cacheNamespace) {
+            apply(slots: cached.slots, sessions: cached.sessions)
+            bootstrappedFromCache = true
+        }
+        if let cachedDefinitions = appStateCache.loadDefinitions(namespace: cacheNamespace) {
+            desiredSlotsByID = Dictionary(uniqueKeysWithValues: cachedDefinitions.slots.map { ($0.id, $0) })
+            desiredSessionsByID = Dictionary(uniqueKeysWithValues: cachedDefinitions.sessions.map { ($0.id, $0) })
+        }
+
         daemonClient.$slots
             .combineLatest(daemonClient.$sessions, daemonClient.$connectionState, daemonClient.$lastErrorMessage)
-            .sink { [weak self] slots, sessions, connectionState, lastErrorMessage in
-                self?.apply(slots: slots, sessions: sessions)
-                self?.connectionState = connectionState
-                self?.lastErrorMessage = lastErrorMessage
+            .combineLatest(daemonClient.$hasReceivedInitialSnapshot)
+            .sink { [weak self] payload, hasInitialSnapshot in
+                guard let self else { return }
+                let (slots, sessions, connectionState, lastErrorMessage) = payload
+                self.connectionState = connectionState
+                self.lastErrorMessage = lastErrorMessage
+
+                if connectionState != .connected {
+                    self.hasReconciledRuntimeForCurrentConnection = false
+                }
+
+                if self.bootstrappedFromCache, hasInitialSnapshot == false {
+                    return
+                }
+
+                self.apply(slots: slots, sessions: sessions)
+                if connectionState == .connected,
+                   hasInitialSnapshot,
+                   self.hasReconciledRuntimeForCurrentConnection == false {
+                    self.reconcileRuntimeWithDesiredDefinitions()
+                    self.hasReconciledRuntimeForCurrentConnection = true
+                }
             }
             .store(in: &cancellables)
     }
@@ -508,6 +542,7 @@ final class WorkspaceStore: ObservableObject {
                 daemonClient?.stopSlot(id: slot.id)
             }
             daemonClient?.removeSlot(id: slot.id)
+            removeDesiredSlot(slotID: slot.id)
         }
         workspaceEntries.removeAll { $0.id == workspace.id }
         reconcileSelectionAfterMutation()
@@ -574,6 +609,9 @@ final class WorkspaceStore: ObservableObject {
         )
 
         pendingStandaloneSelectionSlotID = slotID
+        desiredSlotsByID[slotID] = slot
+        desiredSessionsByID[sessionID] = session
+        persistDesiredDefinitions()
         daemonClient?.createSlot(slot)
         daemonClient?.createSessionDefinition(session)
         daemonClient?.startSlot(id: slotID)
@@ -583,8 +621,84 @@ final class WorkspaceStore: ObservableObject {
         self.slots = slots.sorted(by: SlotState.sortComparator)
         self.sessions = sessions
 
+        synthesizeDesiredDefinitionsFromRuntimeStates()
         reconcileWorkspaceEntries()
         reconcileSelectionAfterMutation()
+        appStateCache.save(namespace: cacheNamespace, slots: self.slots, sessions: self.sessions)
+    }
+
+    private func synthesizeDesiredDefinitionsFromRuntimeStates() {
+        for slot in slots where desiredSlotsByID[slot.id] == nil {
+            let definition = SlotDefinition(
+                id: slot.id,
+                kind: slot.kind,
+                name: slot.name,
+                autostart: slot.autostart,
+                presentationMode: slot.presentationMode,
+                primarySessionDefinitionID: slot.primarySessionDefID,
+                sessionDefinitionIDs: slot.sessionDefIDs,
+                persisted: slot.persisted,
+                sortOrder: slot.sortOrder
+            )
+            desiredSlotsByID[slot.id] = definition
+        }
+
+        for session in sessions where desiredSessionsByID[session.sessionDefID] == nil {
+            let definition = SessionDefinition(
+                id: session.sessionDefID,
+                slotID: session.slotID,
+                kind: session.kind,
+                name: session.name,
+                command: "exec ${SHELL:-/bin/zsh} -i",
+                cwd: nil,
+                port: session.port,
+                envOverrides: [:],
+                restartPolicy: .manual,
+                pauseSupported: true,
+                resumeSupported: true
+            )
+            desiredSessionsByID[definition.id] = definition
+        }
+
+        persistDesiredDefinitions()
+    }
+
+    private func reconcileRuntimeWithDesiredDefinitions() {
+        guard let daemonClient else { return }
+
+        let liveSlotIDs = Set(slots.map(\.id))
+        let liveSessionDefIDs = Set(slots.flatMap(\.sessionDefIDs))
+
+        for slot in desiredSlotsByID.values.sorted(by: { $0.sortOrder < $1.sortOrder }) where liveSlotIDs.contains(slot.id) == false {
+            daemonClient.createSlot(slot)
+            for sessionDefID in slot.sessionDefinitionIDs {
+                if let definition = desiredSessionsByID[sessionDefID] {
+                    daemonClient.createSessionDefinition(definition)
+                }
+            }
+            if slot.autostart {
+                daemonClient.startSlot(id: slot.id)
+            }
+        }
+
+        for definition in desiredSessionsByID.values where liveSessionDefIDs.contains(definition.id) == false {
+            guard liveSlotIDs.contains(definition.slotID) else { continue }
+            daemonClient.createSessionDefinition(definition)
+        }
+    }
+
+    private func removeDesiredSlot(slotID: String) {
+        desiredSlotsByID.removeValue(forKey: slotID)
+        desiredSessionsByID = desiredSessionsByID.filter { $0.value.slotID != slotID }
+        persistDesiredDefinitions()
+    }
+
+    private func persistDesiredDefinitions() {
+        appStateCache.saveDefinitions(
+            namespace: cacheNamespace,
+            slots: Array(desiredSlotsByID.values),
+            sessions: Array(desiredSessionsByID.values)
+        )
     }
 
     private func reconcileWorkspaceEntries() {
