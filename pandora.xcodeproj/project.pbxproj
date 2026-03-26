@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F601230000AA01 /* GhosttyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F601230000AB01 /* GhosttyKit */; };
-		B1D2E3F4A5B600000001AA01 /* Bonsplit in Frameworks */ = {isa = PBXBuildFile; productRef = B1D2E3F4A5B600000001AB01 /* Bonsplit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,7 +27,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B1D2E3F4A5B600000001AA01 /* Bonsplit in Frameworks */,
 				A1B2C3D4E5F601230000AA01 /* GhosttyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -72,7 +70,6 @@
 			);
 			name = pandora;
 			packageProductDependencies = (
-				B1D2E3F4A5B600000001AB01 /* Bonsplit */,
 				A1B2C3D4E5F601230000AB01 /* GhosttyKit */,
 			);
 			productName = pandora;
@@ -104,7 +101,6 @@
 			mainGroup = 9CACECE52F72866B00565244;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				B1D2E3F4A5B600000001AC01 /* XCLocalSwiftPackageReference "pandora/Vendor/Bonsplit" */,
 				A1B2C3D4E5F601230000AC01 /* XCRemoteSwiftPackageReference "libghostty-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -371,13 +367,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		B1D2E3F4A5B600000001AC01 /* XCLocalSwiftPackageReference "pandora/Vendor/Bonsplit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = pandora/Vendor/Bonsplit;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D4E5F601230000AC01 /* XCRemoteSwiftPackageReference "libghostty-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -395,11 +384,7 @@
 			package = A1B2C3D4E5F601230000AC01 /* XCRemoteSwiftPackageReference "libghostty-spm" */;
 			productName = GhosttyKit;
 		};
-		B1D2E3F4A5B600000001AB01 /* Bonsplit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B1D2E3F4A5B600000001AC01 /* XCLocalSwiftPackageReference "pandora/Vendor/Bonsplit" */;
-			productName = Bonsplit;
-		};
+
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9CACECE62F72866B00565244 /* Project object */;
