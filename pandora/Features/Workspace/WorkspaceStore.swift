@@ -442,6 +442,7 @@ final class WorkspaceStore: ObservableObject {
         }
 
         // re-key the workspace to the first remaining slot so the IDs stay consistent.
+        var activeWorkspaceID = workspaceEntries[workspaceIndex].id
         if workspaceEntries[workspaceIndex].id == slotID,
            let remainingSlotID = updatedRoot.memberSlotIDs.first,
            let remainingSlot = slotsByID[remainingSlotID] {
@@ -454,6 +455,7 @@ final class WorkspaceStore: ObservableObject {
             )
             workspaceEntries.remove(at: workspaceIndex)
             workspaceEntries.append(reKeyedEntry)
+            activeWorkspaceID = reKeyedEntry.id
         }
 
         if workspaceEntries.contains(where: { $0.id == slotID }) == false {
@@ -462,10 +464,18 @@ final class WorkspaceStore: ObservableObject {
 
         sortWorkspaceEntries()
 
-        selectedSidebarWorkspaceID = slotID
-        visibleWorkspaceID = slotID
-        keyboardNavigationArea = .sidebar
-        focusedTerminalTarget = nil
+        // Keep the source workspace active/focused when there are remaining tabs.
+        // The detached slot should appear in the sidebar, but should not steal focus.
+        selectedSidebarWorkspaceID = activeWorkspaceID
+        visibleWorkspaceID = activeWorkspaceID
+        if let activeWorkspace = workspaceEntries.first(where: { $0.id == activeWorkspaceID }) {
+            let nextTarget = activeWorkspace.activeFocusTarget ?? activeWorkspace.defaultFocusTarget
+            focusedTerminalTarget = nextTarget
+            keyboardNavigationArea = nextTarget == nil ? .sidebar : .workspace
+        } else {
+            focusedTerminalTarget = nil
+            keyboardNavigationArea = .sidebar
+        }
     }
 
     /// Close a tab (slot) from the visible workspace and return it to the sidebar.
