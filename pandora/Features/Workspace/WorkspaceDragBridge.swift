@@ -13,11 +13,13 @@ final class WorkspaceDragBridge: ObservableObject {
     static let shared = WorkspaceDragBridge()
 
     @Published private(set) var draggedWorkspaceID: String?
+    private(set) var enteredMainWorkspace = false
     private var localMouseUpMonitor: Any?
     private var localKeyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
 
     func beginDragging(workspaceID: String) {
+        enteredMainWorkspace = false
         installCleanupHooks()
         DispatchQueue.main.async { [weak self] in
             self?.draggedWorkspaceID = workspaceID
@@ -25,10 +27,15 @@ final class WorkspaceDragBridge: ObservableObject {
     }
 
     func endDragging() {
+        enteredMainWorkspace = false
         removeCleanupHooks()
         DispatchQueue.main.async { [weak self] in
             self?.draggedWorkspaceID = nil
         }
+    }
+
+    func markEnteredMainWorkspace() {
+        enteredMainWorkspace = true
     }
 
     private func installCleanupHooks() {

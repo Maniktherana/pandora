@@ -215,6 +215,7 @@ private struct WorkspaceSurfaceDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         DispatchQueue.main.async {
+            WorkspaceDragBridge.shared.markEnteredMainWorkspace()
             setActiveTarget(resolveTarget(info.location))
         }
     }
@@ -227,6 +228,7 @@ private struct WorkspaceSurfaceDropDelegate: DropDelegate {
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DispatchQueue.main.async {
+            WorkspaceDragBridge.shared.markEnteredMainWorkspace()
             setActiveTarget(resolveTarget(info.location))
         }
         return DropProposal(operation: .move)

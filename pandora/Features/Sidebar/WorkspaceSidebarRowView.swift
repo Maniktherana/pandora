@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 struct WorkspaceSidebarRowView: View {
     @ObservedObject var store: WorkspaceStore
     @ObservedObject var workspaceController: PandoraWorkspaceController
+    @ObservedObject private var dragBridge = WorkspaceDragBridge.shared
     let workspace: WorkspaceEntry
     let isSelected: Bool
 
@@ -211,9 +212,10 @@ struct WorkspaceSidebarRowView: View {
                 if let transfer = ExternalTabTransfer.decode(from: sourceID),
                    let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
                     store.moveSlotToWorkspace(slotID: slotID, targetWorkspaceID: workspace.id)
-                } else {
+                } else if dragBridge.enteredMainWorkspace == false {
                     store.mergeWorkspaces(sourceID: sourceID, into: workspace.id, mode: .tabs)
                 }
+                WorkspaceDragBridge.shared.endDragging()
             }
         }
         return true
