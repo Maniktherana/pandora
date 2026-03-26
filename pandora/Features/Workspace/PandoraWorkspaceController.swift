@@ -23,6 +23,43 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
     private var isApplyingSnapshot = false
     private var isSynchronizingSelection = false
 
+    private func logAction(_ header: String, extras: [String] = []) {
+        let snapshot = bonsplitController.layoutSnapshot()
+        let paneLines = snapshot.panes.map { pane in
+            let sel = pane.selectedTabId ?? "nil"
+            return "    pane \(pane.paneId.prefix(8)) frame=\(Int(pane.frame.width))x\(Int(pane.frame.height)) sel=\(sel.prefix(8)) tabs=\(pane.tabIds.count)"
+        }
+
+        let mappingCount = slotIDByBonsplitTabID.count
+        let knownTabs = snapshot.panes.flatMap(\.tabIds).map { tabID in
+            let slot = slotIDByBonsplitTabID[tabID.lowercased()] ?? "nil"
+            return "    tab \(tabID.prefix(8)) -> slot \(slot.prefix(8))"
+        }
+
+        let workspaceLine: String = {
+            guard let store, let w = store.visibleWorkspace else { return "  store.visibleWorkspace=nil" }
+            return "  visible-workspace=\(w.id.prefix(8)) memberSlots=\(w.memberSlotIDs.count) focusedPane=\(String(describing: w.focusedPaneID).prefix(8))"
+        }()
+
+        var parts: [String] = []
+        parts.append(header)
+        parts.append(workspaceLine)
+        parts.append("  snapshot container=\(Int(snapshot.containerFrame.width))x\(Int(snapshot.containerFrame.height)) panes=\(snapshot.panes.count) mappingCount=\(mappingCount)")
+        parts.append(contentsOf: paneLines)
+        if knownTabs.isEmpty == false {
+            parts.append("  mappings:")
+            parts.append(contentsOf: knownTabs)
+        }
+        if extras.isEmpty == false {
+            parts.append("  extras:")
+            parts.append(contentsOf: extras.map { "    \($0)" })
+        }
+        let message = parts.joined(separator: "\n")
+
+        print(message)
+        DebugLogStore.shared.append(message, source: "workspace")
+    }
+
     override init() {
         let controller = PandoraWorkspaceController.makeController()
         self.bonsplitController = controller
@@ -410,7 +447,21 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
 }
 
 extension PandoraWorkspaceController: SplitPaneDelegate {
+    func splitTabBar(_ controller: SplitPaneController, didCloseTab tabId: TabID, fromPane pane: PaneID) {
+        // Closing a tab should be a canonical model transition: return the slot to the sidebar
+        // and/or clear the visible workspace if it was the last tab.
+        if let store,
+           let tabKey = tabIDString(for: tabId),
+           let slotID = slotIDByBonsplitTabID[tabKey] {
+            store.closeSlotToSidebar(slotID: slotID)
+        } else {
+            // Fallback: if we can't resolve the slot mapping, snapshot the tree.
+            rebuildWorkspaceFromShell()
+        }
+    }
+
     func splitTabBar(_ controller: SplitPaneController, didSelectTab tab: Tab, inPane pane: PaneID) {
+        logAction("[PANDORA] EVENT didSelectTab pane=\(paneIDString(for: pane)?.prefix(8) ?? "?") tab=\(tabIDString(for: tab.id)?.prefix(8) ?? "?") title=\"\(tab.title)\"")
         guard isApplyingSnapshot == false,
               isSynchronizingSelection == false,
               let store,
@@ -430,18 +481,22 @@ extension PandoraWorkspaceController: SplitPaneDelegate {
     }
 
     func splitTabBar(_ controller: SplitPaneController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {
+        logAction("[PANDORA] EVENT didMoveTab tab=\(tabIDString(for: tab.id)?.prefix(8) ?? "?") title=\"\(tab.title)\" from=\(paneIDString(for: source)?.prefix(8) ?? "?") to=\(paneIDString(for: destination)?.prefix(8) ?? "?")")
         rebuildWorkspaceFromShell()
     }
 
     func splitTabBar(_ controller: SplitPaneController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {
+        logAction("[PANDORA] EVENT didSplitPane original=\(paneIDString(for: originalPane)?.prefix(8) ?? "?") new=\(paneIDString(for: newPane)?.prefix(8) ?? "?") orient=\(orientation == .horizontal ? "H" : "V")")
         rebuildWorkspaceFromShell()
     }
 
     func splitTabBar(_ controller: SplitPaneController, didClosePane paneId: PaneID) {
+        logAction("[PANDORA] EVENT didClosePane pane=\(paneIDString(for: paneId)?.prefix(8) ?? "?")")
         rebuildWorkspaceFromShell()
     }
 
     func splitTabBar(_ controller: SplitPaneController, didFocusPane pane: PaneID) {
+        logAction("[PANDORA] EVENT didFocusPane pane=\(paneIDString(for: pane)?.prefix(8) ?? "?")")
         guard isApplyingSnapshot == false,
               isSynchronizingSelection == false,
               let store,
@@ -465,7 +520,11 @@ extension PandoraWorkspaceController: SplitPaneDelegate {
         true
     }
 
-    func splitTabBar(_ controller: SplitPaneController, didChangeGeometry snapshot: LayoutSnapshot) {}
+    func splitTabBar(_ controller: SplitPaneController, didChangeGeometry snapshot: LayoutSnapshot) {
+        let sized = snapshot.panes.allSatisfy { $0.frame.width > 0 && $0.frame.height > 0 }
+        logAction("[PANDORA] EVENT didChangeGeometry dragging=? sized=\(sized) panes=\(snapshot.panes.count)",
+                  extras: snapshot.panes.map { "pane=\($0.paneId.prefix(8)) frame=\(Int($0.frame.width))x\(Int($0.frame.height))" })
+    }
 }
 
 // Compares two layout nodes structurally: same pane IDs, same slot membership, same

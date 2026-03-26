@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Foundation
 
 /// Drop zone positions for creating splits
 enum DropZone: Equatable {
@@ -240,6 +241,29 @@ struct UnifiedPaneDropDelegate: DropDelegate {
                 // Find source pane
                 guard let sourcePaneId = controller.rootNode.allPaneIds.first(where: { $0.id == transfer.sourcePaneId }) else {
                     return
+                }
+
+                // Comprehensive drag/split logging: what was dragged, from where, to where, and how it was interpreted.
+                let zoneString: String = {
+                    switch zone {
+                    case .center: return "center"
+                    case .left: return "left"
+                    case .right: return "right"
+                    case .top: return "top"
+                    case .bottom: return "bottom"
+                    }
+                }()
+                let orientationString = zone.orientation.map { $0 == .horizontal ? "horizontal" : "vertical" } ?? "none"
+                let message = """
+                [PANDORA] ACTION tab-drop zone=\(zoneString) orientation=\(orientationString) insertFirst=\(zone.insertsFirst)
+                  dragged-tab id=\(transfer.tab.id.uuidString.lowercased()) title="\((transfer.tab.title))"
+                  source-pane id=\(transfer.sourcePaneId.uuidString.lowercased())
+                  target-pane id=\(pane.id.id.uuidString.lowercased())
+                  location x=\(String(format: "%.1f", info.location.x)) y=\(String(format: "%.1f", info.location.y)) size w=\(String(format: "%.1f", size.width)) h=\(String(format: "%.1f", size.height))
+                """
+                print(message)
+                Task { @MainActor in
+                    DebugLogStore.shared.append(message, source: "workspace")
                 }
 
                 if zone == .center {

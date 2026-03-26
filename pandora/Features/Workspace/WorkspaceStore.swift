@@ -242,6 +242,7 @@ final class WorkspaceStore: ObservableObject {
 
     func mergeWorkspaces(sourceID: String, into targetID: String, intent: WorkspaceDropIntent) {
         guard sourceID != targetID else { return }
+        DebugLogStore.shared.append("[PANDORA] ACTION mergeWorkspaces source=\(sourceID.prefix(8)) into=\(targetID.prefix(8)) intent=\(intent)", source: "workspace")
         guard let sourceIndex = workspaceEntries.firstIndex(where: { $0.id == sourceID }),
               let targetIndex = workspaceEntries.firstIndex(where: { $0.id == targetID }) else {
             return
@@ -300,6 +301,7 @@ final class WorkspaceStore: ObservableObject {
         intent: WorkspaceDropIntent
     ) {
         guard sourceID != targetID else { return }
+        DebugLogStore.shared.append("[PANDORA] ACTION mergeWorkspace source=\(sourceID.prefix(8)) into=\(targetID.prefix(8)) pane=\(targetPaneID.uuidString.lowercased().prefix(8)) intent=\(intent)", source: "workspace")
         guard let source = workspaceEntries.first(where: { $0.id == sourceID }),
               let targetIndex = workspaceEntries.firstIndex(where: { $0.id == targetID }) else {
             return
@@ -461,6 +463,30 @@ final class WorkspaceStore: ObservableObject {
         sortWorkspaceEntries()
 
         selectedSidebarWorkspaceID = slotID
+        visibleWorkspaceID = slotID
+        keyboardNavigationArea = .sidebar
+        focusedTerminalTarget = nil
+    }
+
+    /// Close a tab (slot) from the visible workspace and return it to the sidebar.
+    ///
+    /// - If the slot is part of a merged workspace (memberSlots > 1), this detaches the slot into its own standalone entry.
+    /// - If the slot is the only member of its workspace, closing the last tab should "unactivate" the main area
+    ///   (visibleWorkspace becomes nil) while keeping the sidebar row available for re-activation.
+    func closeSlotToSidebar(slotID: String) {
+        guard let workspace = workspaceEntries.first(where: { $0.memberSlotIDs.contains(slotID) }) else { return }
+
+        if workspace.memberSlotIDs.count > 1 {
+            detachSlotToSidebar(slotID: slotID)
+            return
+        }
+
+        // Single-slot workspace: keep the sidebar entry, but clear the visible workspace so
+        // the main area is no longer "connected" to any terminal.
+        selectedSidebarWorkspaceID = workspace.id
+        if visibleWorkspaceID == workspace.id {
+            visibleWorkspaceID = nil
+        }
         keyboardNavigationArea = .sidebar
         focusedTerminalTarget = nil
     }
