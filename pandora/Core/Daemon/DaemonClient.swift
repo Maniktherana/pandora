@@ -170,6 +170,14 @@ final class DaemonClient: ObservableObject {
             lastErrorMessage = nil
             debugLogStore.append("Connected to daemon socket", source: "client")
             startReceiveLoop()
+        case .waiting(let error):
+            isConnected = false
+            connectionState = .connecting
+            lastErrorMessage = nil
+            debugLogStore.append("Connection waiting: \(error.localizedDescription)", source: "client")
+            connection?.cancel()
+            connection = nil
+            scheduleReconnectIfNeeded()
         case .failed(let error):
             isConnected = false
             if shouldMaintainConnection {
