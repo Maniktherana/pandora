@@ -50,6 +50,14 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
     }
 
+    private struct SurfaceViewportSignature: Equatable {
+        let widthPx: Int
+        let heightPx: Int
+        let widthPoints: CGFloat
+        let heightPoints: CGFloat
+        let scaleFactor: CGFloat
+    }
+
     // MARK: - Properties
 
     /// The underlying ghostty surface (nil until createSurface is called)
@@ -97,6 +105,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }()
 
     private var scrollbarState: ScrollbarState?
+    private var lastViewportSignature: SurfaceViewportSignature?
 
     // MARK: - Initialization
 
@@ -119,6 +128,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         metalLayer.isOpaque = false
         metalLayer.backgroundColor = NSColor.clear.cgColor
         metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        metalLayer.masksToBounds = true
         metalLayer.frame = bounds
         layer = metalLayer
         addSubview(scrollbar)
@@ -494,25 +504,56 @@ class GhosttyNSView: NSView, NSTextInputClient {
         refreshSurfaceLayout()
     }
 
+    override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        refreshSurfaceLayout()
+    }
+
     override func layout() {
         super.layout()
         layoutScrollbar()
         refreshSurfaceLayout()
     }
 
-    private func refreshSurfaceLayout() {
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        refreshSurfaceLayout(forceRefresh: true)
+    }
+
+    private func refreshSurfaceLayout(forceRefresh: Bool = false) {
         let contentBounds = terminalContentBounds()
         let backingSize = convertToBacking(contentBounds).size
+        let scaleFactor = currentScaleFactor()
+        let widthPx = max(Int(backingSize.width.rounded(.toNearestOrAwayFromZero)), 0)
+        let heightPx = max(Int(backingSize.height.rounded(.toNearestOrAwayFromZero)), 0)
+        let signature = SurfaceViewportSignature(
+            widthPx: widthPx,
+            heightPx: heightPx,
+            widthPoints: contentBounds.width,
+            heightPoints: contentBounds.height,
+            scaleFactor: scaleFactor
+        )
+
         if let metalLayer = layer as? CAMetalLayer {
             metalLayer.frame = contentBounds
+            metalLayer.contentsScale = scaleFactor
             metalLayer.drawableSize = backingSize
         }
         guard let surface = surface,
-              backingSize.width > 0,
-              backingSize.height > 0
+              widthPx > 0,
+              heightPx > 0
         else { return }
-        ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
-        ghostty_surface_refresh(surface)
+
+        ghostty_surface_set_content_scale(surface, Double(scaleFactor), Double(scaleFactor))
+
+        if forceRefresh || lastViewportSignature != signature {
+            ghostty_surface_set_size(surface, UInt32(widthPx), UInt32(heightPx))
+            lastViewportSignature = signature
+        }
+
+        if forceRefresh || lastViewportSignature == signature {
+            ghostty_surface_refresh(surface)
+        }
     }
 
     private func layoutScrollbar() {
@@ -544,6 +585,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         installWindowObservers()
         guard window != nil else {
             removeWindowObservers()
+            lastViewportSignature = nil
             surfaceRegistry?.releaseFocus(for: self)
             return
         }
@@ -556,13 +598,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 presentationMode: presentationMode,
                 surfaceRegistry: surfaceRegistry
             )
-            if let surface = surface {
-                ghostty_surface_refresh(surface)
-                let backingSize = convertToBacking(NSRect(origin: .zero, size: bounds.size)).size
-                if backingSize.width > 0 && backingSize.height > 0 {
-                    ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
-                }
-            }
+            refreshSurfaceLayout(forceRefresh: true)
 
             if window?.firstResponder === self {
                 surfaceRegistry?.claimFocus(for: self)
@@ -581,6 +617,8 @@ class GhosttyNSView: NSView, NSTextInputClient {
         } else {
             surfaceRegistry?.synchronizeFocus(for: self)
         }
+
+        refreshSurfaceLayout(forceRefresh: true)
     }
 
     // MARK: - Action and Close Callbacks
@@ -820,6 +858,72 @@ class GhosttyNSView: NSView, NSTextInputClient {
                 }
             }
         )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didResizeNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didEndLiveResizeNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didChangeBackingPropertiesNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didChangeScreenNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didEnterFullScreenNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
+        windowObservers.append(
+            center.addObserver(
+                forName: NSWindow.didExitFullScreenNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshSurfaceLayout(forceRefresh: true)
+                }
+            }
+        )
     }
 
     private func removeWindowObservers() {
@@ -854,6 +958,15 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// The terminal handles all key input via ghostty_surface_key, so these dispatches are always spurious.
     override func doCommand(by selector: Selector) {
         // intentionally a no-op — swallow without beeping
+    }
+}
+
+private extension GhosttyNSView {
+    func currentScaleFactor() -> CGFloat {
+        window?.backingScaleFactor
+            ?? window?.screen?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2.0
     }
 }
 
