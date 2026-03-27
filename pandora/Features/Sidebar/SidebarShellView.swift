@@ -52,7 +52,7 @@ struct SidebarShellView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onDrop(of: [UTType.text], delegate: SidebarShellDropDelegate(
+        .onDrop(of: [.json], delegate: SidebarShellDropDelegate(
             store: store,
             workspaceController: workspaceController,
             isTargeted: $isSidebarDropTargeted
@@ -116,13 +116,12 @@ struct SidebarShellDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
 
     func validateDrop(info: DropInfo) -> Bool {
-        // validateDrop is called synchronously in AppKit's drag machinery.
-        // beginTabDragging() is set synchronously before any drag events fire.
-        guard WorkspaceDragBridge.shared.isContentTabDrag else { return false }
-        return info.hasItemsConforming(to: [UTType.text])
+        WorkspaceDragBridge.shared.isContentTabDrag &&
+        info.hasItemsConforming(to: [.json])
     }
 
     func dropEntered(info: DropInfo) {
+        guard validateDrop(info: info) else { return }
         isTargeted = true
     }
 
@@ -131,34 +130,28 @@ struct SidebarShellDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else {
+            isTargeted = false
+            return nil
+        }
         return DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
         isTargeted = false
         guard WorkspaceDragBridge.shared.isContentTabDrag,
-              let provider = info.itemProviders(for: [UTType.text]).first else { return false }
+              let provider = info.itemProviders(for: [.json]).first else {
+            WorkspaceDragBridge.shared.endDragging()
+            return false
+        }
 
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            let value: String?
-            switch item {
-            case let data as Data:
-                value = String(data: data, encoding: .utf8)
-            case let string as String:
-                value = string
-            case let nsString as NSString:
-                value = nsString as String
-            default:
-                value = nil
-            }
-
-            guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  rawValue.isEmpty == false else { return }
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.json.identifier) { data, _ in
+            guard let data,
+                  let transfer = ExternalTabTransfer.decodeFromTabTransfer(data) else { return }
 
             DispatchQueue.main.async {
                 WorkspaceDragBridge.shared.endDragging()
-                if let transfer = ExternalTabTransfer.decode(from: rawValue),
-                   let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
+                if let slotID = workspaceController.slotID(forDragTabIdentifier: transfer.tab.id) {
                     store.detachSlotToSidebar(slotID: slotID)
                 }
             }
@@ -176,8 +169,7 @@ struct ExternalTabTransfer: Decodable {
 
     let tab: TabPayload
 
-    static func decode(from value: String) -> ExternalTabTransfer? {
-        guard let data = value.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(ExternalTabTransfer.self, from: data)
+    static func decodeFromTabTransfer(_ data: Data) -> ExternalTabTransfer? {
+        try? JSONDecoder().decode(ExternalTabTransfer.self, from: data)
     }
 }

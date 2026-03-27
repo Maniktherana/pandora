@@ -1,17 +1,4 @@
 import Foundation
-import SwiftUI
-import UniformTypeIdentifiers
-
-/// Custom UTTypes for tab drag and drop
-extension UTType {
-    static var tabItem: UTType {
-        UTType(exportedAs: "com.splittabbar.tabitem")
-    }
-
-    static var tabTransfer: UTType {
-        UTType(exportedAs: "com.splittabbar.tabtransfer")
-    }
-}
 
 /// Represents a single tab in a pane's tab bar (internal representation)
 struct TabItem: Identifiable, Hashable, Sendable {
@@ -65,14 +52,6 @@ extension TabItem: Codable {
     }
 }
 
-// MARK: - Transferable for Drag & Drop
-
-extension TabItem: Transferable {
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .tabItem)
-    }
-}
-
 /// Transfer data that includes source pane information for cross-pane moves
 struct TabTransferData: Sendable {
     let tab: TabItem
@@ -94,11 +73,5 @@ extension TabTransferData: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(tab, forKey: .tab)
         try c.encode(sourcePaneId, forKey: .sourcePaneId)
-    }
-}
-
-extension TabTransferData: Transferable {
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .tabTransfer)
     }
 }

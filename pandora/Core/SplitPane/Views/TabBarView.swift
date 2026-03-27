@@ -123,7 +123,7 @@ struct TabBarView: View {
         } preview: {
             TabDragPreview(tab: tab)
         }
-        .onDrop(of: [.text], delegate: TabDropDelegate(
+        .onDrop(of: [.json], delegate: TabDropDelegate(
             targetIndex: index,
             pane: pane,
             controller: splitViewController,
@@ -145,11 +145,17 @@ struct TabBarView: View {
         WorkspaceDragBridge.shared.beginTabDragging()
 
         let transfer = TabTransferData(tab: tab, sourcePaneId: pane.id.id)
-        if let data = try? JSONEncoder().encode(transfer),
-           let string = String(data: data, encoding: .utf8) {
-            return NSItemProvider(object: string as NSString)
+        let provider = NSItemProvider()
+        if let data = try? JSONEncoder().encode(transfer) {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.json.identifier,
+                visibility: .all
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
         }
-        return NSItemProvider()
+        return provider
     }
 
     // MARK: - Drop Zone at End
@@ -160,7 +166,7 @@ struct TabBarView: View {
             .fill(Color.clear)
             .frame(width: 30, height: TabBarMetrics.tabHeight)
             .contentShape(Rectangle())
-            .onDrop(of: [.text], delegate: TabDropDelegate(
+            .onDrop(of: [.json], delegate: TabDropDelegate(
                 targetIndex: pane.tabs.count,
                 pane: pane,
                 controller: splitViewController,
@@ -270,32 +276,24 @@ struct TabDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         dropTargetIndex = nil
 
-        guard let provider = info.itemProviders(for: [.text]).first else {
+        guard WorkspaceDragBridge.shared.isContentTabDrag,
+              let provider = info.itemProviders(for: [.json]).first else {
             // Clear drag state
             controller.draggingTab = nil
             controller.dragSourcePaneId = nil
+            WorkspaceDragBridge.shared.endDragging()
             return false
         }
 
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.json.identifier) { data, _ in
             DispatchQueue.main.async {
                 // Clear drag state
                 controller.draggingTab = nil
                 controller.dragSourcePaneId = nil
+                WorkspaceDragBridge.shared.endDragging()
 
-                // Handle both Data and String representations
-                let string: String?
-                if let data = item as? Data {
-                    string = String(data: data, encoding: .utf8)
-                } else if let nsString = item as? NSString {
-                    string = nsString as String
-                } else if let str = item as? String {
-                    string = str
-                } else {
-                    string = nil
-                }
-
-                guard let string, let transfer = decodeTransfer(from: string) else {
+                guard let data,
+                      let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
                     return
                 }
 
@@ -323,6 +321,7 @@ struct TabDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
+        guard validateDrop(info: info) else { return }
         dropTargetIndex = targetIndex
     }
 
@@ -333,19 +332,17 @@ struct TabDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        guard validateDrop(info: info) else {
+            if dropTargetIndex == targetIndex {
+                dropTargetIndex = nil
+            }
+            return nil
+        }
+        return DropProposal(operation: .move)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        guard WorkspaceDragBridge.shared.isContentTabDrag else { return false }
-        return info.hasItemsConforming(to: [.text])
-    }
-
-    private func decodeTransfer(from string: String) -> TabTransferData? {
-        guard let data = string.data(using: .utf8),
-              let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
-            return nil
-        }
-        return transfer
+        WorkspaceDragBridge.shared.isContentTabDrag &&
+        info.hasItemsConforming(to: [.json])
     }
 }

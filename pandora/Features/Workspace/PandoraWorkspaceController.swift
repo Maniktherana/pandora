@@ -224,6 +224,11 @@ final class PandoraWorkspaceController: NSObject, ObservableObject {
         slotIDByBonsplitTabID[identifier.lowercased()]
     }
 
+    func workspacePaneID(for paneID: PaneID) -> UUID? {
+        guard let paneIDString = paneIDString(for: paneID) else { return nil }
+        return workspacePaneIDByBonsplitPaneID[paneIDString]
+    }
+
     func dropTarget(at location: CGPoint) -> WorkspaceDropTarget? {
         let snapshot = bonsplitController.layoutSnapshot()
         let panes = snapshot.panes.compactMap { pane -> (workspacePaneID: UUID, frame: CGRect)? in

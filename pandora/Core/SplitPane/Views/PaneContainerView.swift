@@ -2,6 +2,25 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
 
+// MARK: - External Drop Handler (injected via environment)
+
+struct ExternalPaneDropHandler {
+    let supportedTypes: [UTType]
+    let onDragUpdated: () -> Void
+    let onDrop: (PaneID, DropZone, [NSItemProvider]) -> Bool
+}
+
+private struct ExternalPaneDropHandlerKey: EnvironmentKey {
+    static let defaultValue: ExternalPaneDropHandler? = nil
+}
+
+extension EnvironmentValues {
+    var externalPaneDropHandler: ExternalPaneDropHandler? {
+        get { self[ExternalPaneDropHandlerKey.self] }
+        set { self[ExternalPaneDropHandlerKey.self] = newValue }
+    }
+}
+
 /// Drop zone positions for creating splits
 enum DropZone: Equatable {
     case center
@@ -35,6 +54,7 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
     var showSplitButtons: Bool = true
     var contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch
 
+    @Environment(\.externalPaneDropHandler) private var externalDropHandler
     @State private var activeDropZone: DropZone?
 
     private var isFocused: Bool {
@@ -118,16 +138,27 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
 
     @ViewBuilder
     private func dropZonesLayer(size: CGSize) -> some View {
-        // Single unified drop zone that determines zone based on position
+        // Single unified drop zone that determines zone based on position.
+        // Accepts JSON tab payloads plus any external types injected via the
+        // environment (e.g. workspace row merges).
+        let dropTypes: [UTType] = {
+            var types: [UTType] = [.json]
+            if let handler = externalDropHandler {
+                types.append(contentsOf: handler.supportedTypes)
+            }
+            return types
+        }()
+
         Color.clear
             .onTapGesture {
                 controller.focusPane(pane.id)
             }
-            .onDrop(of: [.text], delegate: UnifiedPaneDropDelegate(
+            .onDrop(of: dropTypes, delegate: UnifiedPaneDropDelegate(
                 size: size,
                 pane: pane,
                 controller: controller,
-                activeDropZone: $activeDropZone
+                activeDropZone: $activeDropZone,
+                externalDropHandler: externalDropHandler
             ))
     }
 
@@ -163,7 +194,7 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
             )
             .frame(width: frame.width, height: frame.height)
             .position(x: frame.midX, y: frame.midY)
-            .opacity(zone != nil && controller.draggingTab != nil ? 1 : 0)
+            .opacity(zone != nil ? 1 : 0)
             .animation(.spring(duration: 0.25, bounce: 0.15), value: zone)
     }
 
@@ -183,14 +214,21 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     let pane: PaneState
     let controller: SplitViewController
     @Binding var activeDropZone: DropZone?
+    let externalDropHandler: ExternalPaneDropHandler?
 
-    // Calculate zone based on position within the view
+    private var acceptsWorkspaceDrop: Bool {
+        externalDropHandler != nil && WorkspaceDragBridge.shared.isWorkspaceRowDrag
+    }
+
+    private var acceptsTabDrop: Bool {
+        WorkspaceDragBridge.shared.isContentTabDrag
+    }
+
     private func zoneForLocation(_ location: CGPoint) -> DropZone {
         let edgeRatio: CGFloat = 0.25
         let horizontalEdge = max(80, size.width * edgeRatio)
         let verticalEdge = max(80, size.height * edgeRatio)
 
-        // Check edges first (left/right take priority at corners)
         if location.x < horizontalEdge {
             return .left
         } else if location.x > size.width - horizontalEdge {
@@ -207,97 +245,93 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         let zone = zoneForLocation(info.location)
 
-        guard let provider = info.itemProviders(for: [.text]).first else {
-            activeDropZone = nil
-            // Clear drag state
-            controller.draggingTab = nil
-            controller.dragSourcePaneId = nil
-            return false
+        // 1. Try internal tab transfer first
+        if acceptsTabDrop, let provider = info.itemProviders(for: [.json]).first {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.json.identifier) { data, _ in
+                DispatchQueue.main.async {
+                    activeDropZone = nil
+                    controller.draggingTab = nil
+                    controller.dragSourcePaneId = nil
+                    WorkspaceDragBridge.shared.endDragging()
+
+                    guard let data,
+                          let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
+                        return
+                    }
+
+                    guard let sourcePaneId = controller.rootNode.allPaneIds.first(where: { $0.id == transfer.sourcePaneId }) else {
+                        return
+                    }
+
+                    let zoneString: String = {
+                        switch zone {
+                        case .center: return "center"
+                        case .left: return "left"
+                        case .right: return "right"
+                        case .top: return "top"
+                        case .bottom: return "bottom"
+                        }
+                    }()
+                    let orientationString = zone.orientation.map { $0 == .horizontal ? "horizontal" : "vertical" } ?? "none"
+                    let message = """
+                    [PANDORA] ACTION tab-drop zone=\(zoneString) orientation=\(orientationString) insertFirst=\(zone.insertsFirst)
+                      dragged-tab id=\(transfer.tab.id.uuidString.lowercased()) title="\((transfer.tab.title))"
+                      source-pane id=\(transfer.sourcePaneId.uuidString.lowercased())
+                      target-pane id=\(pane.id.id.uuidString.lowercased())
+                      location x=\(String(format: "%.1f", info.location.x)) y=\(String(format: "%.1f", info.location.y)) size w=\(String(format: "%.1f", size.width)) h=\(String(format: "%.1f", size.height))
+                    """
+                    print(message)
+                    Task { @MainActor in
+                        DebugLogStore.shared.append(message, source: "workspace")
+                    }
+
+                    if zone == .center {
+                        withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
+                            controller.moveTab(transfer.tab, from: sourcePaneId, to: pane.id, atIndex: nil)
+                        }
+                    } else if let orientation = zone.orientation {
+                        if let sourcePane = controller.rootNode.findPane(sourcePaneId) {
+                            sourcePane.removeTab(transfer.tab.id)
+                            if sourcePane.tabs.isEmpty && controller.rootNode.allPaneIds.count > 1 {
+                                controller.closePane(sourcePaneId)
+                            }
+                        }
+                        controller.splitPaneWithTab(
+                            pane.id,
+                            orientation: orientation,
+                            tab: transfer.tab,
+                            insertFirst: zone.insertsFirst
+                        )
+                    }
+                }
+            }
+            return true
         }
 
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            DispatchQueue.main.async {
-                activeDropZone = nil
-                // Clear drag state
-                controller.draggingTab = nil
-                controller.dragSourcePaneId = nil
-
-                // Handle both Data and String representations
-                let string: String?
-                if let data = item as? Data {
-                    string = String(data: data, encoding: .utf8)
-                } else if let nsString = item as? NSString {
-                    string = nsString as String
-                } else if let str = item as? String {
-                    string = str
-                } else {
-                    string = nil
+        // 2. Try external drop handler (e.g. workspace row merge)
+        if acceptsWorkspaceDrop, let handler = externalDropHandler {
+            let providers = info.itemProviders(for: handler.supportedTypes)
+            if !providers.isEmpty {
+                // Defer clearing to next run loop iteration so it runs after any
+                // pending dropUpdated calls that could re-set activeDropZone.
+                DispatchQueue.main.async {
+                    activeDropZone = nil
                 }
-
-                guard let string, let transfer = decodeTransfer(from: string) else {
-                    return
-                }
-
-                // Find source pane
-                guard let sourcePaneId = controller.rootNode.allPaneIds.first(where: { $0.id == transfer.sourcePaneId }) else {
-                    return
-                }
-
-                // Comprehensive drag/split logging: what was dragged, from where, to where, and how it was interpreted.
-                let zoneString: String = {
-                    switch zone {
-                    case .center: return "center"
-                    case .left: return "left"
-                    case .right: return "right"
-                    case .top: return "top"
-                    case .bottom: return "bottom"
-                    }
-                }()
-                let orientationString = zone.orientation.map { $0 == .horizontal ? "horizontal" : "vertical" } ?? "none"
-                let message = """
-                [PANDORA] ACTION tab-drop zone=\(zoneString) orientation=\(orientationString) insertFirst=\(zone.insertsFirst)
-                  dragged-tab id=\(transfer.tab.id.uuidString.lowercased()) title="\((transfer.tab.title))"
-                  source-pane id=\(transfer.sourcePaneId.uuidString.lowercased())
-                  target-pane id=\(pane.id.id.uuidString.lowercased())
-                  location x=\(String(format: "%.1f", info.location.x)) y=\(String(format: "%.1f", info.location.y)) size w=\(String(format: "%.1f", size.width)) h=\(String(format: "%.1f", size.height))
-                """
-                print(message)
-                Task { @MainActor in
-                    DebugLogStore.shared.append(message, source: "workspace")
-                }
-
-                if zone == .center {
-                    // Drop in center - move tab to this pane
-                    withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
-                        controller.moveTab(transfer.tab, from: sourcePaneId, to: pane.id, atIndex: nil)
-                    }
-                } else if let orientation = zone.orientation {
-                    // Drop on edge - create a split (120fps animation handled by SplitAnimator)
-                    // Remove tab from source first
-                    if let sourcePane = controller.rootNode.findPane(sourcePaneId) {
-                        sourcePane.removeTab(transfer.tab.id)
-
-                        // Close empty source pane if not the only one
-                        if sourcePane.tabs.isEmpty && controller.rootNode.allPaneIds.count > 1 {
-                            controller.closePane(sourcePaneId)
-                        }
-                    }
-
-                    // Create the split
-                    controller.splitPaneWithTab(
-                        pane.id,
-                        orientation: orientation,
-                        tab: transfer.tab,
-                        insertFirst: zone.insertsFirst
-                    )
-                }
+                return handler.onDrop(pane.id, zone, providers)
             }
         }
 
-        return true
+        activeDropZone = nil
+        controller.draggingTab = nil
+        controller.dragSourcePaneId = nil
+        return false
     }
 
     func dropEntered(info: DropInfo) {
+        guard validateDrop(info: info) else {
+            activeDropZone = nil
+            return
+        }
         activeDropZone = zoneForLocation(info.location)
     }
 
@@ -306,20 +340,22 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else {
+            activeDropZone = nil
+            return nil
+        }
         activeDropZone = zoneForLocation(info.location)
+        if acceptsWorkspaceDrop {
+            externalDropHandler?.onDragUpdated()
+        }
         return DropProposal(operation: .move)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        guard WorkspaceDragBridge.shared.isContentTabDrag else { return false }
-        return info.hasItemsConforming(to: [.text])
-    }
-
-    private func decodeTransfer(from string: String) -> TabTransferData? {
-        guard let data = string.data(using: .utf8),
-              let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
-            return nil
-        }
-        return transfer
+        if acceptsTabDrop, info.hasItemsConforming(to: [.json]) { return true }
+        if acceptsWorkspaceDrop,
+           let handler = externalDropHandler,
+           info.hasItemsConforming(to: handler.supportedTypes) { return true }
+        return false
     }
 }

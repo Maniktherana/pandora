@@ -11,11 +11,7 @@ import UniformTypeIdentifiers
 struct PandoraWorkspaceView: View {
     @ObservedObject var store: WorkspaceStore
     @ObservedObject var workspaceController: PandoraWorkspaceController
-    @ObservedObject private var dragBridge = WorkspaceDragBridge.shared
     let surfaceRegistry: SurfaceRegistry
-    @State private var activeDropTarget: WorkspaceDropTarget?
-
-    private let dropPreviewAnimation = Animation.spring(duration: 0.25, bounce: 0.15)
 
     var body: some View {
         if let workspace = store.visibleWorkspace {
@@ -24,43 +20,30 @@ struct PandoraWorkspaceView: View {
             } emptyPane: { _ in
                 emptyPane
             }
+            .environment(\.externalPaneDropHandler, ExternalPaneDropHandler(
+                supportedTypes: [.text],
+                onDragUpdated: {
+                    WorkspaceDragBridge.shared.markEnteredMainWorkspace()
+                },
+                onDrop: { paneID, zone, providers in
+                    guard let workspacePaneID = workspaceController.workspacePaneID(for: paneID) else {
+                        WorkspaceDragBridge.shared.endDragging()
+                        return false
+                    }
+                    return handleWorkspaceDrop(
+                        providers: providers,
+                        into: workspace.id,
+                        paneID: workspacePaneID,
+                        zone: zone
+                    )
+                }
+            ))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
             .overlay(alignment: .top) {
                 Rectangle()
                     .fill(store.keyboardNavigationArea == .workspace ? Color.accentColor : Color.clear)
                     .frame(height: 2)
-            }
-            .overlay {
-                GeometryReader { _ in
-                    DynamicWorkspaceDropPreview(
-                        previewFrame: dragBridge.isWorkspaceRowDrag ? activeDropTarget?.previewFrame : nil
-                    )
-                    .onDrop(
-                        of: [UTType.text],
-                        delegate: WorkspaceSurfaceDropDelegate(
-                            resolveTarget: { location in
-                                workspaceController.dropTarget(at: location)
-                            },
-                            currentTarget: { activeDropTarget },
-                            setActiveTarget: { target in
-                                withAnimation(dropPreviewAnimation) {
-                                    activeDropTarget = target
-                                }
-                            },
-                            onPerformDrop: { providers, target in
-                                handleExternalDrop(providers: providers, into: workspace.id, target: target)
-                            }
-                        )
-                    )
-                }
-            }
-            .onChange(of: dragBridge.dragKind) { _, newValue in
-                if newValue == nil {
-                    withAnimation(dropPreviewAnimation) {
-                        activeDropTarget = nil
-                    }
-                }
             }
         } else {
             emptyPane
@@ -93,12 +76,14 @@ struct PandoraWorkspaceView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func handleExternalDrop(
+    private func handleWorkspaceDrop(
         providers: [NSItemProvider],
         into workspaceID: String,
-        target: WorkspaceDropTarget
+        paneID: UUID,
+        zone: DropZone
     ) -> Bool {
         guard let provider = providers.first else { return false }
+        let validWorkspaceIDs = Set(store.workspaceEntries.map(\.id))
         provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
             let value: String?
             switch item {
@@ -114,20 +99,30 @@ struct PandoraWorkspaceView: View {
 
             guard let sourceID = value?.trimmingCharacters(in: .whitespacesAndNewlines),
                   sourceID.isEmpty == false,
-                  store.workspaceEntries.contains(where: { $0.id == sourceID }) else {
+                  validWorkspaceIDs.contains(sourceID) else {
+                DispatchQueue.main.async {
+                    WorkspaceDragBridge.shared.endDragging()
+                }
                 return
             }
 
-            DispatchQueue.main.async {
-                withAnimation(dropPreviewAnimation) {
-                    activeDropTarget = nil
+            let intent: WorkspaceDropIntent = {
+                switch zone {
+                case .center: return .tabs
+                case .left: return .splitLeft
+                case .right: return .splitRight
+                case .top: return .splitUp
+                case .bottom: return .splitDown
                 }
-                dragBridge.endDragging()
+            }()
+
+            DispatchQueue.main.async {
+                WorkspaceDragBridge.shared.endDragging()
                 store.mergeWorkspace(
                     sourceID: sourceID,
                     into: workspaceID,
-                    targetPaneID: target.paneID,
-                    intent: target.intent
+                    targetPaneID: paneID,
+                    intent: intent
                 )
             }
         }
@@ -176,15 +171,18 @@ private struct EmptyWorkspaceDropDelegate: DropDelegate {
     let onActivateWorkspace: (String) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
+        WorkspaceDragBridge.shared.isWorkspaceRowDrag &&
         info.hasItemsConforming(to: [UTType.text])
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        guard validateDrop(info: info) else { return nil }
+        return DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let provider = info.itemProviders(for: [UTType.text]).first else {
+        guard WorkspaceDragBridge.shared.isWorkspaceRowDrag,
+              let provider = info.itemProviders(for: [UTType.text]).first else {
             WorkspaceDragBridge.shared.endDragging()
             return false
         }
@@ -218,95 +216,5 @@ private struct EmptyWorkspaceDropDelegate: DropDelegate {
         }
 
         return true
-    }
-}
-
-private struct DynamicWorkspaceDropPreview: View {
-    let previewFrame: CGRect?
-    @State private var renderedFrame: CGRect = .zero
-    @State private var isVisible = false
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color.accentColor.opacity(0.25))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.accentColor, lineWidth: 2)
-            }
-            .frame(width: renderedFrame.width, height: renderedFrame.height)
-            .position(x: renderedFrame.midX, y: renderedFrame.midY)
-            .opacity(isVisible ? 1 : 0)
-        .allowsHitTesting(false)
-        .onAppear {
-            if let previewFrame {
-                renderedFrame = previewFrame
-                isVisible = true
-            }
-        }
-        .onChange(of: previewFrame) { oldValue, newValue in
-            switch (oldValue, newValue) {
-            case (.none, .some(let frame)):
-                renderedFrame = frame
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    isVisible = true
-                }
-            case (.some, .some(let frame)):
-                withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
-                    renderedFrame = frame
-                }
-            case (.some, .none):
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    isVisible = false
-                }
-            case (.none, .none):
-                break
-            }
-        }
-    }
-}
-
-private struct WorkspaceSurfaceDropDelegate: DropDelegate {
-    let resolveTarget: (CGPoint) -> WorkspaceDropTarget?
-    let currentTarget: () -> WorkspaceDropTarget?
-    let setActiveTarget: (WorkspaceDropTarget?) -> Void
-    let onPerformDrop: ([NSItemProvider], WorkspaceDropTarget) -> Bool
-
-    func performDrop(info: DropInfo) -> Bool {
-        let target = resolveTarget(info.location) ?? currentTarget()
-        guard let target else {
-            // Drop rejected — clean up here since handleExternalDrop won't run.
-            DispatchQueue.main.async {
-                setActiveTarget(nil)
-                WorkspaceDragBridge.shared.endDragging()
-            }
-            return false
-        }
-        // Drop accepted — handleExternalDrop owns cleanup (endDragging + mergeWorkspace).
-        return onPerformDrop(info.itemProviders(for: [UTType.text]), target)
-    }
-
-    func dropEntered(info: DropInfo) {
-        DispatchQueue.main.async {
-            WorkspaceDragBridge.shared.markEnteredMainWorkspace()
-            setActiveTarget(resolveTarget(info.location))
-        }
-    }
-
-    func dropExited(info: DropInfo) {
-        DispatchQueue.main.async {
-            setActiveTarget(nil)
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DispatchQueue.main.async {
-            WorkspaceDragBridge.shared.markEnteredMainWorkspace()
-            setActiveTarget(resolveTarget(info.location))
-        }
-        return DropProposal(operation: .move)
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [UTType.text])
     }
 }

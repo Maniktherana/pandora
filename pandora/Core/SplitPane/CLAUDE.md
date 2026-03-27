@@ -33,19 +33,17 @@ SplitPaneView
 | `Models/SplitNode.swift` | Recursive tree enum. `findPane`, `allPaneIds`, `computePaneBounds`. |
 | `Models/PaneState.swift` | `@Observable` per-pane state: tabs array, selectedTabId. |
 | `Models/SplitState.swift` | `@Observable` split node: orientation, two children, divider position (0–1). |
-| `Models/TabItem.swift` | Internal tab struct. Also defines `TabTransferData` for cross-pane drag payloads (Codable + Transferable). |
-| `Views/PaneContainerView.swift` | Drop zone logic. `UnifiedPaneDropDelegate` handles center (tab move) vs edge (split) drops. Guards on `WorkspaceDragBridge.isContentTabDrag` — workspace row drags are rejected. |
-| `Views/TabBarView.swift` | Tab strip. Calls `WorkspaceDragBridge.shared.beginTabDragging()` on drag start so other drop zones can scope correctly. `TabDropDelegate` handles same-pane reorder. |
+| `Models/TabItem.swift` | Internal tab struct. Also defines `TabTransferData` for cross-pane drag payloads (Codable, JSON-encoded into `NSItemProvider`). |
+| `Views/PaneContainerView.swift` | Drop zone logic. `UnifiedPaneDropDelegate` handles center (tab move) vs edge (split) drops, and can also route external `.text` workspace-row drops through `ExternalPaneDropHandler`. |
+| `Views/TabBarView.swift` | Tab strip. Drag encodes `TabTransferData` as `UTType.json`. `TabDropDelegate` handles same-pane reorder. |
 | `Views/SplitContainerView.swift` | NSSplitView bridge. Manages animation on split creation (pane enters from edge). Coordinator distinguishes user drags from programmatic updates. |
 
 ## Drag-drop scoping
 
-Two drag kinds exist in the app, distinguished via `WorkspaceDragBridge.dragKind`:
-
-- **`.contentTab`** — a SplitPane tab being dragged. Set by `TabBarView.createItemProvider`. Accepted by: pane drop zones (move/split), sidebar shell (detach to sidebar).
-- **`.workspaceRow`** — a sidebar workspace row being reordered. Set by `WorkspaceSidebarRowView.onDrag`. Accepted by: sidebar kanban reorder slots, main workspace surface (merge).
-
-`validateDrop` in both `UnifiedPaneDropDelegate` and `TabDropDelegate` checks `isContentTabDrag` — workspace row drags never activate pane drop zones.
+- **Tab moves / splits / sidebar detach:** payload is `UTType.json` containing encoded `TabTransferData`. Drop delegates must gate on `WorkspaceDragBridge.isContentTabDrag`, because `public.json` conforms to text-like types and should not be treated as a sidebar row drag.
+- **Sidebar workspace row merge into visible workspace:** payload is plain `UTType.text` workspace id + `WorkspaceDragBridge.beginDragging(workspaceID:)`. Drop delegates must gate on `WorkspaceDragBridge.isWorkspaceRowDrag` so text-only targets ignore tab drags.
+- **Pane routing:** `PaneContainerView` exposes one unified `.onDrop` that accepts both `UTType.json` and injected external types. It tries tab JSON first, then falls back to `ExternalPaneDropHandler` for workspace-row drops.
+- **Pane ID translation:** SplitPane drop callbacks hand back Bonsplit `PaneID`s. Pandora must translate those through `PandoraWorkspaceController.workspacePaneID(for:)` before calling `WorkspaceStore.mergeWorkspace`, which operates on workspace-layout pane UUIDs.
 
 ## Drop zones (PaneContainerView)
 
