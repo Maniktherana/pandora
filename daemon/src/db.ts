@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -10,7 +10,7 @@ function pandoraDirectory(): string {
   return process.env.PANDORA_HOME || join(homedir(), ".pandora");
 }
 
-function defaultDatabasePath(): string {
+function legacyGlobalDatabasePath(): string {
   return join(pandoraDirectory(), "pandora.db");
 }
 
@@ -37,10 +37,38 @@ function decodeEnv(raw: string | null): Record<string, string> {
   }
 }
 
-export function openDatabase(options?: { dbPath?: string }): Database {
-  const dbPath = options?.dbPath ?? defaultDatabasePath();
+function defaultRuntimeDatabasePath(workspacePath: string): string {
+  return join(workspacePath, ".pandora", "runtime.db");
+}
+
+function removeDatabaseFiles(dbPath: string): void {
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (existsSync(candidate)) {
+      rmSync(candidate, { force: true });
+    }
+  }
+}
+
+function resetLegacyGlobalDatabase(): void {
+  removeDatabaseFiles(legacyGlobalDatabasePath());
+}
+
+function databaseUserVersion(db: Database): number {
+  const row = db.query("PRAGMA user_version;").get() as { user_version?: number } | null;
+  return row?.user_version ?? 0;
+}
+
+export function openDatabase(options?: { dbPath?: string; workspacePath?: string; defaultCwd?: string }): Database {
+  const dbPath = options?.dbPath ?? defaultRuntimeDatabasePath(options?.workspacePath ?? pandoraDirectory());
   ensureDirectory(dirname(dbPath));
-  const db = new Database(dbPath);
+  resetLegacyGlobalDatabase();
+  let db = new Database(dbPath);
+  if (databaseUserVersion(db) < 2) {
+    db.close();
+    removeDatabaseFiles(dbPath);
+    ensureDirectory(dirname(dbPath));
+    db = new Database(dbPath);
+  }
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS slot_definitions (
@@ -69,13 +97,14 @@ export function openDatabase(options?: { dbPath?: string }): Database {
       FOREIGN KEY(slot_id) REFERENCES slot_definitions(id) ON DELETE CASCADE
     );
   `);
-  if (options?.dbPath === undefined) {
-    ensureSeedData(db);
+  db.exec("PRAGMA user_version = 2;");
+  if (options?.dbPath === undefined || options?.workspacePath !== undefined || options?.defaultCwd !== undefined) {
+    ensureSeedData(db, options?.defaultCwd ?? options?.workspacePath ?? homedir());
   }
   return db;
 }
 
-function ensureSeedData(db: Database): void {
+function ensureSeedData(db: Database, defaultCwd: string): void {
   const slotCount = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as { count: number };
   if (slotCount.count > 0) {
     return;
@@ -108,7 +137,7 @@ function ensureSeedData(db: Database): void {
     "terminal",
     "Local Terminal",
     "exec ${SHELL:-/bin/zsh} -i",
-    homedir(),
+    defaultCwd,
     null,
     "{}",
     "manual",

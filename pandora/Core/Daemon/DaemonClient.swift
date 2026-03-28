@@ -25,7 +25,7 @@ final class DaemonClient: ObservableObject {
 
     var onOutputChunk: ((String, Data) -> Void)?
 
-    private let projectPath: String
+    private let workspacePath: String
     private let socketPath: String
     private var connection: NWConnection?
     private var connectionTimeoutTask: Task<Void, Never>?
@@ -37,12 +37,16 @@ final class DaemonClient: ObservableObject {
     private var hasReceivedSessionSnapshot = false
     private let debugLogStore = DebugLogStore.shared
 
-    init(projectPath: String) {
-        self.projectPath = (projectPath as NSString).standardizingPath
-        let digest = SHA256.hash(data: Data(self.projectPath.utf8))
+    init(workspacePath: String) {
+        self.workspacePath = (workspacePath as NSString).standardizingPath
+        let digest = SHA256.hash(data: Data(self.workspacePath.utf8))
         let hashPrefix = digest.compactMap { String(format: "%02x", $0) }.joined().prefix(8)
         self.socketPath = "/tmp/pandora-\(hashPrefix).sock"
         debugLogStore.append("Socket path resolved to \(socketPath)", source: "client")
+    }
+
+    convenience init(projectPath: String) {
+        self.init(workspacePath: projectPath)
     }
 
     func connect() {
