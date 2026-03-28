@@ -520,6 +520,31 @@ class GhosttyNSView: NSView, NSTextInputClient {
         refreshSurfaceLayout(forceRefresh: true)
     }
 
+    private func enforceLayerMetrics(bounds contentBounds: NSRect, scaleFactor: CGFloat) {
+        guard let rootLayer = layer else { return }
+
+        rootLayer.frame = contentBounds
+        rootLayer.bounds = CGRect(origin: .zero, size: contentBounds.size)
+        rootLayer.contentsScale = scaleFactor
+
+        if let metalLayer = rootLayer as? CAMetalLayer {
+            metalLayer.drawableSize = CGSize(
+                width: contentBounds.width * scaleFactor,
+                height: contentBounds.height * scaleFactor
+            )
+        }
+
+        for sublayer in rootLayer.sublayers ?? [] {
+            if sublayer === scrollbar.layer {
+                continue
+            }
+
+            sublayer.frame = rootLayer.bounds
+            sublayer.bounds = CGRect(origin: .zero, size: rootLayer.bounds.size)
+            sublayer.contentsScale = scaleFactor
+        }
+    }
+
     private func refreshSurfaceLayout(forceRefresh: Bool = false) {
         let contentBounds = terminalContentBounds()
         let backingSize = convertToBacking(contentBounds).size
@@ -534,11 +559,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             scaleFactor: scaleFactor
         )
 
-        if let metalLayer = layer as? CAMetalLayer {
-            metalLayer.frame = contentBounds
-            metalLayer.contentsScale = scaleFactor
-            metalLayer.drawableSize = backingSize
-        }
+        enforceLayerMetrics(bounds: contentBounds, scaleFactor: scaleFactor)
         guard let surface = surface,
               widthPx > 0,
               heightPx > 0
@@ -553,6 +574,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
         if forceRefresh || lastViewportSignature == signature {
             ghostty_surface_refresh(surface)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.enforceLayerMetrics(bounds: self.terminalContentBounds(), scaleFactor: self.currentScaleFactor())
+            }
         }
     }
 
