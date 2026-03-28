@@ -8,17 +8,27 @@
 import AppKit
 import SwiftUI
 
+final class TitlebarHostingView<Content: View>: NSHostingView<Content> {
+    override var safeAreaInsets: NSEdgeInsets {
+        NSEdgeInsetsZero
+    }
+}
+
 class ProjectWindow: NSWindowController {
 
     convenience init(projectPath: String) {
         let initialFrame = Self.initialFrame()
         let window = NSWindow(
             contentRect: initialFrame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.tabbingMode = .disallowed
         window.title = "Pandora"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 1200, height: 800)
         window.setFrame(initialFrame, display: false)
 
@@ -26,7 +36,7 @@ class ProjectWindow: NSWindowController {
 
         // bridge into SwiftUI for the actual UI
         let contentView = ContentView(projectPath: projectPath)
-        window.contentView = NSHostingView(rootView: contentView)
+        window.contentView = TitlebarHostingView(rootView: contentView)
     }
 
     private static func initialFrame() -> NSRect {
