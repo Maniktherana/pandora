@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #0a0a0a;
+  --color-card-foreground: #fafafa;
+  --color-popover: #0a0a0a;
+  --color-popover-foreground: #fafafa;
+  --color-primary: #fafafa;
+  --color-primary-foreground: #171717;
+  --color-secondary: #262626;
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #262626;
+  --color-muted-foreground: #a3a3a3;
+  --color-accent: #262626;
+  --color-accent-foreground: #fafafa;
+  --color-destructive: #7f1d1d;
+  --color-destructive-foreground: #fafafa;
+  --color-border: #262626;
+  --color-input: #262626;
+  --color-ring: #d4d4d4;
+  --radius: 0.5rem;
+  --color-sidebar-background: #0a0a0a;
+  --color-sidebar-foreground: #fafafa;
+  --color-sidebar-primary: #fafafa;
+  --color-sidebar-primary-foreground: #171717;
+  --color-sidebar-accent: #262626;
+  --color-sidebar-accent-foreground: #fafafa;
+  --color-sidebar-border: #262626;
+  --color-sidebar-ring: #d4d4d4;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+/* Tauri window drag region */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+/* Resizable panel handles */
+[data-panel-group-direction="horizontal"] > [data-resize-handle-active] {
+  background-color: #3b82f6 !important;
+}
+[data-panel-group-direction="vertical"] > [data-resize-handle-active] {
+  background-color: #3b82f6 !important;
+}
