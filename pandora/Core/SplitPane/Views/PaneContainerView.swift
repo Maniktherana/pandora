@@ -63,7 +63,6 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab bar
             TabBarView(
                 pane: pane,
                 isFocused: isFocused,

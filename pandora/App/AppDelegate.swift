@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // suppress the default empty window AppKit creates
         NSApp.setActivationPolicy(.regular)
+        NSWindow.allowsAutomaticWindowTabbing = false
         debugLogStore.append("Application did finish launching", source: "app")
 
         // open last project or show project picker
