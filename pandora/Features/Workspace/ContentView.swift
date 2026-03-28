@@ -9,7 +9,11 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    private let sidebarWidth: CGFloat = 320
+    private let titlebarControlSize: CGFloat = 24
+
     let projectPath: String
+    @ObservedObject var chromeMetrics: WindowChromeMetrics
     @StateObject private var daemonClient: DaemonClient
     @StateObject private var workspaceStore: WorkspaceStore
     @StateObject private var surfaceRegistry: SurfaceRegistry
@@ -17,9 +21,12 @@ struct ContentView: View {
     @StateObject private var debugLogStore = DebugLogStore.shared
     @State private var keyMonitor: Any?
     @State private var isShowingDiagnostics = false
+    @State private var isPresentingAddTerminal = false
+    @State private var isSidebarHidden = false
 
-    init(projectPath: String) {
+    init(projectPath: String, chromeMetrics: WindowChromeMetrics) {
         self.projectPath = projectPath
+        self.chromeMetrics = chromeMetrics
 
         let daemonClient = DaemonClient(projectPath: projectPath)
         _daemonClient = StateObject(wrappedValue: daemonClient)
@@ -29,12 +36,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HSplitView {
-                SidebarShellView(store: workspaceStore, workspaceController: workspaceController)
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
-
-                mainArea
-            }
+            workspaceChromeLayout
 
             Divider()
 
@@ -99,6 +101,123 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingDiagnostics) {
             diagnosticsSheet
+        }
+        .sheet(isPresented: $isPresentingAddTerminal) {
+            AddTerminalSheet(store: workspaceStore)
+        }
+    }
+
+    @ViewBuilder
+    private var workspaceChromeLayout: some View {
+        if isSidebarHidden {
+            mainColumn
+        } else {
+            HStack(spacing: 0) {
+                sidebarColumn
+                    .frame(width: sidebarWidth)
+
+                Divider()
+
+                mainColumn
+            }
+        }
+    }
+
+    private var sidebarColumn: some View {
+        VStack(spacing: 0) {
+            sidebarTopInset
+            SidebarShellView(store: workspaceStore, workspaceController: workspaceController)
+        }
+        .frame(maxHeight: .infinity)
+        .background(VisualEffectBackdrop(material: .sidebar, blendingMode: .behindWindow))
+    }
+
+    private var mainColumn: some View {
+        VStack(spacing: 0) {
+            mainTopInset
+            mainArea
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var sidebarTopInset: some View {
+        topInsetStrip(material: .sidebar) {
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+
+                chromeButton(systemName: "plus") {
+                    isPresentingAddTerminal = true
+                }
+
+                chromeButton(systemName: "sidebar.left") {
+                    toggleSidebar()
+                }
+            }
+            .padding(.leading, chromeMetrics.leadingClearance)
+            .padding(.trailing, 12)
+        }
+    }
+
+    private var mainTopInset: some View {
+        topInsetStrip(material: .titlebar) {
+            HStack(spacing: 8) {
+                if isSidebarHidden {
+                    chromeButton(systemName: "sidebar.left") {
+                        toggleSidebar()
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, isSidebarHidden ? chromeMetrics.leadingClearance : 12)
+            .padding(.trailing, 12)
+        }
+    }
+
+    private func topInsetStrip<StripContent: View>(
+        material: NSVisualEffectView.Material,
+        @ViewBuilder content: () -> StripContent
+    ) -> some View {
+        ZStack {
+            VisualEffectBackdrop(material: material, blendingMode: .behindWindow)
+            WindowDragRegionView()
+
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, max(0, chromeMetrics.trafficLightCenterYFromTop - (titlebarControlSize / 2)))
+        }
+        .frame(height: chromeMetrics.rowHeight)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+        }
+    }
+
+    private func chromeButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: titlebarControlSize, height: titlebarControlSize)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
+    private func toggleSidebar() {
+        isSidebarHidden.toggle()
+        if isSidebarHidden {
+            if workspaceStore.visibleWorkspace != nil {
+                workspaceStore.focusVisibleWorkspace()
+            }
+        } else {
+            workspaceStore.activateSidebarNavigation()
+            DispatchQueue.main.async {
+                SidebarFocusBridge.shared.focus()
+            }
         }
     }
 

@@ -15,6 +15,8 @@ final class TitlebarHostingView<Content: View>: NSHostingView<Content> {
 }
 
 class ProjectWindow: NSWindowController {
+    private let chromeMetrics = WindowChromeMetrics()
+    private var chromeObservers: [NSObjectProtocol] = []
 
     convenience init(projectPath: String) {
         let initialFrame = Self.initialFrame()
@@ -28,6 +30,7 @@ class ProjectWindow: NSWindowController {
         window.title = "Pandora"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .line
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 1200, height: 800)
         window.setFrame(initialFrame, display: false)
@@ -35,8 +38,56 @@ class ProjectWindow: NSWindowController {
         self.init(window: window)
 
         // bridge into SwiftUI for the actual UI
-        let contentView = ContentView(projectPath: projectPath)
+        let contentView = ContentView(projectPath: projectPath, chromeMetrics: chromeMetrics)
         window.contentView = TitlebarHostingView(rootView: contentView)
+        installChromeMetrics(for: window)
+    }
+
+    deinit {
+        for observer in chromeObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func installChromeMetrics(for window: NSWindow) {
+        let center = NotificationCenter.default
+        let names: [Notification.Name] = [
+            NSWindow.didResizeNotification,
+            NSWindow.didEndLiveResizeNotification,
+            NSWindow.didEnterFullScreenNotification,
+            NSWindow.didExitFullScreenNotification,
+            NSWindow.didBecomeKeyNotification
+        ]
+
+        chromeObservers = names.map { name in
+            center.addObserver(forName: name, object: window, queue: .main) { [weak self, weak window] _ in
+                guard let self, let window else { return }
+                self.updateChromeMetrics(for: window)
+            }
+        }
+
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.updateChromeMetrics(for: window)
+        }
+    }
+
+    private func updateChromeMetrics(for window: NSWindow) {
+        guard let closeButton = window.standardWindowButton(.closeButton),
+              let zoomButton = window.standardWindowButton(.zoomButton),
+              let buttonContainer = closeButton.superview else {
+            return
+        }
+
+        let closeFrame = closeButton.frame
+        let zoomFrame = zoomButton.frame
+        let centerYFromTop = buttonContainer.bounds.height - closeFrame.midY
+        let leadingClearance = zoomFrame.maxX + 14
+        let rowHeight = max(32, ceil(centerYFromTop * 2))
+
+        chromeMetrics.trafficLightCenterYFromTop = centerYFromTop
+        chromeMetrics.leadingClearance = leadingClearance
+        chromeMetrics.rowHeight = rowHeight
     }
 
     private static func initialFrame() -> NSRect {
