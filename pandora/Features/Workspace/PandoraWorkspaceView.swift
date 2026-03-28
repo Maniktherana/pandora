@@ -38,13 +38,13 @@ struct PandoraWorkspaceView: View {
                     )
                 }
             ))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
             .overlay(alignment: .top) {
                 Rectangle()
                     .fill(store.keyboardNavigationArea == .workspace ? Color.accentColor : Color.clear)
                     .frame(height: 2)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         } else {
             emptyPane
                 .onDrop(
