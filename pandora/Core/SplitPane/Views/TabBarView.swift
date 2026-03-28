@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct TabBarView: View {
     @Environment(SplitPaneController.self) private var controller
     @Environment(SplitViewController.self) private var splitViewController
+    @Environment(\.tabBarActionHandler) private var tabBarActionHandler
     
     @Bindable var pane: PaneState
     let isFocused: Bool
@@ -26,6 +27,10 @@ struct TabBarView: View {
     /// Whether this tab bar should show full saturation (focused or drag source)
     private var shouldShowFullSaturation: Bool {
         isFocused || splitViewController.dragSourcePaneId == pane.id
+    }
+
+    private var shouldShowTrailingControls: Bool {
+        showSplitButtons || tabBarActionHandler.onAddTab != nil
     }
 
     var body: some View {
@@ -83,8 +88,7 @@ struct TabBarView: View {
 
             Spacer()
 
-            // Split buttons
-            if showSplitButtons {
+            if shouldShowTrailingControls {
                 splitButtons
             }
         }
@@ -195,25 +199,37 @@ struct TabBarView: View {
     @ViewBuilder
     private var splitButtons: some View {
         HStack(spacing: 4) {
-            Button {
-                // 120fps animation handled by SplitAnimator
-                controller.splitPane(pane.id, orientation: .horizontal)
-            } label: {
-                Image(systemName: "square.split.2x1")
-                    .font(.system(size: 12))
+            if let onAddTab = tabBarActionHandler.onAddTab {
+                Button {
+                    controller.focusPane(pane.id)
+                    onAddTab(pane.id)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help("New Terminal")
             }
-            .buttonStyle(.borderless)
-            .help("Split Right")
 
-            Button {
-                // 120fps animation handled by SplitAnimator
-                controller.splitPane(pane.id, orientation: .vertical)
-            } label: {
-                Image(systemName: "square.split.1x2")
-                    .font(.system(size: 12))
+            if showSplitButtons {
+                Button {
+                    controller.splitPane(pane.id, orientation: .horizontal)
+                } label: {
+                    Image(systemName: "square.split.2x1")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.borderless)
+                .help("Split Right")
+
+                Button {
+                    controller.splitPane(pane.id, orientation: .vertical)
+                } label: {
+                    Image(systemName: "square.split.1x2")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.borderless)
+                .help("Split Down")
             }
-            .buttonStyle(.borderless)
-            .help("Split Down")
         }
         .padding(.trailing, 8)
     }

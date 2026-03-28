@@ -1,10 +1,3 @@
-//
-//  ProjectWindow.swift
-//  pandora
-//
-//  Created by Manik Rana on 24/03/26.
-//
-
 import AppKit
 import SwiftUI
 
@@ -18,7 +11,7 @@ class ProjectWindow: NSWindowController {
     private let chromeMetrics = WindowChromeMetrics()
     private var chromeObservers: [NSObjectProtocol] = []
 
-    convenience init(projectPath: String) {
+    convenience init() {
         let initialFrame = Self.initialFrame()
         let window = NSWindow(
             contentRect: initialFrame,
@@ -37,8 +30,7 @@ class ProjectWindow: NSWindowController {
 
         self.init(window: window)
 
-        // bridge into SwiftUI for the actual UI
-        let contentView = ContentView(projectPath: projectPath, chromeMetrics: chromeMetrics)
+        let contentView = ContentView(chromeMetrics: chromeMetrics)
         window.contentView = TitlebarHostingView(rootView: contentView)
         installChromeMetrics(for: window)
     }

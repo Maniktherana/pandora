@@ -19,16 +19,20 @@ import { createMessageReader, writeMessage } from "./protocol";
 import type { ClientMessage, DaemonMessage, SessionState, SlotState } from "./types";
 
 export class DaemonServer {
-  private readonly db = openDatabase();
+  private readonly db;
   private readonly clients = new Set<net.Socket>();
   private readonly processManager: ProcessManager;
   private readonly socketPath: string;
   private server: net.Server | null = null;
 
-  constructor(projectPath: string) {
-    const normalizedPath = path.resolve(projectPath);
+  constructor(workspacePath: string, defaultCwd?: string) {
+    const normalizedPath = path.resolve(workspacePath);
     const hash = createHash("sha256").update(normalizedPath).digest("hex").slice(0, 8);
     this.socketPath = `/tmp/pandora-${hash}.sock`;
+    this.db = openDatabase({
+      workspacePath: normalizedPath,
+      defaultCwd: defaultCwd ?? normalizedPath
+    });
 
     const slotDefinitions = listSlotDefinitions(this.db);
     const sessionDefinitions = listSessionDefinitions(this.db);

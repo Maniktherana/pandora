@@ -1,13 +1,14 @@
 import { DaemonServer } from "./daemon";
 
 async function main(): Promise<void> {
-  const projectPath = process.argv[2];
-  if (!projectPath) {
-    console.error("Usage: pandorad <project-path>");
+  const workspacePath = process.argv[2];
+  if (!workspacePath) {
+    console.error("Usage: pandorad <workspace-path> [default-cwd]");
     process.exit(1);
   }
+  const defaultCwd = process.argv[3];
 
-  const server = new DaemonServer(projectPath);
+  const server = new DaemonServer(workspacePath, defaultCwd);
   await server.start();
 
   let shuttingDown = false;

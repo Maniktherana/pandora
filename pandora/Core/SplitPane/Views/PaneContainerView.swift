@@ -10,14 +10,27 @@ struct ExternalPaneDropHandler {
     let onDrop: (PaneID, DropZone, [NSItemProvider]) -> Bool
 }
 
+struct TabBarActionHandler {
+    let onAddTab: ((PaneID) -> Void)?
+}
+
 private struct ExternalPaneDropHandlerKey: EnvironmentKey {
     static let defaultValue: ExternalPaneDropHandler? = nil
+}
+
+private struct TabBarActionHandlerKey: EnvironmentKey {
+    static let defaultValue = TabBarActionHandler(onAddTab: nil)
 }
 
 extension EnvironmentValues {
     var externalPaneDropHandler: ExternalPaneDropHandler? {
         get { self[ExternalPaneDropHandlerKey.self] }
         set { self[ExternalPaneDropHandlerKey.self] = newValue }
+    }
+
+    var tabBarActionHandler: TabBarActionHandler {
+        get { self[TabBarActionHandlerKey.self] }
+        set { self[TabBarActionHandlerKey.self] = newValue }
     }
 }
 
