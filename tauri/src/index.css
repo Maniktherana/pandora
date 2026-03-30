@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "@xterm/xterm/css/xterm.css";
 
 @theme {
   --color-background: #0a0a0a;
@@ -60,6 +59,15 @@ body {
 /* Tauri window drag region */
 [data-tauri-drag-region] {
   -webkit-app-region: drag;
+}
+
+/* Interactive controls inside drag regions must opt out or clicks can be swallowed. */
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] textarea,
+[data-tauri-drag-region] select,
+[data-tauri-drag-region] a {
+  -webkit-app-region: no-drag;
 }
 
 /* Resizable panel handles */

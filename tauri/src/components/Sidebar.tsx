@@ -1,56 +1,179 @@
-import { Search, Plus, ChevronLeft } from "lucide-react";
+import { Search, Plus, ChevronLeft, ChevronDown, ChevronRight, FolderPlus, RotateCcw, Trash2 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { cn } from "@/lib/utils";
-import type { SlotState, AggregateStatus } from "@/lib/types";
+import type { ProjectRecord, WorkspaceRecord, WorkspaceStatus } from "@/lib/types";
+import { open } from "@tauri-apps/plugin-dialog";
 
-function StatusDot({ status }: { status: AggregateStatus }) {
-  const colors: Record<AggregateStatus, string> = {
-    running: "bg-green-500",
-    restarting: "bg-yellow-500",
-    crashed: "bg-red-500",
-    stopped: "bg-neutral-500",
+function StatusDot({ status }: { status: WorkspaceStatus }) {
+  const colors: Record<WorkspaceStatus, string> = {
+    ready: "bg-green-500",
+    creating: "bg-yellow-500 animate-pulse",
+    failed: "bg-red-500",
+    deleting: "bg-neutral-500",
   };
   return <div className={cn("w-2 h-2 rounded-full shrink-0", colors[status])} />;
 }
 
-interface SidebarProps {
-  onCollapse: () => void;
-  onNewTerminal: () => void;
-}
-
-export default function Sidebar({ onCollapse, onNewTerminal }: SidebarProps) {
+function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
   const {
-    filteredWorkspaces,
-    selectedSidebarWorkspaceID,
+    selectedWorkspaceID,
     selectWorkspace,
-    searchText,
-    setSearchText,
-    slotsByID,
-    navigationArea,
+    retryWorkspace,
+    removeWorkspace,
     setNavigationArea,
+    navigationArea,
   } = useWorkspaceStore();
 
-  const workspaces = filteredWorkspaces();
-  const slotsMap = slotsByID();
+  const isSelected = workspace.id === selectedWorkspaceID;
+  const isActive = navigationArea === "sidebar" && isSelected;
 
-  function getWorkspaceSlots(workspaceId: string) {
-    const workspace = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId);
-    if (!workspace) return [];
-    const slotIDs = getAllSlotIDs(workspace.root);
-    return slotIDs.map((id) => slotsMap[id]).filter(Boolean) as SlotState[];
-  }
+  return (
+    <div className="group">
+      <button
+        onClick={() => {
+          selectWorkspace(workspace);
+          setNavigationArea("sidebar");
+        }}
+        onDoubleClick={() => {
+          selectWorkspace(workspace);
+          setNavigationArea("workspace");
+        }}
+        className={cn(
+          "w-full text-left px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-2",
+          isActive
+            ? "bg-blue-600/20 border border-blue-500/30"
+            : isSelected
+            ? "bg-neutral-800/60 border border-transparent"
+            : "hover:bg-neutral-800/40 border border-transparent"
+        )}
+      >
+        <StatusDot status={workspace.status} />
+        <span className="text-[13px] text-neutral-300 truncate flex-1">{workspace.name}</span>
+        {workspace.status === "failed" && (
+          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void retryWorkspace(workspace.id);
+              }}
+              className="p-0.5 rounded hover:bg-neutral-700"
+              title="Retry"
+            >
+              <RotateCcw className="w-3 h-3 text-neutral-400" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void removeWorkspace(workspace.id);
+              }}
+              className="p-0.5 rounded hover:bg-neutral-700"
+              title="Remove"
+            >
+              <Trash2 className="w-3 h-3 text-neutral-400" />
+            </button>
+          </div>
+        )}
+      </button>
+      {workspace.status === "failed" && workspace.failureMessage && isSelected && (
+        <div className="text-[11px] text-red-400/80 px-7 pb-1 truncate">
+          {workspace.failureMessage}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  function getAllSlotIDs(node: any): string[] {
-    if (node.type === "leaf") return node.slotIDs;
-    return node.children.flatMap(getAllSlotIDs);
-  }
+function ProjectRow({ project }: { project: ProjectRecord }) {
+  const {
+    workspacesForProject,
+    toggleProject,
+    createWorkspace,
+    selectedProjectID,
+    selectProject,
+  } = useWorkspaceStore();
 
-  function getAggregateStatus(slots: SlotState[]): AggregateStatus {
-    if (slots.some((s) => s.aggregateStatus === "crashed")) return "crashed";
-    if (slots.some((s) => s.aggregateStatus === "restarting")) return "restarting";
-    if (slots.some((s) => s.aggregateStatus === "running")) return "running";
-    return "stopped";
-  }
+  const workspaces = workspacesForProject(project.id);
+  const isSelected = project.id === selectedProjectID;
+
+  return (
+    <div className="mb-1">
+      {/* Project header */}
+      <div
+        className={cn(
+          "flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer group",
+          isSelected ? "bg-neutral-800/40" : "hover:bg-neutral-800/30"
+        )}
+        onClick={() => {
+          selectProject(project.id);
+          void toggleProject(project.id);
+        }}
+      >
+        {project.isExpanded ? (
+          <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+        )}
+        <div
+          className="w-5 h-5 rounded bg-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-300 shrink-0"
+        >
+          {project.displayName.charAt(0).toUpperCase()}
+        </div>
+        <span className="text-sm font-medium text-neutral-200 truncate flex-1">
+          {project.displayName}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            void createWorkspace(project.id);
+          }}
+          className="p-0.5 rounded hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="New Workspace"
+        >
+          <Plus className="w-3.5 h-3.5 text-neutral-400" />
+        </button>
+      </div>
+
+      {/* Workspace children */}
+      {project.isExpanded && (
+        <div className="ml-4 mt-0.5 space-y-0.5">
+          {workspaces.map((ws) => (
+            <WorkspaceRow key={ws.id} workspace={ws} />
+          ))}
+          {workspaces.length === 0 && (
+            <div className="text-[11px] text-neutral-600 px-2.5 py-1">
+              No workspaces yet
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SidebarProps {
+  onCollapse: () => void;
+}
+
+export default function Sidebar({ onCollapse }: SidebarProps) {
+  const {
+    filteredProjects,
+    searchText,
+    setSearchText,
+    addProject,
+  } = useWorkspaceStore();
+
+  const projects = filteredProjects();
+
+  const handleAddProject = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Add Project — Choose a folder inside a Git repository",
+    });
+    if (selected) {
+      await addProject(selected);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-neutral-900/40 backdrop-blur-2xl border-r border-white/5">
@@ -67,11 +190,11 @@ export default function Sidebar({ onCollapse, onNewTerminal }: SidebarProps) {
           />
         </div>
         <button
-          onClick={onNewTerminal}
+          onClick={() => void handleAddProject()}
           className="p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
-          title="New Terminal"
+          title="Add Project"
         >
-          <Plus className="w-3.5 h-3.5" />
+          <FolderPlus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={onCollapse}
@@ -82,55 +205,27 @@ export default function Sidebar({ onCollapse, onNewTerminal }: SidebarProps) {
         </button>
       </div>
 
-      {/* Workspace list */}
+      {/* Project/workspace list */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1">
-        {workspaces.map((workspace) => {
-          const slots = getWorkspaceSlots(workspace.id);
-          const status = getAggregateStatus(slots);
-          const isSelected = workspace.id === selectedSidebarWorkspaceID;
-          const isActive = navigationArea === "sidebar" && isSelected;
+        {projects.map((project) => (
+          <ProjectRow key={project.id} project={project} />
+        ))}
 
-          return (
-            <button
-              key={workspace.id}
-              onClick={() => {
-                selectWorkspace(workspace.id);
-                setNavigationArea("sidebar");
-              }}
-              onDoubleClick={() => {
-                selectWorkspace(workspace.id);
-                setNavigationArea("workspace");
-              }}
-              className={cn(
-                "w-full text-left px-2.5 py-2 rounded-md mb-0.5 transition-colors group",
-                isActive
-                  ? "bg-blue-600/20 border border-blue-500/30"
-                  : isSelected
-                  ? "bg-neutral-800/60 border border-transparent"
-                  : "hover:bg-neutral-800/40 border border-transparent"
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <StatusDot status={status} />
-                <span className="text-sm font-medium text-neutral-200 truncate flex-1">
-                  {workspace.title}
-                </span>
-                <span className="text-[10px] font-medium text-neutral-500 uppercase tracking-wider">
-                  {slots.length > 1 ? "workspace" : slots[0]?.kind === "terminal_slot" ? "term" : "proc"}
-                </span>
-              </div>
-              {slots.length > 1 && (
-                <div className="text-[11px] text-neutral-500 mt-0.5 ml-4">
-                  {slots.length} panes
-                </div>
-              )}
-            </button>
-          );
-        })}
-
-        {workspaces.length === 0 && (
+        {projects.length === 0 && (
           <div className="text-center text-neutral-600 text-xs mt-8 px-4">
-            {searchText ? "No matching workspaces" : "No workspaces yet"}
+            {searchText ? (
+              "No matching projects"
+            ) : (
+              <div className="space-y-2">
+                <p>No projects yet</p>
+                <button
+                  onClick={() => void handleAddProject()}
+                  className="text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Add a project
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

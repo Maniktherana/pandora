@@ -1,17 +1,42 @@
-import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useRef, useCallback } from "react";
 
 interface TabBarProps {
   paneID: string;
   slotIDs: string[];
   selectedIndex: number;
   isFocused: boolean;
+  workspaceId: string;
 }
 
-export default function TabBar({ paneID, slotIDs, selectedIndex, isFocused }: TabBarProps) {
-  const { selectTabInPane, removeTabFromPane, setFocusedPane, slotsByID } = useWorkspaceStore();
-  const slotsMap = slotsByID();
+export default function TabBar({ paneID, slotIDs, selectedIndex, isFocused, workspaceId }: TabBarProps) {
+  const { selectTabInPane, setFocusedPane, slotsByID, reorderTab } = useWorkspaceStore();
+  const slotsMap = slotsByID(workspaceId);
+  const dragIndexRef = useRef<number | null>(null);
+
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    dragIndexRef.current = index;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", slotIDs[index]);
+    e.dataTransfer.setData("application/x-pane-id", paneID);
+  }, [slotIDs, paneID]);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    const sourcePaneID = e.dataTransfer.getData("application/x-pane-id");
+    const slotID = e.dataTransfer.getData("text/plain");
+
+    if (sourcePaneID === paneID && dragIndexRef.current !== null) {
+      // Reorder within same pane
+      reorderTab(paneID, dragIndexRef.current, targetIndex);
+    } else if (slotID) {
+      // Cross-pane tab move
+      const { moveTab } = useWorkspaceStore.getState();
+      moveTab(sourcePaneID, paneID, slotID);
+    }
+    dragIndexRef.current = null;
+  }, [paneID, reorderTab]);
 
   if (slotIDs.length <= 1) return null;
 
@@ -29,6 +54,10 @@ export default function TabBar({ paneID, slotIDs, selectedIndex, isFocused }: Ta
         return (
           <button
             key={slotID}
+            draggable
+            onDragStart={(e) => handleDragStart(e, index)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => handleDrop(e, index)}
             onClick={() => {
               selectTabInPane(paneID, index);
               setFocusedPane(paneID);
@@ -41,15 +70,6 @@ export default function TabBar({ paneID, slotIDs, selectedIndex, isFocused }: Ta
             )}
           >
             <span className="truncate max-w-[120px]">{slot?.name ?? slotID.slice(0, 8)}</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                removeTabFromPane(paneID, slotID);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-neutral-700 transition-opacity"
-            >
-              <X className="w-3 h-3" />
-            </button>
           </button>
         );
       })}

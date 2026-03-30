@@ -1,14 +1,18 @@
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
 import type {
+  ProjectRecord,
+  WorkspaceRecord,
   SlotState,
   SessionState,
-  Workspace,
   LayoutNode,
   LayoutLeaf,
   LayoutSplit,
   LayoutAxis,
+  AppState,
+  PersistedWorkspaceLayout,
+  WorkspaceRuntimeState,
 } from "../lib/types";
-import type { ConnectionState } from "../lib/daemon-client";
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -18,10 +22,14 @@ function createLeaf(slotIDs: string[]): LayoutLeaf {
   return { type: "leaf", id: uuid(), slotIDs, selectedIndex: 0 };
 }
 
-
 function getAllLeaves(node: LayoutNode): LayoutLeaf[] {
   if (node.type === "leaf") return [node];
   return node.children.flatMap(getAllLeaves);
+}
+
+function getAllSlotIDs(node: LayoutNode): string[] {
+  if (node.type === "leaf") return node.slotIDs;
+  return node.children.flatMap(getAllSlotIDs);
 }
 
 function removeSlotFromTree(node: LayoutNode, slotID: string): LayoutNode | null {
@@ -44,162 +52,446 @@ function removeSlotFromTree(node: LayoutNode, slotID: string): LayoutNode | null
   return { ...node, children: newChildren, ratios: newChildren.map(() => 1 / newChildren.length) };
 }
 
+function findLeaf(node: LayoutNode, paneID: string): LayoutLeaf | null {
+  if (node.type === "leaf") return node.id === paneID ? node : null;
+  for (const child of node.children) {
+    const found = findLeaf(child, paneID);
+    if (found) return found;
+  }
+  return null;
+}
+
 export type NavigationArea = "sidebar" | "workspace";
 
 interface WorkspaceStoreState {
-  // Daemon state
-  slots: SlotState[];
-  sessions: SessionState[];
-  connectionState: ConnectionState;
+  // ─── Project/workspace model ───
+  projects: ProjectRecord[];
+  workspaces: WorkspaceRecord[];
+  selectedProjectID: string | null;
+  selectedWorkspaceID: string | null;
 
-  // Workspace state (client-side layout)
-  workspaces: Workspace[];
-  visibleWorkspaceID: string | null;
-  selectedSidebarWorkspaceID: string | null;
+  // ─── Per-workspace runtime state ───
+  runtimes: Record<string, WorkspaceRuntimeState>;
+
+  // ─── UI state ───
   navigationArea: NavigationArea;
   searchText: string;
 
-  // Computed helpers
-  slotsByID: () => Record<string, SlotState>;
-  sessionsByID: () => Record<string, SessionState>;
-  visibleWorkspace: () => Workspace | null;
-  filteredWorkspaces: () => Workspace[];
+  // ─── Computed helpers ───
+  selectedProject: () => ProjectRecord | null;
+  selectedWorkspace: () => WorkspaceRecord | null;
+  workspacesForProject: (projectId: string) => WorkspaceRecord[];
+  filteredProjects: () => ProjectRecord[];
+  activeRuntime: () => WorkspaceRuntimeState | null;
+  slotsByID: (workspaceId: string) => Record<string, SlotState>;
+  sessionsByID: (workspaceId: string) => Record<string, SessionState>;
 
-  // Daemon state setters
-  setConnectionState: (state: ConnectionState) => void;
-  setSlots: (slots: SlotState[]) => void;
-  setSessions: (sessions: SessionState[]) => void;
-  updateSlot: (slot: SlotState) => void;
-  addSlot: (slot: SlotState) => void;
-  removeSlot: (slotID: string) => void;
-  updateSession: (session: SessionState) => void;
-  addSession: (session: SessionState) => void;
-  removeSession: (sessionID: string) => void;
+  // ─── Data loading ───
+  loadAppState: () => Promise<void>;
+  reloadFromBackend: () => Promise<void>;
 
-  // Workspace actions
-  ensureWorkspacesForSlots: () => void;
-  selectWorkspace: (id: string) => void;
-  setSearchText: (text: string) => void;
-  setNavigationArea: (area: NavigationArea) => void;
-  navigateSidebar: (offset: number) => void;
+  // ─── Project actions ───
+  addProject: (path: string) => Promise<void>;
+  toggleProject: (projectId: string) => Promise<void>;
+  removeProject: (projectId: string) => Promise<void>;
+  selectProject: (projectId: string) => void;
 
-  // Layout actions
+  // ─── Workspace actions ───
+  createWorkspace: (projectId: string) => Promise<void>;
+  retryWorkspace: (workspaceId: string) => Promise<void>;
+  removeWorkspace: (workspaceId: string) => Promise<void>;
+  selectWorkspace: (workspace: WorkspaceRecord) => void;
+  markWorkspaceOpened: (workspaceId: string) => Promise<void>;
+
+  // ─── Runtime actions (per-workspace) ───
+  setRuntimeConnectionState: (workspaceId: string, state: "disconnected" | "connecting" | "connected") => void;
+  setRuntimeSlots: (workspaceId: string, slots: SlotState[]) => void;
+  setRuntimeSessions: (workspaceId: string, sessions: SessionState[]) => void;
+  updateRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
+  addRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
+  removeRuntimeSlot: (workspaceId: string, slotID: string) => void;
+  updateRuntimeSession: (workspaceId: string, session: SessionState) => void;
+  addRuntimeSession: (workspaceId: string, session: SessionState) => void;
+  removeRuntimeSession: (workspaceId: string, sessionID: string) => void;
+  ensureRuntimeLayout: (workspaceId: string) => void;
+
+  // ─── Layout actions ───
   splitPane: (paneID: string, slotID: string, axis: LayoutAxis, position: "before" | "after") => void;
   addTabToPane: (paneID: string, slotID: string) => void;
   removeTabFromPane: (paneID: string, slotID: string) => void;
   selectTabInPane: (paneID: string, index: number) => void;
+  moveTab: (fromPaneID: string, toPaneID: string, slotID: string) => void;
+  reorderTab: (paneID: string, fromIndex: number, toIndex: number) => void;
   setFocusedPane: (paneID: string) => void;
-  focusDirection: (direction: "left" | "right" | "up" | "down") => void;
+  cycleTab: (direction: -1 | 1) => void;
+  persistLayout: () => void;
+  loadPersistedLayout: (workspaceId: string) => Promise<void>;
+
+  // ─── Navigation ───
+  setNavigationArea: (area: NavigationArea) => void;
+  setSearchText: (text: string) => void;
+  navigateSidebar: (offset: number) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
-  slots: [],
-  sessions: [],
-  connectionState: "disconnected",
+  projects: [],
   workspaces: [],
-  visibleWorkspaceID: null,
-  selectedSidebarWorkspaceID: null,
+  selectedProjectID: null,
+  selectedWorkspaceID: null,
+  runtimes: {},
   navigationArea: "sidebar",
   searchText: "",
 
-  slotsByID: () => {
-    const map: Record<string, SlotState> = {};
-    for (const s of get().slots) map[s.id] = s;
-    return map;
+  // ─── Computed ───
+  selectedProject: () => {
+    const { projects, selectedProjectID } = get();
+    return projects.find((p) => p.id === selectedProjectID) ?? null;
   },
-  sessionsByID: () => {
-    const map: Record<string, SessionState> = {};
-    for (const s of get().sessions) map[s.id] = s;
-    return map;
+  selectedWorkspace: () => {
+    const { workspaces, selectedWorkspaceID } = get();
+    return workspaces.find((w) => w.id === selectedWorkspaceID) ?? null;
   },
-  visibleWorkspace: () => {
-    const { workspaces, visibleWorkspaceID } = get();
-    return workspaces.find((w) => w.id === visibleWorkspaceID) ?? null;
+  workspacesForProject: (projectId) => {
+    return get().workspaces.filter((w) => w.projectId === projectId);
   },
-  filteredWorkspaces: () => {
-    const { workspaces, searchText, slotsByID } = get();
-    const slotsMap = slotsByID();
-    if (!searchText) return workspaces;
+  filteredProjects: () => {
+    const { projects, searchText } = get();
+    if (!searchText) return projects;
     const lower = searchText.toLowerCase();
-    return workspaces.filter((w) => {
-      if (w.title.toLowerCase().includes(lower)) return true;
-      const leaves = getAllLeaves(w.root);
-      return leaves.some((l) => l.slotIDs.some((sid) => slotsMap[sid]?.name.toLowerCase().includes(lower)));
+    return projects.filter((p) => p.displayName.toLowerCase().includes(lower));
+  },
+  activeRuntime: () => {
+    const { selectedWorkspaceID, runtimes } = get();
+    if (!selectedWorkspaceID) return null;
+    return runtimes[selectedWorkspaceID] ?? null;
+  },
+  slotsByID: (workspaceId) => {
+    const runtime = get().runtimes[workspaceId];
+    if (!runtime) return {};
+    const map: Record<string, SlotState> = {};
+    for (const s of runtime.slots) map[s.id] = s;
+    return map;
+  },
+  sessionsByID: (workspaceId) => {
+    const runtime = get().runtimes[workspaceId];
+    if (!runtime) return {};
+    const map: Record<string, SessionState> = {};
+    for (const s of runtime.sessions) map[s.id] = s;
+    return map;
+  },
+
+  // ─── Data loading ───
+  loadAppState: async () => {
+    try {
+      const state = await invoke<AppState>("load_app_state");
+      set({
+        projects: state.projects,
+        workspaces: state.workspaces,
+        selectedProjectID: state.selectedProjectId,
+        selectedWorkspaceID: state.selectedWorkspaceId,
+      });
+    } catch (e) {
+      console.error("Failed to load app state:", e);
+    }
+  },
+  reloadFromBackend: async () => {
+    await get().loadAppState();
+  },
+
+  // ─── Project actions ───
+  addProject: async (path) => {
+    try {
+      const project = await invoke<ProjectRecord>("add_project", { selectedPath: path });
+      await get().reloadFromBackend();
+      set({ selectedProjectID: project.id });
+      void invoke("save_selection", {
+        projectId: project.id,
+        workspaceId: get().selectedWorkspaceID,
+      });
+    } catch (e) {
+      console.error("Failed to add project:", e);
+    }
+  },
+  toggleProject: async (projectId) => {
+    await invoke("toggle_project", { projectId });
+    await get().reloadFromBackend();
+  },
+  removeProject: async (projectId) => {
+    await invoke("remove_project", { projectId });
+    await get().reloadFromBackend();
+  },
+  selectProject: (projectId) => {
+    set({ selectedProjectID: projectId });
+    void invoke("save_selection", {
+      projectId,
+      workspaceId: get().selectedWorkspaceID,
     });
   },
 
-  setConnectionState: (state) => set({ connectionState: state }),
-  setSlots: (slots) => {
-    set({ slots });
-    get().ensureWorkspacesForSlots();
+  // ─── Workspace actions ───
+  createWorkspace: async (projectId) => {
+    try {
+      await invoke("create_workspace", { projectId });
+      // Reload to pick up the optimistic record
+      await get().reloadFromBackend();
+    } catch (e) {
+      console.error("Failed to create workspace:", e);
+    }
   },
-  setSessions: (sessions) => set({ sessions }),
-  updateSlot: (slot) =>
-    set((s) => ({ slots: s.slots.map((existing) => (existing.id === slot.id ? slot : existing)) })),
-  addSlot: (slot) => {
-    set((s) => ({ slots: [...s.slots, slot] }));
-    get().ensureWorkspacesForSlots();
+  retryWorkspace: async (workspaceId) => {
+    try {
+      await invoke("retry_workspace", { workspaceId });
+      await get().reloadFromBackend();
+    } catch (e) {
+      console.error("Failed to retry workspace:", e);
+    }
   },
-  removeSlot: (slotID) =>
-    set((s) => ({
-      slots: s.slots.filter((slot) => slot.id !== slotID),
-      workspaces: s.workspaces
-        .map((w) => {
-          const newRoot = removeSlotFromTree(w.root, slotID);
-          return newRoot ? { ...w, root: newRoot } : null;
-        })
-        .filter(Boolean) as Workspace[],
-    })),
-  updateSession: (session) =>
-    set((s) => ({
-      sessions: s.sessions.map((existing) => (existing.id === session.id ? session : existing)),
-    })),
-  addSession: (session) => set((s) => ({ sessions: [...s.sessions, session] })),
-  removeSession: (sessionID) =>
-    set((s) => ({ sessions: s.sessions.filter((ses) => ses.id !== sessionID) })),
+  removeWorkspace: async (workspaceId) => {
+    try {
+      await invoke("remove_workspace", { workspaceId });
+      set((s) => {
+        const { [workspaceId]: _, ...rest } = s.runtimes;
+        return {
+          runtimes: rest,
+          selectedWorkspaceID:
+            s.selectedWorkspaceID === workspaceId
+              ? s.workspaces.find((w) => w.id !== workspaceId)?.id ?? null
+              : s.selectedWorkspaceID,
+        };
+      });
+      await get().reloadFromBackend();
+    } catch (e) {
+      console.error("Failed to remove workspace:", e);
+    }
+  },
+  selectWorkspace: (workspace) => {
+    set({
+      selectedWorkspaceID: workspace.id,
+      selectedProjectID: workspace.projectId,
+      navigationArea: "sidebar",
+    });
+    void invoke("save_selection", {
+      projectId: workspace.projectId,
+      workspaceId: workspace.id,
+    });
 
-  ensureWorkspacesForSlots: () => {
-    const { slots, workspaces } = get();
-    const existingSlotIDs = new Set(workspaces.flatMap((w) => getAllLeaves(w.root).flatMap((l) => l.slotIDs)));
-    const newSlots = slots.filter((s) => !existingSlotIDs.has(s.id));
+    // Start runtime if workspace is ready and not already running
+    if (workspace.status === "ready") {
+      const runtime = get().runtimes[workspace.id];
+      if (!runtime) {
+        const defaultCwd = workspace.workspaceContextSubpath
+          ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
+          : workspace.worktreePath;
+
+        void invoke("start_workspace_runtime", {
+          workspaceId: workspace.id,
+          workspacePath: workspace.worktreePath,
+          defaultCwd,
+        });
+
+        // Initialize runtime state
+        set((s) => ({
+          runtimes: {
+            ...s.runtimes,
+            [workspace.id]: {
+              workspaceId: workspace.id,
+              slots: [],
+              sessions: [],
+              connectionState: "connecting",
+              root: null,
+              focusedPaneID: null,
+            },
+          },
+        }));
+
+        // Load persisted layout
+        void get().loadPersistedLayout(workspace.id);
+      }
+    }
+
+    void invoke("mark_workspace_opened", { workspaceId: workspace.id });
+  },
+  markWorkspaceOpened: async (workspaceId) => {
+    await invoke("mark_workspace_opened", { workspaceId });
+  },
+
+  // ─── Runtime actions ───
+  setRuntimeConnectionState: (workspaceId, state) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId] ?? {
+        workspaceId,
+        slots: [],
+        sessions: [],
+        connectionState: "disconnected",
+        root: null,
+        focusedPaneID: null,
+      };
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: { ...runtime, connectionState: state },
+        },
+      };
+    });
+  },
+  setRuntimeSlots: (workspaceId, slots) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: { ...runtime, slots },
+        },
+      };
+    });
+    get().ensureRuntimeLayout(workspaceId);
+  },
+  setRuntimeSessions: (workspaceId, sessions) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: { ...runtime, sessions },
+        },
+      };
+    });
+  },
+  updateRuntimeSlot: (workspaceId, slot) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            slots: runtime.slots.map((existing) => (existing.id === slot.id ? slot : existing)),
+          },
+        },
+      };
+    });
+  },
+  addRuntimeSlot: (workspaceId, slot) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: { ...runtime, slots: [...runtime.slots, slot] },
+        },
+      };
+    });
+    get().ensureRuntimeLayout(workspaceId);
+  },
+  removeRuntimeSlot: (workspaceId, slotID) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      const newRoot = runtime.root ? removeSlotFromTree(runtime.root, slotID) : null;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            slots: runtime.slots.filter((sl) => sl.id !== slotID),
+            root: newRoot,
+          },
+        },
+      };
+    });
+  },
+  updateRuntimeSession: (workspaceId, session) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            sessions: runtime.sessions.map((existing) =>
+              existing.id === session.id ? session : existing
+            ),
+          },
+        },
+      };
+    });
+  },
+  addRuntimeSession: (workspaceId, session) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: { ...runtime, sessions: [...runtime.sessions, session] },
+        },
+      };
+    });
+  },
+  removeRuntimeSession: (workspaceId, sessionID) => {
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            sessions: runtime.sessions.filter((ses) => ses.id !== sessionID),
+          },
+        },
+      };
+    });
+  },
+
+  ensureRuntimeLayout: (workspaceId) => {
+    const runtime = get().runtimes[workspaceId];
+    if (!runtime) return;
+
+    const existingSlotIDs = runtime.root ? new Set(getAllSlotIDs(runtime.root)) : new Set<string>();
+    const newSlots = runtime.slots.filter((s) => !existingSlotIDs.has(s.id));
     if (newSlots.length === 0) return;
 
-    const newWorkspaces = newSlots.map((slot, i) => ({
-      id: uuid(),
-      title: slot.name,
-      root: createLeaf([slot.id]),
-      focusedPaneID: null,
-      sortOrder: workspaces.length + i,
+    let root = runtime.root;
+    for (const slot of newSlots) {
+      const leaf = createLeaf([slot.id]);
+      if (!root) {
+        root = leaf;
+      } else {
+        // Add as tab to focused pane if it exists, otherwise split
+        const focusedPaneID = runtime.focusedPaneID;
+        if (focusedPaneID && root) {
+          root = addTabToNode(root, focusedPaneID, slot.id);
+        } else {
+          root = leaf;
+        }
+      }
+    }
+
+    set((s) => ({
+      runtimes: {
+        ...s.runtimes,
+        [workspaceId]: {
+          ...runtime,
+          root,
+          focusedPaneID: runtime.focusedPaneID ?? (root?.type === "leaf" ? root.id : null),
+        },
+      },
     }));
-
-    const allWorkspaces = [...workspaces, ...newWorkspaces];
-    set({
-      workspaces: allWorkspaces,
-      visibleWorkspaceID: get().visibleWorkspaceID ?? allWorkspaces[0]?.id ?? null,
-      selectedSidebarWorkspaceID: get().selectedSidebarWorkspaceID ?? allWorkspaces[0]?.id ?? null,
-    });
   },
 
-  selectWorkspace: (id) =>
-    set({ visibleWorkspaceID: id, selectedSidebarWorkspaceID: id }),
-
-  setSearchText: (text) => set({ searchText: text }),
-
-  setNavigationArea: (area) => set({ navigationArea: area }),
-
-  navigateSidebar: (offset) => {
-    const { filteredWorkspaces, selectedSidebarWorkspaceID } = get();
-    const list = filteredWorkspaces();
-    if (list.length === 0) return;
-    const currentIdx = list.findIndex((w) => w.id === selectedSidebarWorkspaceID);
-    const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + offset));
-    set({ selectedSidebarWorkspaceID: list[nextIdx].id });
-  },
-
+  // ─── Layout actions ───
   splitPane: (paneID, slotID, axis, position) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
     set((s) => {
-      const workspace = s.visibleWorkspace();
-      if (!workspace) return s;
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
 
       function splitNode(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
@@ -220,57 +512,54 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       }
 
       return {
-        workspaces: s.workspaces.map((w) =>
-          w.id === workspace.id ? { ...w, root: splitNode(w.root) } : w
-        ),
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root: splitNode(runtime.root) },
+        },
       };
     });
+    get().persistLayout();
   },
 
   addTabToPane: (paneID, slotID) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
     set((s) => {
-      const workspace = s.visibleWorkspace();
-      if (!workspace) return s;
-
-      function addTab(node: LayoutNode): LayoutNode {
-        if (node.type === "leaf" && node.id === paneID) {
-          if (node.slotIDs.includes(slotID)) return node;
-          return { ...node, slotIDs: [...node.slotIDs, slotID], selectedIndex: node.slotIDs.length };
-        }
-        if (node.type === "split") {
-          return { ...node, children: node.children.map(addTab) };
-        }
-        return node;
-      }
-
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
       return {
-        workspaces: s.workspaces.map((w) =>
-          w.id === workspace.id ? { ...w, root: addTab(w.root) } : w
-        ),
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root: addTabToNode(runtime.root, paneID, slotID) },
+        },
       };
     });
+    get().persistLayout();
   },
 
   removeTabFromPane: (paneID, slotID) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
     set((s) => {
-      const workspace = s.visibleWorkspace();
-      if (!workspace) return s;
-
-      const newRoot = removeSlotFromTree(workspace.root, slotID);
-      if (!newRoot) return s;
-
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
+      const newRoot = removeSlotFromTree(runtime.root, slotID);
       return {
-        workspaces: s.workspaces.map((w) =>
-          w.id === workspace.id ? { ...w, root: newRoot } : w
-        ),
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root: newRoot },
+        },
       };
     });
+    get().persistLayout();
   },
 
   selectTabInPane: (paneID, index) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
     set((s) => {
-      const workspace = s.visibleWorkspace();
-      if (!workspace) return s;
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
 
       function selectTab(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
@@ -283,26 +572,153 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       }
 
       return {
-        workspaces: s.workspaces.map((w) =>
-          w.id === workspace.id ? { ...w, root: selectTab(w.root) } : w
-        ),
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root: selectTab(runtime.root) },
+        },
       };
     });
+    get().persistLayout();
+  },
+
+  moveTab: (fromPaneID, toPaneID, slotID) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    set((s) => {
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
+      let root = removeSlotFromTree(runtime.root, slotID);
+      if (!root) return s;
+      root = addTabToNode(root, toPaneID, slotID);
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root },
+        },
+      };
+    });
+    get().persistLayout();
+  },
+
+  reorderTab: (paneID, fromIndex, toIndex) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    set((s) => {
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
+
+      function reorder(node: LayoutNode): LayoutNode {
+        if (node.type === "leaf" && node.id === paneID) {
+          const ids = [...node.slotIDs];
+          const [moved] = ids.splice(fromIndex, 1);
+          ids.splice(toIndex, 0, moved);
+          const newSelected = node.selectedIndex === fromIndex
+            ? toIndex
+            : node.selectedIndex;
+          return { ...node, slotIDs: ids, selectedIndex: newSelected };
+        }
+        if (node.type === "split") {
+          return { ...node, children: node.children.map(reorder) };
+        }
+        return node;
+      }
+
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root: reorder(runtime.root) },
+        },
+      };
+    });
+    get().persistLayout();
   },
 
   setFocusedPane: (paneID) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
     set((s) => {
-      const workspace = s.visibleWorkspace();
-      if (!workspace) return s;
+      const runtime = s.runtimes[wsId];
+      if (!runtime) return s;
       return {
-        workspaces: s.workspaces.map((w) =>
-          w.id === workspace.id ? { ...w, focusedPaneID: paneID } : w
-        ),
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, focusedPaneID: paneID },
+        },
       };
     });
+    get().persistLayout();
   },
 
-  focusDirection: (_direction) => {
-    // TODO: implement spatial navigation between panes
+  cycleTab: (direction) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    const runtime = get().runtimes[wsId];
+    if (!runtime?.root || !runtime.focusedPaneID) return;
+    const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
+    if (!leaf || leaf.slotIDs.length <= 1) return;
+    const newIndex = (leaf.selectedIndex + direction + leaf.slotIDs.length) % leaf.slotIDs.length;
+    get().selectTabInPane(leaf.id, newIndex);
+  },
+
+  persistLayout: () => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    const runtime = get().runtimes[wsId];
+    if (!runtime?.root) return;
+    const layout: PersistedWorkspaceLayout = {
+      root: runtime.root,
+      focusedPaneID: runtime.focusedPaneID,
+    };
+    void invoke("save_workspace_layout", { workspaceId: wsId, layout });
+  },
+
+  loadPersistedLayout: async (workspaceId) => {
+    try {
+      const layout = await invoke<PersistedWorkspaceLayout | null>("load_workspace_layout", {
+        workspaceId,
+      });
+      if (layout) {
+        set((s) => {
+          const runtime = s.runtimes[workspaceId];
+          if (!runtime) return s;
+          return {
+            runtimes: {
+              ...s.runtimes,
+              [workspaceId]: {
+                ...runtime,
+                root: layout.root,
+                focusedPaneID: layout.focusedPaneID,
+              },
+            },
+          };
+        });
+      }
+    } catch {
+      // No persisted layout
+    }
+  },
+
+  // ─── Navigation ───
+  setNavigationArea: (area) => set({ navigationArea: area }),
+  setSearchText: (text) => set({ searchText: text }),
+  navigateSidebar: (offset) => {
+    const { workspaces, selectedWorkspaceID } = get();
+    if (workspaces.length === 0) return;
+    const currentIdx = workspaces.findIndex((w) => w.id === selectedWorkspaceID);
+    const nextIdx = Math.max(0, Math.min(workspaces.length - 1, currentIdx + offset));
+    const ws = workspaces[nextIdx];
+    if (ws) get().selectWorkspace(ws);
   },
 }));
+
+// Helper: add a tab (slotID) to a specific pane within a layout tree
+function addTabToNode(node: LayoutNode, paneID: string, slotID: string): LayoutNode {
+  if (node.type === "leaf" && node.id === paneID) {
+    if (node.slotIDs.includes(slotID)) return node;
+    return { ...node, slotIDs: [...node.slotIDs, slotID], selectedIndex: node.slotIDs.length };
+  }
+  if (node.type === "split") {
+    return { ...node, children: node.children.map((c) => addTabToNode(c, paneID, slotID)) };
+  }
+  return node;
+}
