@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 **/xcuserdata/
 .build/
+.turbo/
+dist/
+apps/*/dist/
+apps/*/src-tauri/target/

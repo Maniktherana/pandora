@@ -1,0 +1,21 @@
+{
+  "name": "pandora",
+  "private": true,
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "desktop:dev": "bun --cwd apps/desktop run tauri dev",
+    "desktop:build": "bun --cwd apps/desktop run tauri build",
+    "daemon:dev": "bun --cwd apps/daemon run dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.6"
+  }
+}
