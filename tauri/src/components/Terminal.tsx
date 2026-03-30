@@ -1,136 +1,112 @@
 import { useEffect, useRef, useCallback } from "react";
-import { Terminal as XTerminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
+import { invoke } from "@tauri-apps/api/core";
+import type { TerminalSurfaceRect } from "@/lib/types";
 
-interface TerminalProps {
+interface NativeTerminalSurfaceProps {
+  surfaceId: string;
   sessionID: string;
-  onInput: (data: string) => void;
-  onResize: (cols: number, rows: number) => void;
+  workspaceId: string;
+  visible: boolean;
+  focused: boolean;
   onFocus?: () => void;
-  isFocused?: boolean;
 }
 
-// Global registry of terminal instances so they persist across re-renders
-const terminalRegistry = new Map<string, XTerminal>();
-const fitAddonRegistry = new Map<string, FitAddon>();
-
-export function feedTerminalOutput(sessionID: string, data: string) {
-  const term = terminalRegistry.get(sessionID);
-  if (term) {
-    // Data comes as base64 from daemon
-    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-    term.write(bytes);
-  }
-}
-
-export function getTerminal(sessionID: string): XTerminal | undefined {
-  return terminalRegistry.get(sessionID);
-}
-
-export default function Terminal({ sessionID, onInput, onResize, onFocus, isFocused }: TerminalProps) {
+export default function NativeTerminalSurface({
+  surfaceId,
+  sessionID,
+  workspaceId,
+  visible,
+  focused,
+  onFocus,
+}: NativeTerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mountedRef = useRef(false);
+  const createdRef = useRef(false);
+  const lastRectRef = useRef<string>("");
 
-  const handleResize = useCallback(() => {
-    const fitAddon = fitAddonRegistry.get(sessionID);
-    const term = terminalRegistry.get(sessionID);
-    if (fitAddon && term) {
-      try {
-        fitAddon.fit();
-        onResize(term.cols, term.rows);
-      } catch {}
+  // Measure the container and get its position relative to the window
+  const measureRect = useCallback((): TerminalSurfaceRect | null => {
+    const el = containerRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+      scaleFactor: window.devicePixelRatio || 1,
+    };
+  }, []);
+
+  const syncSurface = useCallback((forceCreate = false) => {
+    const rect = measureRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return;
+
+    if (!createdRef.current || forceCreate) {
+      createdRef.current = true;
+      void invoke("terminal_surface_create", {
+        surfaceId,
+        workspaceId,
+        sessionId: sessionID,
+        rect,
+      }).catch((e) => console.error("Failed to create native surface:", e));
     }
-  }, [sessionID, onResize]);
 
+    const key = JSON.stringify({ rect, visible, focused });
+    if (key === lastRectRef.current) return;
+    lastRectRef.current = key;
+
+    void invoke("terminal_surface_update", {
+      surfaceId,
+      rect,
+      visible,
+      focused,
+    }).catch(() => {});
+  }, [focused, measureRect, sessionID, surfaceId, visible, workspaceId]);
+
+  // Create surface on mount
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container || mountedRef.current) return;
-    mountedRef.current = true;
-
-    let term = terminalRegistry.get(sessionID);
-    let fitAddon = fitAddonRegistry.get(sessionID);
-
-    if (!term) {
-      term = new XTerminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-        theme: {
-          background: "#0a0a0a",
-          foreground: "#e4e4e7",
-          cursor: "#e4e4e7",
-          selectionBackground: "#3b82f680",
-          black: "#18181b",
-          red: "#ef4444",
-          green: "#22c55e",
-          yellow: "#eab308",
-          blue: "#3b82f6",
-          magenta: "#a855f7",
-          cyan: "#06b6d4",
-          white: "#e4e4e7",
-          brightBlack: "#52525b",
-          brightRed: "#f87171",
-          brightGreen: "#4ade80",
-          brightYellow: "#facc15",
-          brightBlue: "#60a5fa",
-          brightMagenta: "#c084fc",
-          brightCyan: "#22d3ee",
-          brightWhite: "#fafafa",
-        },
-        allowProposedApi: true,
-        scrollback: 10000,
-      });
-
-      fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-
-      terminalRegistry.set(sessionID, term);
-      fitAddonRegistry.set(sessionID, fitAddon);
-
-      term.onData((data) => onInput(data));
-    }
-
-    // Open in container (or re-attach)
-    if (container.children.length === 0) {
-      term.open(container);
-
-      // Try WebGL addon for GPU-accelerated rendering
-      try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => webgl.dispose());
-        term.loadAddon(webgl);
-      } catch {
-        // WebGL not available, canvas renderer is fine
-      }
-    }
-
-    // Initial fit
-    requestAnimationFrame(() => {
-      handleResize();
-    });
-
-    const observer = new ResizeObserver(() => handleResize());
-    observer.observe(container);
+    if (!sessionID) return;
+    syncSurface(true);
 
     return () => {
-      observer.disconnect();
-      mountedRef.current = false;
+      if (createdRef.current) {
+        createdRef.current = false;
+        void invoke("terminal_surface_destroy", { surfaceId }).catch(() => {});
+      }
     };
-  }, [sessionID, onInput, handleResize]);
+  }, [sessionID, surfaceId, syncSurface]);
 
+  // Update surface geometry on resize
   useEffect(() => {
-    if (isFocused) {
-      const term = terminalRegistry.get(sessionID);
-      term?.focus();
-    }
-  }, [isFocused, sessionID]);
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      syncSurface();
+    });
+
+    observer.observe(el);
+    window.addEventListener("resize", syncSurface);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncSurface);
+    };
+  }, [syncSurface]);
+
+  // Update visibility and focus
+  useEffect(() => {
+    syncSurface();
+  }, [visible, focused, syncSurface]);
 
   return (
     <div
       ref={containerRef}
       className="h-full w-full"
       onClick={onFocus}
+      style={{
+        // Transparent placeholder - native surface renders above
+        background: "transparent",
+      }}
     />
   );
 }

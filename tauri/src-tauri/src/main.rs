@@ -1,17 +1,64 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod commands;
 mod daemon_bridge;
+mod database;
+mod git;
+mod ghostty_app;
+mod ghostty_ffi;
+mod models;
+mod surface_registry;
+mod terminal_commands;
 
-use std::process::Command;
+use commands::DbState;
+use database::AppDatabase;
+use std::sync::Arc;
+use tauri::Manager;
 
 fn main() {
+    let pandora_home = git::pandora_home();
+    let db = AppDatabase::open(&pandora_home).expect("Failed to open database");
+    let db = Arc::new(db);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(daemon_bridge::DaemonState::new())
-        .invoke_handler(tauri::generate_handler![daemon_bridge::daemon_send])
+        .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
+        .manage(DbState(db))
+        .invoke_handler(tauri::generate_handler![
+            // Daemon bridge
+            daemon_bridge::daemon_send,
+            // Native terminal surfaces
+            terminal_commands::terminal_surface_create,
+            terminal_commands::terminal_surface_update,
+            terminal_commands::terminal_surface_destroy,
+            terminal_commands::terminal_surface_focus,
+            // Project commands
+            commands::list_projects,
+            commands::add_project,
+            commands::toggle_project,
+            commands::remove_project,
+            // Workspace commands
+            commands::list_workspaces,
+            commands::create_workspace,
+            commands::retry_workspace,
+            commands::remove_workspace,
+            commands::mark_workspace_opened,
+            // Selection
+            commands::load_selection,
+            commands::save_selection,
+            // Layout
+            commands::save_workspace_layout,
+            commands::load_workspace_layout,
+            // Runtime
+            commands::start_workspace_runtime,
+            // Full state reload
+            commands::load_app_state,
+        ])
         .setup(|app| {
-            let pid = std::process::id();
+            ghostty_app::init_ghostty_app(app.handle().clone());
 
             // Resolve daemon dir relative to repo root
             let daemon_dir = std::env::current_dir()
@@ -21,49 +68,24 @@ fn main() {
                 .map(|p| p.join("daemon"))
                 .unwrap_or_else(|| std::path::PathBuf::from("../daemon"));
 
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let project_dir = format!("{}/pandora-tauri-project", home);
-            let _ = std::fs::create_dir_all(&project_dir);
-
-            // Start the daemon as a child process
-            eprintln!("Starting daemon from {:?}", daemon_dir);
-            let daemon_dir_clone = daemon_dir.clone();
-            let project_dir_clone = project_dir.clone();
-            std::thread::spawn(move || {
-                match Command::new("bun")
-                    .arg("run")
-                    .arg("src/index.ts")
-                    .arg(&project_dir_clone)
-                    .current_dir(&daemon_dir_clone)
-                    .env("PANDORA_PARENT_PID", pid.to_string())
-                    .env(
-                        "PANDORA_HOME",
-                        format!("{}/.pandora", project_dir_clone),
-                    )
-                    .spawn()
-                {
-                    Ok(mut child) => {
-                        eprintln!("Daemon PID: {:?}", child.id());
-                        let _ = child.wait();
-                        eprintln!("Daemon exited");
-                    }
-                    Err(e) => eprintln!("Failed to start daemon: {}", e),
-                }
-            });
-
-            // Start reading from daemon socket (connects when socket appears).
-            // start_daemon_reader spawns its own tokio task, so we just need
-            // a runtime running on a background thread.
             let handle = app.handle().clone();
+            let daemon_state = handle.state::<daemon_bridge::DaemonState>();
+
+            // Store daemon directory for later workspace launches
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("Failed to create tokio runtime");
 
+            let daemon_dir_clone = daemon_dir.clone();
+            let daemon_state_ref = daemon_state.inner();
+            rt.block_on(async {
+                daemon_bridge::set_daemon_dir(daemon_state_ref, daemon_dir_clone).await;
+            });
+
+            // Start tokio runtime in background for async operations
             std::thread::spawn(move || {
                 rt.block_on(async {
-                    daemon_bridge::start_daemon_reader(handle);
-                    // Keep the runtime alive
                     loop {
                         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
                     }

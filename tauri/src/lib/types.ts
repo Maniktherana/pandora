@@ -1,4 +1,4 @@
-// Mirrored from daemon/src/types.ts
+// ─── Daemon protocol types (mirrored from daemon/src/types.ts) ───
 
 export type SlotKind = "process_slot" | "agent_slot" | "terminal_slot";
 export type SessionKind = "process" | "agent" | "terminal";
@@ -68,18 +68,51 @@ export type ClientMessage =
   | { type: "resize"; sessionID: string; cols: number; rows: number };
 
 export type DaemonMessage =
-  | { type: "slot_snapshot"; slots: SlotState[] }
-  | { type: "session_snapshot"; sessions: SessionState[] }
-  | { type: "slot_state_changed"; slot: SlotState }
-  | { type: "session_state_changed"; session: SessionState }
-  | { type: "slot_added"; slot: SlotState }
-  | { type: "slot_removed"; slotID: string }
-  | { type: "session_opened"; session: SessionState }
-  | { type: "session_closed"; sessionID: string }
-  | { type: "output_chunk"; sessionID: string; data: string }
-  | { type: "error"; message: string };
+  | { type: "slot_snapshot"; slots: SlotState[]; workspaceId?: string }
+  | { type: "session_snapshot"; sessions: SessionState[]; workspaceId?: string }
+  | { type: "slot_state_changed"; slot: SlotState; workspaceId?: string }
+  | { type: "session_state_changed"; session: SessionState; workspaceId?: string }
+  | { type: "slot_added"; slot: SlotState; workspaceId?: string }
+  | { type: "slot_removed"; slotID: string; workspaceId?: string }
+  | { type: "session_opened"; session: SessionState; workspaceId?: string }
+  | { type: "session_closed"; sessionID: string; workspaceId?: string }
+  | { type: "output_chunk"; sessionID: string; data: string; workspaceId?: string }
+  | { type: "error"; message: string; workspaceId?: string };
 
-// Workspace layout types (client-side only)
+// ─── Project/workspace model types (matching Swift app) ───
+
+export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting";
+
+export interface ProjectRecord {
+  id: string;
+  displayPath: string;
+  gitRootPath: string;
+  gitContextSubpath: string | null;
+  displayName: string;
+  gitRemoteOwner: string | null;
+  isExpanded: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceRecord {
+  id: string;
+  projectId: string;
+  name: string;
+  gitBranchName: string;
+  gitWorktreeOwner: string;
+  gitWorktreeSlug: string;
+  worktreePath: string;
+  workspaceContextSubpath: string | null;
+  status: WorkspaceStatus;
+  failureMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt: string | null;
+}
+
+// ─── Workspace layout types ───
+
 export type LayoutAxis = "horizontal" | "vertical";
 
 export interface LayoutLeaf {
@@ -99,10 +132,56 @@ export interface LayoutSplit {
 
 export type LayoutNode = LayoutLeaf | LayoutSplit;
 
-export interface Workspace {
-  id: string;
-  title: string;
+export interface PersistedWorkspaceLayout {
   root: LayoutNode;
   focusedPaneID: string | null;
-  sortOrder: number;
+}
+
+// ─── App state from backend ───
+
+export interface AppState {
+  projects: ProjectRecord[];
+  workspaces: WorkspaceRecord[];
+  selectedProjectId: string | null;
+  selectedWorkspaceId: string | null;
+}
+
+// ─── Workspace runtime state (per-workspace) ───
+
+export interface WorkspaceRuntimeState {
+  workspaceId: string;
+  slots: SlotState[];
+  sessions: SessionState[];
+  connectionState: "disconnected" | "connecting" | "connected";
+  root: LayoutNode | null;
+  focusedPaneID: string | null;
+}
+
+export type TerminalSurfaceId = string;
+export type TerminalPresentationMode = PresentationMode;
+
+export interface TerminalSurfaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+}
+
+export interface TerminalSurfaceCreateArgs {
+  surfaceId: TerminalSurfaceId;
+  workspaceId: string;
+  sessionId: string;
+  rect: TerminalSurfaceRect;
+  visible?: boolean;
+  focused?: boolean;
+  presentationMode?: TerminalPresentationMode;
+}
+
+export interface TerminalSurfaceUpdateArgs {
+  surfaceId: TerminalSurfaceId;
+  rect: TerminalSurfaceRect;
+  visible: boolean;
+  focused: boolean;
+  presentationMode?: TerminalPresentationMode;
 }
