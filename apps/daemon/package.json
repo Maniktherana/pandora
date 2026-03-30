@@ -1,0 +1,16 @@
+{
+  "name": "@pandora/daemon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "smoke:pty": "bun run src/smoke-pty.ts",
+    "test": "bun test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "@types/node": "^24.0.0"
+  }
+}
