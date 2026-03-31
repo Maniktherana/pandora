@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import Sidebar from "@/components/Sidebar";
 import WorkspaceView from "@/components/WorkspaceView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { DaemonClient } from "@/lib/daemon-client";
+import { publishTerminalOutput, setTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
+import type { LayoutNode, LayoutLeaf } from "@/lib/types";
 import { PanelLeft, Plus } from "lucide-react";
 
 export default function App() {
@@ -33,17 +36,24 @@ export default function App() {
         store.getState().setRuntimeConnectionState(workspaceId, state);
       },
       onSlotSnapshot: (workspaceId, slots) => {
+        // On first connect the daemon may return stale slots from a previous session.
+        // Ignore them and start fresh with a single terminal.
+        if (!hasSeededRef.current.has(workspaceId)) {
+          hasSeededRef.current.add(workspaceId);
+          // Clear any stale persisted slots
+          for (const slot of slots) {
+            client.send(workspaceId, { type: "remove_slot", slotID: slot.id });
+          }
+          store.getState().setRuntimeSlots(workspaceId, []);
+          seedFirstTerminal(client, workspaceId);
+          return;
+        }
         store.getState().setRuntimeSlots(workspaceId, slots);
-        // Auto-open session instances for terminal slots
+        // Auto-open session instances for terminal slots that need them
         for (const slot of slots) {
           if (slot.kind === "terminal_slot" && slot.sessionIDs.length === 0 && slot.sessionDefIDs.length > 0) {
             client.openSessionInstance(workspaceId, slot.sessionDefIDs[0]);
           }
-        }
-        // Auto-seed first terminal if snapshot is empty
-        if (slots.length === 0 && !hasSeededRef.current.has(workspaceId)) {
-          hasSeededRef.current.add(workspaceId);
-          seedFirstTerminal(client, workspaceId);
         }
       },
       onSessionSnapshot: (workspaceId, sessions) => {
@@ -67,7 +77,9 @@ export default function App() {
       onSessionClosed: (workspaceId, sessionID) => {
         store.getState().removeRuntimeSession(workspaceId, sessionID);
       },
-      onOutputChunk: () => {},
+      onOutputChunk: (_workspaceId, sessionID, data) => {
+        publishTerminalOutput(sessionID, data);
+      },
       onError: (workspaceId, message) => {
         console.error(`Daemon error [${workspaceId}]:`, message);
       },
@@ -75,11 +87,13 @@ export default function App() {
 
     clientRef.current = client;
     (window as any).__daemonClient = client;
+    setTerminalDaemonClient(client);
     void client.connect();
 
     return () => {
       client.disconnect();
       (window as any).__daemonClient = null;
+      setTerminalDaemonClient(null);
     };
   }, []);
 
@@ -90,7 +104,29 @@ export default function App() {
     seedTerminal(client, selectedWorkspaceID);
   }, []);
 
-  // Global keyboard shortcuts
+  const handleCloseFocusedTab = useCallback(() => {
+    const client = clientRef.current;
+    const state = store.getState();
+    const workspaceId = state.selectedWorkspaceID;
+    if (!client || !workspaceId) return;
+
+    const runtime = state.runtimes[workspaceId];
+    if (!runtime?.root || !runtime.focusedPaneID) return;
+
+    const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
+    if (!leaf) return;
+
+    const activeSlotId = leaf.slotIDs[leaf.selectedIndex] ?? leaf.slotIDs[0];
+    if (!activeSlotId) return;
+
+    client.send(workspaceId, {
+      type: "remove_slot",
+      slotID: activeSlotId,
+    });
+  }, []);
+
+  // Global keyboard shortcuts — use capture phase so app shortcuts fire
+  // before the terminal's InputHandler can consume/stopPropagation on them.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const {
@@ -100,56 +136,93 @@ export default function App() {
         setNavigationArea,
         selectedWorkspaceID,
         workspaces,
-        cycleTab,
       } = store.getState();
 
       if (e.metaKey) {
         switch (e.key) {
           case "[":
-            e.preventDefault();
-            cycleTab(-1);
+            if (e.shiftKey) {
+              e.preventDefault();
+              store.getState().cycleTab(-1);
+            }
             break;
           case "]":
-            e.preventDefault();
-            cycleTab(1);
+            if (e.shiftKey) {
+              e.preventDefault();
+              store.getState().cycleTab(1);
+            }
             break;
           case "ArrowLeft":
-            e.preventDefault();
-            setNavigationArea("sidebar");
+            // Only intercept for sidebar navigation, not when in workspace (terminal needs Cmd+Arrow)
+            if (navigationArea === "sidebar") {
+              e.preventDefault();
+            }
             break;
           case "ArrowRight":
-            e.preventDefault();
             if (navigationArea === "sidebar" && selectedWorkspaceID) {
+              e.preventDefault();
               const ws = workspaces.find((w) => w.id === selectedWorkspaceID);
               if (ws) selectWorkspace(ws);
               setNavigationArea("workspace");
             }
             break;
           case "ArrowUp":
-            e.preventDefault();
-            if (navigationArea === "sidebar") navigateSidebar(-1);
+            if (navigationArea === "sidebar") {
+              e.preventDefault();
+              navigateSidebar(-1);
+            }
             break;
           case "ArrowDown":
-            e.preventDefault();
-            if (navigationArea === "sidebar") navigateSidebar(1);
+            if (navigationArea === "sidebar") {
+              e.preventDefault();
+              navigateSidebar(1);
+            }
             break;
           case "b":
             e.preventDefault();
             setSidebarVisible((v) => !v);
             break;
           case "t":
-            if (e.shiftKey) {
-              e.preventDefault();
-              handleNewTerminal();
-            }
+            // Cmd+T — new terminal (Cmd+Shift+T also works)
+            e.preventDefault();
+            handleNewTerminal();
+            break;
+          case "w":
+            // Cmd+W — close focused tab
+            e.preventDefault();
+            handleCloseFocusedTab();
             break;
         }
       }
     };
 
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [handleNewTerminal]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    void listen<string>("app-shortcut", (event) => {
+      switch (event.payload) {
+        case "close-tab":
+          handleCloseFocusedTab();
+          break;
+        case "previous-tab":
+          store.getState().cycleTab(1);
+          break;
+        case "next-tab":
+          store.getState().cycleTab(-1);
+          break;
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [handleCloseFocusedTab]);
 
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
   const runtime = useWorkspaceStore((s) =>
@@ -287,4 +360,13 @@ function seedTerminalWithName(client: DaemonClient, workspaceId: string, name: s
   });
 
   setTimeout(() => client.openSessionInstance(workspaceId, sessionDefID), 100);
+}
+
+function findLeaf(node: LayoutNode, paneID: string): LayoutLeaf | null {
+  if (node.type === "leaf") return node.id === paneID ? node : null;
+  for (const child of node.children) {
+    const found = findLeaf(child, paneID);
+    if (found) return found;
+  }
+  return null;
 }

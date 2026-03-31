@@ -18,6 +18,7 @@
     "apps/desktop": {
       "name": "@pandora/desktop",
       "dependencies": {
+        "@pandora/ghostty-web": "workspace:*",
         "@tauri-apps/api": "^2.10.1",
         "@tauri-apps/plugin-dialog": "^2.6.0",
         "@tauri-apps/plugin-shell": "^2.3.5",
@@ -44,6 +45,13 @@
       },
       "peerDependencies": {
         "typescript": "^5",
+      },
+    },
+    "packages/ghostty-web": {
+      "name": "@pandora/ghostty-web",
+      "version": "0.3.0",
+      "devDependencies": {
+        "typescript": "^5.9.3",
       },
     },
   },
@@ -161,6 +169,8 @@
     "@pandora/daemon": ["@pandora/daemon@workspace:apps/daemon"],
 
     "@pandora/desktop": ["@pandora/desktop@workspace:apps/desktop"],
+
+    "@pandora/ghostty-web": ["@pandora/ghostty-web@workspace:packages/ghostty-web"],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.0-rc.12", "", { "os": "android", "cpu": "arm64" }, "sha512-pv1y2Fv0JybcykuiiD3qBOBdz6RteYojRFY1d+b95WVuzx211CRh+ytI/+9iVyWQ6koTh5dawe4S/yRfOFjgaA=="],
 

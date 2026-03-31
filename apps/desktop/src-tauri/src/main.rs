@@ -5,16 +5,81 @@ mod commands;
 mod daemon_bridge;
 mod database;
 mod git;
-mod ghostty_app;
-mod ghostty_ffi;
 mod models;
-mod surface_registry;
-mod terminal_commands;
 
 use commands::DbState;
 use database::AppDatabase;
 use std::sync::Arc;
+use tauri::Emitter;
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+const MENU_CLOSE_TAB_ID: &str = "pandora.close-tab";
+const MENU_PREVIOUS_TAB_ID: &str = "pandora.previous-tab";
+const MENU_NEXT_TAB_ID: &str = "pandora.next-tab";
+
+fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let pkg_info = app.package_info();
+
+    let close_tab = MenuItem::with_id(app, MENU_CLOSE_TAB_ID, "Close Tab", true, Some("Cmd+W"))?;
+    let previous_tab =
+        MenuItem::with_id(app, MENU_PREVIOUS_TAB_ID, "Previous Tab", true, Some("Cmd+Shift+["))?;
+    let next_tab =
+        MenuItem::with_id(app, MENU_NEXT_TAB_ID, "Next Tab", true, Some("Cmd+Shift+]"))?;
+
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                pkg_info.name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[&close_tab],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &previous_tab,
+                    &next_tab,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
 
 fn main() {
     let pandora_home = git::pandora_home();
@@ -24,17 +89,23 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .on_menu_event(|app, event| match event.id().0.as_str() {
+            MENU_CLOSE_TAB_ID => {
+                let _ = app.emit("app-shortcut", "close-tab");
+            }
+            MENU_PREVIOUS_TAB_ID => {
+                let _ = app.emit("app-shortcut", "previous-tab");
+            }
+            MENU_NEXT_TAB_ID => {
+                let _ = app.emit("app-shortcut", "next-tab");
+            }
+            _ => {}
+        })
         .manage(daemon_bridge::DaemonState::new())
-        .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
         .manage(DbState(db))
         .invoke_handler(tauri::generate_handler![
             // Daemon bridge
             daemon_bridge::daemon_send,
-            // Native terminal surfaces
-            terminal_commands::terminal_surface_create,
-            terminal_commands::terminal_surface_update,
-            terminal_commands::terminal_surface_destroy,
-            terminal_commands::terminal_surface_focus,
             // Project commands
             commands::list_projects,
             commands::add_project,
@@ -58,7 +129,8 @@ fn main() {
             commands::load_app_state,
         ])
         .setup(|app| {
-            ghostty_app::init_ghostty_app(app.handle().clone());
+            let menu = build_app_menu(&app.handle())?;
+            app.set_menu(menu)?;
 
             // Resolve daemon dir relative to repo root
             let daemon_dir = std::env::current_dir()

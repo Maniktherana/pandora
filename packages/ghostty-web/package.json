@@ -1,0 +1,20 @@
+{
+  "name": "@pandora/ghostty-web",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Vendored ghostty-web terminal emulator",
+  "type": "module",
+  "main": "./lib/index.ts",
+  "types": "./lib/index.ts",
+  "exports": {
+    ".": "./lib/index.ts",
+    "./ghostty-vt.wasm": "./ghostty-vt.wasm"
+  },
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

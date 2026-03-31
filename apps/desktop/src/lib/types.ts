@@ -156,32 +156,3 @@ export interface WorkspaceRuntimeState {
   root: LayoutNode | null;
   focusedPaneID: string | null;
 }
-
-export type TerminalSurfaceId = string;
-export type TerminalPresentationMode = PresentationMode;
-
-export interface TerminalSurfaceRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scaleFactor: number;
-}
-
-export interface TerminalSurfaceCreateArgs {
-  surfaceId: TerminalSurfaceId;
-  workspaceId: string;
-  sessionId: string;
-  rect: TerminalSurfaceRect;
-  visible?: boolean;
-  focused?: boolean;
-  presentationMode?: TerminalPresentationMode;
-}
-
-export interface TerminalSurfaceUpdateArgs {
-  surfaceId: TerminalSurfaceId;
-  rect: TerminalSurfaceRect;
-  visible: boolean;
-  focused: boolean;
-  presentationMode?: TerminalPresentationMode;
-}

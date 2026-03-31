@@ -5,7 +5,6 @@ edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
@@ -21,10 +20,3 @@ sha2 = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString", "NSData", "NSThread"] }
-objc2-app-kit = { version = "0.3", features = ["NSView", "NSWindow", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSApplication"] }
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer"] }
-dispatch2 = "0.2"

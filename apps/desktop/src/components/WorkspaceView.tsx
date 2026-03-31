@@ -5,6 +5,7 @@ import TabBar from "@/components/TabBar";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { cn } from "@/lib/utils";
 import type { LayoutNode, LayoutLeaf, LayoutAxis } from "@/lib/types";
+import { terminalTheme } from "@/lib/theme";
 import { RotateCcw, Trash2 } from "lucide-react";
 
 interface PaneViewProps {
@@ -78,10 +79,7 @@ function PaneView({ leaf, isFocused, workspaceId }: PaneViewProps) {
 
   return (
     <div
-      className={cn(
-        "flex flex-col h-full overflow-hidden rounded-sm relative",
-        isFocused && "ring-1 ring-blue-500/40"
-      )}
+      className="flex flex-col h-full overflow-hidden rounded-sm relative"
       onDragOver={handleDragOver}
       onDragLeave={() => setDropZone(null)}
       onDrop={handleDrop}
@@ -90,11 +88,10 @@ function PaneView({ leaf, isFocused, workspaceId }: PaneViewProps) {
         paneID={leaf.id}
         slotIDs={leaf.slotIDs}
         selectedIndex={leaf.selectedIndex}
-        isFocused={isFocused}
         workspaceId={workspaceId}
       />
 
-      <div className="flex-1 min-h-0 bg-[#0a0a0a] relative">
+      <div className="flex-1 min-h-0 relative" style={{ background: terminalTheme.background ?? "#0a0a0a" }}>
         {leaf.slotIDs.map((slotID, idx) => {
           const isActiveTab = idx === leaf.selectedIndex;
           const sessionForSlot = Object.values(sessionsMap).find(
@@ -105,10 +102,13 @@ function PaneView({ leaf, isFocused, workspaceId }: PaneViewProps) {
             <div
               key={slotID}
               className="absolute inset-0"
-              style={{ display: isActiveTab ? "block" : "none" }}
+              style={{
+                visibility: isActiveTab ? "visible" : "hidden",
+                pointerEvents: isActiveTab ? "auto" : "none",
+              }}
+              aria-hidden={!isActiveTab}
             >
               <NativeTerminalSurface
-                surfaceId={`${leaf.id}-${slotID}`}
                 sessionID={sessionForSlot.id}
                 workspaceId={workspaceId}
                 visible={isActiveTab}
