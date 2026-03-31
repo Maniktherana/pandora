@@ -1,16 +1,24 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import {
+  ImperativePanelHandle,
+  PanelResizeHandle,
+} from "react-resizable-panels";
 import Sidebar from "@/components/Sidebar";
 import WorkspaceView from "@/components/WorkspaceView";
+import WorkspaceFileTreePanel from "@/components/WorkspaceFileTreePanel";
+import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { DaemonClient } from "@/lib/daemon-client";
 import { setTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import type { LayoutNode, LayoutLeaf } from "@/lib/types";
-import { PanelLeft, Plus } from "lucide-react";
+import { FolderTree, PanelLeft, Plus } from "lucide-react";
 
 export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const clientRef = useRef<DaemonClient | null>(null);
   const store = useWorkspaceStore;
   // Survives HMR so we don't re-seed terminals on hot reload.
@@ -239,6 +247,18 @@ export default function App() {
   );
   const connectionState = runtime?.connectionState ?? "disconnected";
 
+  // Keep WorkspaceView mounted: collapsing the file-tree panel instead of swapping trees avoids
+  // destroying native Ghostty surfaces (which caused a full flash on every toggle).
+  useLayoutEffect(() => {
+    const p = fileTreePanelRef.current;
+    if (!p) return;
+    if (fileTreeOpen && selectedWs?.status === "ready") {
+      p.expand(12);
+    } else {
+      p.collapse();
+    }
+  }, [fileTreeOpen, selectedWs?.status]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-neutral-950/90">
       {/* Sidebar */}
@@ -251,10 +271,7 @@ export default function App() {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Top bar */}
-        <div
-          className="h-10 flex items-center shrink-0 border-b border-neutral-800"
-          data-tauri-drag-region
-        >
+        <div className="h-10 flex items-center shrink-0 border-b border-neutral-800">
           {!sidebarVisible && (
             <button
               onClick={() => setSidebarVisible(true)}
@@ -279,11 +296,55 @@ export default function App() {
               )}
             </div>
           )}
+          <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
+          {selectedWs?.status === "ready" && (
+            <button
+              type="button"
+              onClick={() => setFileTreeOpen((v) => !v)}
+              className={cn(
+                "mr-3 shrink-0 p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
+                fileTreeOpen && "bg-neutral-800 text-neutral-200"
+              )}
+              title="Toggle file tree"
+            >
+              <FolderTree className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {/* Workspace area */}
-        <div className="flex-1 min-h-0">
-          <WorkspaceView />
+        {/* Workspace area (file tree is a collapsible panel — same tree always so native surfaces stay alive) */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+            <ResizablePanel defaultSize={72} minSize={45}>
+              <div className="h-full min-h-0 min-w-0">
+                <WorkspaceView />
+              </div>
+            </ResizablePanel>
+            <PanelResizeHandle
+              hitAreaMargins={{ coarse: 0, fine: 0 }}
+              className={cn(
+                "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                fileTreeOpen && selectedWs?.status === "ready"
+                  ? "cursor-col-resize"
+                  : "hidden"
+              )}
+            />
+            <ResizablePanel
+              ref={fileTreePanelRef}
+              collapsible
+              collapsedSize={0}
+              defaultSize={28}
+              minSize={12}
+              maxSize={50}
+              className="min-h-0 min-w-0"
+            >
+              <div className="h-full min-h-0 min-w-0">
+                {fileTreeOpen && selectedWs?.status === "ready" ? (
+                  <WorkspaceFileTreePanel workspaceRoot={selectedWs.worktreePath} />
+                ) : null}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
 
         {/* Status bar */}
