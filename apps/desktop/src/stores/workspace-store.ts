@@ -529,11 +529,20 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     set((s) => {
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
-      const newRoot = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
+      let newRoot = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
+      if (!newRoot) {
+        newRoot = createLeaf([]);
+      }
+      const leaves = getAllLeaves(newRoot);
+      const focusedOK =
+        runtime.focusedPaneID && findLeaf(newRoot, runtime.focusedPaneID);
+      const focusedPaneID = focusedOK
+        ? runtime.focusedPaneID
+        : (leaves[0]?.id ?? null);
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: newRoot },
+          [wsId]: { ...runtime, root: newRoot, focusedPaneID },
         },
       };
     });
@@ -586,7 +595,11 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
       function selectTab(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
-          return { ...node, selectedIndex: Math.min(index, node.tabs.length - 1) };
+          const sel =
+            node.tabs.length === 0
+              ? 0
+              : Math.min(Math.max(0, index), node.tabs.length - 1);
+          return { ...node, selectedIndex: sel };
         }
         if (node.type === "split") {
           return { ...node, children: node.children.map(selectTab) };
@@ -697,6 +710,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     const currentLeaf = leaves.find((l) => l.id === runtime.focusedPaneID);
     if (!currentLeaf) return;
 
+    if (currentLeaf.tabs.length === 0) {
+      const withTabs = leaves.find((l) => l.tabs.length > 0);
+      if (withTabs) {
+        get().selectTabInPane(withTabs.id, 0);
+        get().setFocusedPane(withTabs.id);
+      }
+      return;
+    }
+
     // Try cycling within the current pane first
     const nextIndex = currentLeaf.selectedIndex + direction;
     if (nextIndex >= 0 && nextIndex < currentLeaf.tabs.length) {
@@ -711,14 +733,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (nextPaneIdx < 0 || nextPaneIdx >= leaves.length) {
       // Wrap: going left past first pane → last tab of last pane, and vice versa
       const wrapPane = direction === 1 ? leaves[0] : leaves[leaves.length - 1];
-      const wrapTabIdx = direction === 1 ? 0 : wrapPane.tabs.length - 1;
+      const wrapTabIdx =
+        direction === 1 ? 0 : Math.max(0, wrapPane.tabs.length - 1);
       get().selectTabInPane(wrapPane.id, wrapTabIdx);
       get().setFocusedPane(wrapPane.id);
       return;
     }
 
     const nextPane = leaves[nextPaneIdx];
-    const targetIndex = direction === 1 ? 0 : nextPane.tabs.length - 1;
+    const targetIndex =
+      direction === 1 ? 0 : Math.max(0, nextPane.tabs.length - 1);
     get().selectTabInPane(nextPane.id, targetIndex);
     get().setFocusedPane(nextPane.id);
   },

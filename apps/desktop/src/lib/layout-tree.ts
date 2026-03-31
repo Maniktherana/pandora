@@ -33,7 +33,9 @@ export function removeMatchingTabFromTree(node: LayoutNode, tab: PaneTab): Layou
   if (node.type === "leaf") {
     const removedIndex = node.tabs.findIndex((t) => tabsEqual(t, tab));
     const tabs = node.tabs.filter((t) => !tabsEqual(t, tab));
-    if (tabs.length === 0) return null;
+    if (tabs.length === 0) {
+      return { ...node, tabs: [], selectedIndex: 0 };
+    }
     let sel = node.selectedIndex;
     if (removedIndex >= 0) {
       if (removedIndex < sel) sel--;
@@ -58,7 +60,9 @@ export function removeTerminalSlotFromTree(node: LayoutNode, slotId: string): La
 export function removeTabAtIndexInTree(node: LayoutNode, paneID: string, tabIndex: number): LayoutNode | null {
   if (node.type === "leaf" && node.id === paneID) {
     const tabs = node.tabs.filter((_, i) => i !== tabIndex);
-    if (tabs.length === 0) return null;
+    if (tabs.length === 0) {
+      return { ...node, tabs: [], selectedIndex: 0 };
+    }
     let sel = node.selectedIndex;
     if (tabIndex < sel) sel--;
     else if (tabIndex === sel) sel = Math.min(sel, tabs.length - 1);
