@@ -2,6 +2,7 @@ use crate::database::{now_iso8601, AppDatabase};
 use crate::git;
 use crate::models::*;
 use crate::daemon_bridge::{self, DaemonState};
+use std::path::Path;
 use std::sync::Arc;
 use tauri::AppHandle;
 
@@ -277,6 +278,77 @@ pub fn start_workspace_runtime(
     default_cwd: String,
 ) {
     daemon_bridge::start_workspace_runtime(app, workspace_id, workspace_path, default_cwd);
+}
+
+// ─── Workspace file tree ───
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDirEntry {
+    pub name: String,
+    pub is_directory: bool,
+}
+
+fn resolve_path_under_workspace_root(
+    workspace_root: &str,
+    relative_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let root = Path::new(workspace_root);
+    let root_abs = root
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {e}"))?;
+    let trimmed = relative_path.trim();
+    let rel = trimmed.trim_start_matches(|c| c == '/' || c == '\\');
+    if Path::new(rel).is_absolute() {
+        return Err("Absolute paths are not allowed".to_string());
+    }
+    let candidate = if rel.is_empty() || rel == "." {
+        root_abs.clone()
+    } else {
+        root_abs.join(rel)
+    };
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|e| format!("Cannot read directory: {e}"))?;
+    if !resolved.starts_with(&root_abs) {
+        return Err("Path escapes workspace root".to_string());
+    }
+    Ok(resolved)
+}
+
+#[tauri::command]
+pub fn list_workspace_directory(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<Vec<WorkspaceDirEntry>, String> {
+    let dir = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+    if !dir.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+
+    let mut entries: Vec<WorkspaceDirEntry> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let meta = e.file_type().ok()?;
+            Some(WorkspaceDirEntry {
+                name,
+                is_directory: meta.is_dir(),
+            })
+        })
+        .collect();
+
+    entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+
+    Ok(entries)
 }
 
 // ─── Reload all data (convenience for frontend) ───

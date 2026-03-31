@@ -53,6 +53,38 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 
 @implementation PandoraTerminalNativeView
 
+/// Ghostty needs an explicit pixel grid + content scale (host-managed path). Pure native terminals
+/// get backing updates from AppKit automatically; we mirror that here so moving the window to
+/// another display updates scale without relying on the webview/JS sync loop.
+- (void)pandoraSyncBackingToSurface {
+    if (self.surface == NULL) {
+        return;
+    }
+    NSWindow *win = self.window;
+    CGFloat scale = (win != nil) ? win.backingScaleFactor : 1.0;
+    if (scale <= 0.0 || scale != scale) {
+        scale = 1.0;
+    }
+    NSSize sz = self.bounds.size;
+    uint32_t w = (uint32_t)fmax(1.0, round(sz.width * scale));
+    uint32_t h = (uint32_t)fmax(1.0, round(sz.height * scale));
+    ghostty_surface_set_content_scale(self.surface, scale, scale);
+    ghostty_surface_set_size(self.surface, w, h);
+    if (self.layer != nil) {
+        self.layer.contentsScale = scale;
+    }
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    [self pandoraSyncBackingToSurface];
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self pandoraSyncBackingToSurface];
+}
+
 - (BOOL)acceptsFirstResponder {
     return YES;
 }
@@ -241,6 +273,7 @@ void *pandora_terminal_view_new(double x, double y, double width, double height)
 void pandora_terminal_view_set_surface(void *view_ptr, ghostty_surface_t surface) {
     PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
     view.surface = surface;
+    [view pandoraSyncBackingToSurface];
 }
 
 bool pandora_terminal_view_focus(void *view_ptr) {

@@ -123,6 +123,7 @@ fn main() {
             terminal_commands::terminal_surface_focus,
             terminal_commands::terminal_surfaces_begin_web_overlay,
             terminal_commands::terminal_surfaces_end_web_overlay,
+            terminal_commands::native_window_scale_factor,
             // Project commands
             commands::list_projects,
             commands::add_project,
@@ -145,6 +146,7 @@ fn main() {
             // Full state reload
             commands::load_app_state,
             commands::native_terminal_supported,
+            commands::list_workspace_directory,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());

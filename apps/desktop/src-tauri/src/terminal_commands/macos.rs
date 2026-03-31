@@ -1,6 +1,20 @@
-use crate::surface_registry::{SurfaceRect, SurfaceRegistry};
+use crate::surface_registry::{backing_scale_for_ns_window, SurfaceRect, SurfaceRegistry};
 use std::sync::Arc;
 use tauri::WebviewWindow;
+
+/// Backing scale for the window’s current display (same source as native terminal surfaces).
+#[tauri::command]
+pub fn native_window_scale_factor(window: WebviewWindow) -> Result<f64, String> {
+    let ptr = window.ns_window().map_err(|e| e.to_string())? as usize;
+    let (tx, rx) = std::sync::mpsc::channel();
+    window
+        .run_on_main_thread(move || {
+            let s = backing_scale_for_ns_window(ptr as *mut _);
+            let _ = tx.send(s);
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 pub fn terminal_surface_create(

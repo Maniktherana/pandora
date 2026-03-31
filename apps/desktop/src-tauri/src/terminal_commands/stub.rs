@@ -5,6 +5,11 @@ use tauri::WebviewWindow;
 const MSG: &str = "Native Ghostty terminal is only available on macOS with Apple Silicon (arm64).";
 
 #[tauri::command]
+pub fn native_window_scale_factor(window: WebviewWindow) -> Result<f64, String> {
+    window.scale_factor().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn terminal_surface_create(
     _window: WebviewWindow,
     _app: tauri::AppHandle,

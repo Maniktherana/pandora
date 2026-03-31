@@ -9,6 +9,7 @@ use crate::daemon_bridge::{self, DaemonState};
 use crate::ghostty_ffi::*;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::NSView;
@@ -64,6 +65,74 @@ struct NativeSurface {
 // while holding the Mutex, and the ghostty surface is created/destroyed
 // on the main thread.
 unsafe impl Send for NativeSurface {}
+
+/// `NSWindow.backingScaleFactor` for the display the window is on (unlike WKWebView DPR).
+unsafe fn ns_window_backing_scale(window_ptr: *mut c_void) -> f64 {
+    let win = window_ptr as *const AnyObject;
+    let scale: f64 = objc2::msg_send![win, backingScaleFactor];
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+/// Best-effort backing scale when moving between displays: `NSWindow`, `window.screen`, and
+/// `deepestScreen` can lag each other briefly; take the max of finite readings so 2× is picked up
+/// as soon as any AppKit object reports it.
+unsafe fn ns_effective_backing_scale(window_ptr: *mut c_void) -> f64 {
+    let win = window_ptr as *const AnyObject;
+    let w = ns_window_backing_scale(window_ptr);
+
+    let screen: *const AnyObject = objc2::msg_send![win, screen];
+    let mut s = w;
+    if !screen.is_null() {
+        let v: f64 = objc2::msg_send![screen, backingScaleFactor];
+        if v.is_finite() && v > 0.0 {
+            s = v;
+        }
+    }
+
+    let deep: *const AnyObject = objc2::msg_send![win, deepestScreen];
+    let mut d = s;
+    if !deep.is_null() {
+        let v: f64 = objc2::msg_send![deep, backingScaleFactor];
+        if v.is_finite() && v > 0.0 {
+            d = v;
+        }
+    }
+
+    let m = w.max(s).max(d);
+    if m.is_finite() && m > 0.0 {
+        m
+    } else {
+        1.0
+    }
+}
+
+/// Same backing scale as [`SurfaceRegistry::update_surface`] (for the `native_window_scale_factor` command).
+pub fn backing_scale_for_ns_window(window_ptr: *mut c_void) -> f64 {
+    unsafe { ns_effective_backing_scale(window_ptr) }
+}
+
+fn surface_state_unchanged(
+    prev_rect: &SurfaceRect,
+    next_rect: &SurfaceRect,
+    prev_vis: bool,
+    next_vis: bool,
+    prev_foc: bool,
+    next_foc: bool,
+) -> bool {
+    const EPS_POS: f64 = 0.25;
+    const EPS_SCALE: f64 = 0.001;
+    (prev_rect.x - next_rect.x).abs() < EPS_POS
+        && (prev_rect.y - next_rect.y).abs() < EPS_POS
+        && (prev_rect.width - next_rect.width).abs() < EPS_POS
+        && (prev_rect.height - next_rect.height).abs() < EPS_POS
+        && (prev_rect.scale_factor - next_rect.scale_factor).abs() < EPS_SCALE
+        && prev_vis == next_vis
+        && prev_foc == next_foc
+}
 
 // ---------------------------------------------------------------------------
 // SurfaceRegistry
@@ -126,6 +195,9 @@ impl SurfaceRegistry {
             let guard = self.window_ptr.lock().unwrap();
             guard.ok_or_else(|| "NSWindow not set".to_string())?
         };
+
+        let mut rect = rect;
+        rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         // Layout changes may use a new surface_id for the same PTY; tear down the old native surface.
         let prev_for_session = {
@@ -255,26 +327,50 @@ impl SurfaceRegistry {
     pub fn update_surface(
         &self,
         surface_id: &str,
-        rect: SurfaceRect,
+        mut rect: SurfaceRect,
         visible: bool,
         focused: bool,
     ) -> Result<(), String> {
+        let window_ptr = {
+            let guard = self.window_ptr.lock().unwrap();
+            guard.ok_or_else(|| "NSWindow not set".to_string())?
+        };
+        rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
+
         let suppress = self.web_ui_suppresses_native_terminals();
         let mut surfaces = self.surfaces.lock().unwrap();
         let surface = surfaces
             .get_mut(surface_id)
             .ok_or_else(|| format!("Surface not found: {surface_id}"))?;
 
+        // Re-apply content scale on every IPC tick so Ghostty catches up even when AppKit briefly
+        // reports an unchanged scale factor (stale `surface.rect` vs fresh `rect`).
+        unsafe {
+            ghostty_surface_set_content_scale(
+                surface.ghostty_surface,
+                rect.scale_factor,
+                rect.scale_factor,
+            );
+        }
+
+        if surface_state_unchanged(
+            &surface.rect,
+            &rect,
+            surface.visible,
+            visible,
+            surface.focused,
+            focused,
+        ) {
+            surface.rect.scale_factor = rect.scale_factor;
+            return Ok(());
+        }
+
         // Flip Y coordinate
         let flipped_y = unsafe {
-            let window_ptr = {
-                let guard = self.window_ptr.lock().unwrap();
-                guard.ok_or_else(|| "NSWindow not set".to_string())?
-            };
             let content_view: *mut c_void =
-                objc2::msg_send![window_ptr as *const objc2::runtime::AnyObject, contentView];
+                objc2::msg_send![window_ptr as *const AnyObject, contentView];
             let frame: NSRect =
-                objc2::msg_send![content_view as *const objc2::runtime::AnyObject, frame];
+                objc2::msg_send![content_view as *const AnyObject, frame];
             frame.size.height - rect.y - rect.height
         };
 
@@ -303,15 +399,12 @@ impl SurfaceRegistry {
             let _ = unsafe { pandora_terminal_view_focus(Retained::as_ptr(&surface.ns_view) as *mut c_void) };
         }
 
-        // Update content scale if it changed
-        if (rect.scale_factor - surface.rect.scale_factor).abs() > f64::EPSILON {
-            unsafe {
-                ghostty_surface_set_content_scale(
-                    surface.ghostty_surface,
-                    rect.scale_factor,
-                    rect.scale_factor,
-                );
-            }
+        unsafe {
+            ghostty_surface_set_content_scale(
+                surface.ghostty_surface,
+                rect.scale_factor,
+                rect.scale_factor,
+            );
         }
 
         // Persist state

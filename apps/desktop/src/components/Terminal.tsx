@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { TauriEvent } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -34,8 +35,6 @@ export default function TerminalSurface({
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const createdRef = useRef(false);
-  const lastRectRef = useRef("");
-  const lastDprRef = useRef(typeof window !== "undefined" ? window.devicePixelRatio : 1);
   const [nativeOk, setNativeOk] = useState<boolean | null>(null);
 
   const nativeOkRef = useRef<boolean | null>(null);
@@ -55,15 +54,16 @@ export default function TerminalSurface({
     const el = ctxRef.current.anchorElement ?? containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
     if (r.width <= 0 || r.height <= 0) return;
 
+    // Layout only from the webview (CSS pixels / points). Scale is applied on the native side
+    // (Rust + NSView backing) — same idea as a normal AppKit terminal, not devicePixelRatio here.
     const rect: TerminalSurfaceRect = {
       x: r.left,
       y: r.top,
       width: r.width,
       height: r.height,
-      scaleFactor: dpr,
+      scaleFactor: 1,
     };
 
     const { sessionID: sid, workspaceId: wid, surfaceId: sfid, visible: vis, focused: foc } =
@@ -71,7 +71,6 @@ export default function TerminalSurface({
 
     if (!createdRef.current || forceCreate) {
       createdRef.current = true;
-      lastRectRef.current = "";
       void invoke("terminal_surface_create", {
         surfaceId: sfid,
         workspaceId: wid,
@@ -80,10 +79,8 @@ export default function TerminalSurface({
       }).catch((e) => console.error("Failed to create native surface:", e));
     }
 
-    const key = JSON.stringify({ rect, visible: vis, focused: foc });
-    if (!forceCreate && key === lastRectRef.current) return;
-    lastRectRef.current = key;
-
+    // Rust overwrites scale from the NSWindow; the terminal NSView also syncs Ghostty on
+    // viewDidChangeBackingProperties when the window moves between displays.
     void invoke("terminal_surface_update", {
       surfaceId: sfid,
       rect,
@@ -95,74 +92,106 @@ export default function TerminalSurface({
   const performSyncRef = useRef(performSync);
   performSyncRef.current = performSync;
 
+  const rafSyncRef = useRef<number | null>(null);
+  const scheduleSync = useCallback(() => {
+    if (rafSyncRef.current != null) return;
+    rafSyncRef.current = requestAnimationFrame(() => {
+      rafSyncRef.current = null;
+      performSyncRef.current(false);
+    });
+  }, []);
+
   // Create once per (session, surface); destroy only when this effect cleans up — not on focus/visibility/sync churn.
   useEffect(() => {
     if (nativeOk !== true || !sessionID) return;
 
-    const bootstrap = () => performSyncRef.current(true);
-    bootstrap();
+    let cancelled = false;
     let innerRaf = 0;
-    const outerRaf = requestAnimationFrame(() => {
-      innerRaf = requestAnimationFrame(bootstrap);
+    let outerRaf = 0;
+
+    performSyncRef.current(true);
+    outerRaf = requestAnimationFrame(() => {
+      innerRaf = requestAnimationFrame(() => {
+        if (!cancelled) performSyncRef.current(true);
+      });
     });
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(outerRaf);
       cancelAnimationFrame(innerRaf);
       createdRef.current = false;
-      lastRectRef.current = "";
       void invoke("terminal_surface_destroy", { surfaceId }).catch(() => {});
     };
   }, [nativeOk, sessionID, surfaceId]);
 
-  // Geometry + scale: ResizeObserver, window resize, Tauri scale/window move, DPR poll (monitor changes).
+  // Window-level scale/geometry sync: must not depend on a mounted anchor — hoisted surfaces can mount
+  // before anchorElement exists; Wry may also deliver tauri://move / tauri://scale-change more reliably than onMoved.
+  useEffect(() => {
+    if (nativeOk !== true) return;
+
+    const syncNow = () => {
+      performSyncRef.current(false);
+    };
+
+    const onWinResize = () => scheduleSync();
+    window.addEventListener("resize", onWinResize);
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") syncNow();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    const win = getCurrentWindow();
+    const push = (p: Promise<() => void>) => {
+      void p
+        .then((u) => {
+          if (!cancelled) unlisteners.push(u);
+        })
+        .catch(() => {});
+    };
+    push(win.onScaleChanged(() => syncNow()));
+    push(win.onResized(() => scheduleSync()));
+    push(win.onMoved(() => syncNow()));
+    push(win.listen(TauriEvent.WINDOW_MOVED, () => syncNow()));
+    push(win.listen(TauriEvent.WINDOW_RESIZED, () => scheduleSync()));
+    push(win.listen(TauriEvent.WINDOW_SCALE_FACTOR_CHANGED, () => syncNow()));
+
+    const scalePoll = window.setInterval(() => {
+      scheduleSync();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      if (rafSyncRef.current != null) {
+        cancelAnimationFrame(rafSyncRef.current);
+        rafSyncRef.current = null;
+      }
+      window.removeEventListener("resize", onWinResize);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(scalePoll);
+      for (const u of unlisteners) u();
+    };
+  }, [nativeOk, scheduleSync]);
+
+  // Layout changes inside the webview (pane resize, file tree) — coalesce to one native update per frame.
   useEffect(() => {
     if (nativeOk !== true) return;
     const el = anchorElement ?? containerRef.current;
     if (!el) return;
 
-    const sync = () => performSyncRef.current(false);
-
-    const ro = new ResizeObserver(sync);
+    const ro = new ResizeObserver(() => scheduleSync());
     ro.observe(el);
-
-    const onWinResize = () => sync();
-    window.addEventListener("resize", onWinResize);
-
-    let cancelled = false;
-    const unlisteners: Array<() => void> = [];
-    void getCurrentWindow()
-      .onScaleChanged(() => {
-        lastDprRef.current = window.devicePixelRatio || 1;
-        sync();
-      })
-      .then((u) => {
-        if (!cancelled) unlisteners.push(u);
-      })
-      .catch(() => {});
-    void getCurrentWindow()
-      .onResized(() => sync())
-      .then((u) => {
-        if (!cancelled) unlisteners.push(u);
-      })
-      .catch(() => {});
-
-    const dprTimer = window.setInterval(() => {
-      const d = window.devicePixelRatio || 1;
-      if (Math.abs(d - lastDprRef.current) > 0.001) {
-        lastDprRef.current = d;
-        sync();
-      }
-    }, 200);
-
     return () => {
-      cancelled = true;
       ro.disconnect();
-      window.removeEventListener("resize", onWinResize);
-      window.clearInterval(dprTimer);
-      for (const u of unlisteners) u();
+      if (rafSyncRef.current != null) {
+        cancelAnimationFrame(rafSyncRef.current);
+        rafSyncRef.current = null;
+      }
     };
-  }, [nativeOk, surfaceId, anchorElement]);
+  }, [nativeOk, surfaceId, anchorElement, scheduleSync]);
 
   // Visibility / focus — update native surface without destroy/recreate.
   useEffect(() => {
