@@ -182,8 +182,6 @@ function DirectoryNode({
   );
 }
 
-const PERSIST_FILE_TREE_MS = 400;
-
 export default function WorkspaceFileTreePanel({
   workspaceRoot,
   workspaceId,
@@ -196,17 +194,33 @@ export default function WorkspaceFileTreePanel({
   const openFile = useEditorStore((s) => s.openFile);
 
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const expandedSnapshotRef = useRef<Set<string>>(new Set());
   const expandedPathsRef = useRef(expandedPaths);
   expandedPathsRef.current = expandedPaths;
 
+  const expansionLoadedRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
-    setExpandedPaths(new Set());
-    void loadFileTreeExpandedPaths(workspaceId).then((paths) => {
-      if (!cancelled) setExpandedPaths(new Set(paths));
-    });
+    expansionLoadedRef.current = false;
+    void loadFileTreeExpandedPaths(workspaceId)
+      .then((paths) => {
+        if (cancelled) return;
+        let merged = new Set<string>();
+        setExpandedPaths((current) => {
+          merged = new Set<string>(paths);
+          for (const p of current) merged.add(p);
+          return merged;
+        });
+        expansionLoadedRef.current = true;
+        const wid = workspaceId;
+        const snap = new Set(merged);
+        queueMicrotask(() => {
+          if (!cancelled) void persistFileTreeExpandedPaths(wid, snap);
+        });
+      })
+      .catch(() => {
+        if (!cancelled) expansionLoadedRef.current = true;
+      });
     return () => {
       cancelled = true;
     };
@@ -215,31 +229,10 @@ export default function WorkspaceFileTreePanel({
   useEffect(() => {
     const wid = workspaceId;
     return () => {
-      if (persistTimerRef.current) {
-        clearTimeout(persistTimerRef.current);
-        persistTimerRef.current = null;
-      }
+      if (!expansionLoadedRef.current) return;
       void persistFileTreeExpandedPaths(wid, expandedPathsRef.current);
     };
   }, [workspaceId]);
-
-  const schedulePersist = useCallback(
-    (next: Set<string>) => {
-      expandedSnapshotRef.current = next;
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = setTimeout(() => {
-        persistTimerRef.current = null;
-        void persistFileTreeExpandedPaths(workspaceId, expandedSnapshotRef.current);
-      }, PERSIST_FILE_TREE_MS);
-    },
-    [workspaceId]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    };
-  }, []);
 
   const isPathExpanded = useCallback((relPath: string) => expandedPaths.has(relPath), [expandedPaths]);
 
@@ -249,11 +242,15 @@ export default function WorkspaceFileTreePanel({
         const next = new Set(prev);
         if (expanded) next.add(relPath);
         else next.delete(relPath);
-        schedulePersist(next);
+        if (expansionLoadedRef.current) {
+          const wid = workspaceId;
+          const snapshot = new Set(next);
+          queueMicrotask(() => void persistFileTreeExpandedPaths(wid, snapshot));
+        }
         return next;
       });
     },
-    [schedulePersist]
+    [workspaceId]
   );
 
   const expansionValue = useMemo<ExpansionCtx>(
