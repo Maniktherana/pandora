@@ -22,6 +22,7 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": true,
+        "backgroundColor": "#00000000",
         "windowEffects": {
           "effects": ["sidebar"],
           "state": "active"

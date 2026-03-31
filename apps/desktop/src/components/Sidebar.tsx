@@ -41,10 +41,10 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
         className={cn(
           "w-full text-left px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-2",
           isActive
-            ? "bg-blue-600/20 border border-blue-500/30"
+            ? "bg-blue-500/25 border border-blue-400/35"
             : isSelected
-            ? "bg-neutral-800/60 border border-transparent"
-            : "hover:bg-neutral-800/40 border border-transparent"
+            ? "bg-white/[0.08] border border-white/[0.06]"
+            : "hover:bg-white/[0.06] border border-transparent"
         )}
       >
         <StatusDot status={workspace.status} />
@@ -56,7 +56,7 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
                 e.stopPropagation();
                 void retryWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-neutral-700"
+              className="p-0.5 rounded hover:bg-white/10"
               title="Retry"
             >
               <RotateCcw className="w-3 h-3 text-neutral-400" />
@@ -66,7 +66,7 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
                 e.stopPropagation();
                 void removeWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-neutral-700"
+              className="p-0.5 rounded hover:bg-white/10"
               title="Remove"
             >
               <Trash2 className="w-3 h-3 text-neutral-400" />
@@ -101,7 +101,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
       <div
         className={cn(
           "flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer group",
-          isSelected ? "bg-neutral-800/40" : "hover:bg-neutral-800/30"
+          isSelected ? "bg-white/[0.07]" : "hover:bg-white/[0.05]"
         )}
         onClick={() => {
           selectProject(project.id);
@@ -114,7 +114,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
           <ChevronRight className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
         )}
         <div
-          className="w-5 h-5 rounded bg-neutral-700 flex items-center justify-center text-[10px] font-bold text-neutral-300 shrink-0"
+          className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-[10px] font-bold text-neutral-200 shrink-0"
         >
           {project.displayName.charAt(0).toUpperCase()}
         </div>
@@ -126,7 +126,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
             e.stopPropagation();
             void createWorkspace(project.id);
           }}
-          className="p-0.5 rounded hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
           title="New Workspace"
         >
           <Plus className="w-3.5 h-3.5 text-neutral-400" />
@@ -176,7 +176,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-neutral-900/40 backdrop-blur-2xl border-r border-white/5">
+    <div className="flex flex-col h-full bg-transparent border-r border-white/[0.08]">
       {/* Header — pt-11 clears macOS traffic lights in overlay titlebar */}
       <div className="flex items-center gap-2 px-3 pt-11 pb-2" data-tauri-drag-region>
         <div className="relative flex-1">
@@ -186,19 +186,19 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
             placeholder="Search..."
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-md pl-7 pr-2 py-1 text-xs text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-neutral-600"
+            className="w-full bg-transparent border border-white/10 rounded-md pl-7 pr-2 py-1 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-white/20"
           />
         </div>
         <button
           onClick={() => void handleAddProject()}
-          className="p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+          className="p-1.5 rounded-md hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-colors"
           title="Add Project"
         >
           <FolderPlus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={onCollapse}
-          className="p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+          className="p-1.5 rounded-md hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-colors"
           title="Hide Sidebar"
         >
           <ChevronLeft className="w-3.5 h-3.5" />

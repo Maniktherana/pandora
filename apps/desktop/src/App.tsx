@@ -297,16 +297,16 @@ export default function App() {
   }, [fileTreeOpen, selectedWs?.status]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-neutral-950/90">
-      {/* Sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-transparent">
+      {/* Sidebar — column stays transparent so native window translucency / vibrancy shows through */}
       {sidebarVisible && (
-        <div className="w-56 shrink-0 h-full">
+        <div className="w-56 shrink-0 h-full bg-transparent">
           <Sidebar onCollapse={() => setSidebarVisible(false)} />
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      {/* Main content — opaque panel so workspace stays readable */}
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-neutral-950/90">
         {/* Top bar */}
         <div className="h-10 flex items-center shrink-0 border-b border-neutral-800">
           {!sidebarVisible && (

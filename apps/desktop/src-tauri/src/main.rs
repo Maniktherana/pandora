@@ -158,6 +158,13 @@ fn main() {
             let menu = build_app_menu(&app.handle())?;
             app.set_menu(menu)?;
 
+            // Transparent window: ensure WKWebView disables opaque backing (drawsBackground /
+            // underPageBackgroundColor). Without this, clear HTML still composites as black on macOS.
+            #[cfg(target_os = "macos")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            }
+
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             ghostty_app::init_ghostty_app(app.handle().clone());
 
