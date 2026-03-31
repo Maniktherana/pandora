@@ -8,7 +8,8 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronRight, File, Folder } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -139,7 +140,7 @@ function DirectoryNode({
             style={{ paddingLeft: 6 + depth * 12 }}
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
-            <Folder className="size-3.5 shrink-0 text-amber-600/90" />
+            <FileTypeIcon path={relPath} kind="directory" expanded={open} />
             <span className="truncate text-xs">{name}</span>
           </Button>
         }
@@ -165,7 +166,9 @@ function DirectoryNode({
               <FileTreeRow
                 key={joinRel(relPath, entry.name)}
                 depth={depth + 1}
-                icon={<File className="size-3.5 shrink-0 text-neutral-500" />}
+                icon={
+                  <FileTypeIcon path={joinRel(relPath, entry.name)} kind="file" />
+                }
                 label={entry.name}
                 onOpen={() =>
                   void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))
@@ -307,7 +310,7 @@ export default function WorkspaceFileTreePanel({
               <FileTreeRow
                 key={entry.name}
                 depth={0}
-                icon={<File className="size-3.5 shrink-0 text-neutral-500" />}
+                icon={<FileTypeIcon path={entry.name} kind="file" />}
                 label={entry.name}
                 onOpen={() => void openFile(workspaceId, workspaceRoot, entry.name)}
               />

@@ -4,6 +4,8 @@ export const UI_KEYS = {
   sidebarVisible: "sidebar_visible",
   /** JSON map: workspaceId -> relative folder paths that stay expanded */
   workspaceFileTreeExpanded: "workspace_file_tree_expanded",
+  /** JSON map: workspaceId -> whether the right file-tree panel was open */
+  workspaceFileTreeOpen: "workspace_file_tree_open",
 } as const;
 
 export async function getUiState(key: string): Promise<string | null> {
@@ -50,4 +52,41 @@ export async function persistFileTreeExpandedPaths(
   const map = parseExpansionMap(raw);
   map[workspaceId] = Array.from(new Set(paths)).sort();
   await setUiState(UI_KEYS.workspaceFileTreeExpanded, JSON.stringify(map));
+}
+
+type FileTreeOpenMap = Record<string, boolean>;
+
+function parseOpenMap(raw: string | null): FileTreeOpenMap {
+  if (!raw) return {};
+  try {
+    const o = JSON.parse(raw) as unknown;
+    if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+    const out: FileTreeOpenMap = {};
+    for (const [k, v] of Object.entries(o)) {
+      if (typeof v === "boolean") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function loadFileTreeOpenForWorkspace(workspaceId: string): Promise<boolean> {
+  const raw = await getUiState(UI_KEYS.workspaceFileTreeOpen);
+  const map = parseOpenMap(raw);
+  return map[workspaceId] === true;
+}
+
+export async function persistFileTreeOpenForWorkspace(
+  workspaceId: string,
+  open: boolean
+): Promise<void> {
+  const raw = await getUiState(UI_KEYS.workspaceFileTreeOpen);
+  const map = parseOpenMap(raw);
+  if (open) {
+    map[workspaceId] = true;
+  } else {
+    delete map[workspaceId];
+  }
+  await setUiState(UI_KEYS.workspaceFileTreeOpen, JSON.stringify(map));
 }
