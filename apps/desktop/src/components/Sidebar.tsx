@@ -135,7 +135,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
 
       {/* Workspace children */}
       {project.isExpanded && (
-        <div className="ml-4 mt-0.5 space-y-0.5">
+        <div className="mt-0.5 space-y-0.5">
           {workspaces.map((ws) => (
             <WorkspaceRow key={ws.id} workspace={ws} />
           ))}
