@@ -6,6 +6,15 @@ mod daemon_bridge;
 mod database;
 mod git;
 mod models;
+mod native_shortcuts;
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod ghostty_app;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod ghostty_ffi;
+
+mod surface_registry;
+mod terminal_commands;
 
 use commands::DbState;
 use database::AppDatabase;
@@ -102,10 +111,18 @@ fn main() {
             _ => {}
         })
         .manage(daemon_bridge::DaemonState::new())
+        .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
         .manage(DbState(db))
         .invoke_handler(tauri::generate_handler![
             // Daemon bridge
             daemon_bridge::daemon_send,
+            // Native terminal surfaces (Ghostty on macOS arm64; stubs elsewhere)
+            terminal_commands::terminal_surface_create,
+            terminal_commands::terminal_surface_update,
+            terminal_commands::terminal_surface_destroy,
+            terminal_commands::terminal_surface_focus,
+            terminal_commands::terminal_surfaces_begin_web_overlay,
+            terminal_commands::terminal_surfaces_end_web_overlay,
             // Project commands
             commands::list_projects,
             commands::add_project,
@@ -127,10 +144,16 @@ fn main() {
             commands::start_workspace_runtime,
             // Full state reload
             commands::load_app_state,
+            commands::native_terminal_supported,
         ])
         .setup(|app| {
+            native_shortcuts::init(app.handle().clone());
+
             let menu = build_app_menu(&app.handle())?;
             app.set_menu(menu)?;
+
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            ghostty_app::init_ghostty_app(app.handle().clone());
 
             // Resolve daemon dir relative to repo root
             let daemon_dir = std::env::current_dir()

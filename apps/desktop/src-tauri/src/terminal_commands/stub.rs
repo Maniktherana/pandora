@@ -1,0 +1,64 @@
+use crate::surface_registry::{SurfaceRect, SurfaceRegistry};
+use std::sync::Arc;
+use tauri::WebviewWindow;
+
+const MSG: &str = "Native Ghostty terminal is only available on macOS with Apple Silicon (arm64).";
+
+#[tauri::command]
+pub fn terminal_surface_create(
+    _window: WebviewWindow,
+    _app: tauri::AppHandle,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _surface_id: String,
+    _workspace_id: String,
+    _session_id: String,
+    _rect: SurfaceRect,
+) -> Result<(), String> {
+    Err(MSG.into())
+}
+
+#[tauri::command]
+pub fn terminal_surface_update(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _surface_id: String,
+    _rect: SurfaceRect,
+    _visible: bool,
+    _focused: bool,
+) -> Result<(), String> {
+    Err(MSG.into())
+}
+
+#[tauri::command]
+pub fn terminal_surface_destroy(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _surface_id: String,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+pub fn terminal_surface_focus(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _surface_id: String,
+) -> Result<(), String> {
+    Err(MSG.into())
+}
+
+#[tauri::command]
+pub fn terminal_surfaces_begin_web_overlay(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+pub fn terminal_surfaces_end_web_overlay(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+) -> Result<(), String> {
+    Ok(())
+}

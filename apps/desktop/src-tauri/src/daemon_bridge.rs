@@ -3,6 +3,8 @@
 //! Each workspace gets its own daemon process and Unix socket connection.
 //! The frontend sends/receives messages scoped by workspaceId.
 
+use crate::surface_registry::SurfaceRegistry;
+use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -205,7 +207,27 @@ pub fn start_workspace_runtime(
                             msg
                         };
 
-                        let _ = app.emit("daemon-message", wrapped);
+                        let mut emitted_to_surface = false;
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&wrapped) {
+                            if parsed.get("type").and_then(|v| v.as_str()) == Some("output_chunk") {
+                                if let (Some(session_id), Some(data)) = (
+                                    parsed.get("sessionID").and_then(|v| v.as_str()),
+                                    parsed.get("data").and_then(|v| v.as_str()),
+                                ) {
+                                    if let Ok(bytes) =
+                                        base64::engine::general_purpose::STANDARD.decode(data)
+                                    {
+                                        let registry = app.state::<Arc<SurfaceRegistry>>();
+                                        emitted_to_surface =
+                                            registry.inner().feed_output(session_id, &bytes);
+                                    }
+                                }
+                            }
+                        }
+
+                        if !emitted_to_surface {
+                            let _ = app.emit("daemon-message", wrapped);
+                        }
                     }
                     Err(e) => {
                         eprintln!(

@@ -16,7 +16,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    target: "es2021",
+    target: "es2022",
     minify: !process.env.TAURI_DEBUG ? "oxc" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
     rolldownOptions: {

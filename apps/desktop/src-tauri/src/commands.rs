@@ -7,6 +7,12 @@ use tauri::AppHandle;
 
 pub struct DbState(pub Arc<AppDatabase>);
 
+/// True when this binary was built with native libghostty (macOS Apple Silicon only).
+#[tauri::command]
+pub fn native_terminal_supported() -> bool {
+    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+}
+
 // ─── Project commands ───
 
 #[tauri::command]

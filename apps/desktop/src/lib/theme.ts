@@ -1,15 +1,32 @@
-import type { ITheme } from "@pandora/ghostty-web";
-
 /**
- * Ghostty-format theme config.
+ * Ghostty-format theme config (for UI chrome around the native terminal).
  * Uses the same key=value format as ~/.config/ghostty/config and Ghostty theme files.
- * To change the terminal theme, edit the THEME_CONFIG string below.
- *
- * Supported keys:
- *   background, foreground, cursor-color, cursor-text,
- *   selection-background, selection-foreground,
- *   palette = 0=#RRGGBB  (indices 0-15)
  */
+
+export interface TerminalThemeColors {
+  black?: string;
+  red?: string;
+  green?: string;
+  yellow?: string;
+  blue?: string;
+  magenta?: string;
+  cyan?: string;
+  white?: string;
+  brightBlack?: string;
+  brightRed?: string;
+  brightGreen?: string;
+  brightYellow?: string;
+  brightBlue?: string;
+  brightMagenta?: string;
+  brightCyan?: string;
+  brightWhite?: string;
+  background?: string;
+  foreground?: string;
+  cursor?: string;
+  cursorAccent?: string;
+  selectionBackground?: string;
+  selectionForeground?: string;
+}
 
 const THEME_CONFIG = `
 palette = 0=#929292
@@ -36,8 +53,7 @@ selection-background = #474e91
 selection-foreground = #f4f4f4
 `;
 
-// Palette index → ITheme key mapping
-const PALETTE_KEYS: Record<number, keyof ITheme> = {
+const PALETTE_KEYS: Record<number, keyof TerminalThemeColors> = {
   0: "black",
   1: "red",
   2: "green",
@@ -56,8 +72,8 @@ const PALETTE_KEYS: Record<number, keyof ITheme> = {
   15: "brightWhite",
 };
 
-function parseGhosttyTheme(config: string): ITheme {
-  const theme: ITheme = {};
+function parseGhosttyTheme(config: string): TerminalThemeColors {
+  const theme: TerminalThemeColors = {};
 
   for (const raw of config.split("\n")) {
     const line = raw.trim();
@@ -70,14 +86,13 @@ function parseGhosttyTheme(config: string): ITheme {
     const value = line.slice(eqIdx + 1).trim();
 
     if (key === "palette") {
-      // "palette = 0=#929292"
       const palEq = value.indexOf("=");
       if (palEq === -1) continue;
       const idx = parseInt(value.slice(0, palEq).trim(), 10);
       const color = value.slice(palEq + 1).trim();
       const themeKey = PALETTE_KEYS[idx];
       if (themeKey) {
-        (theme as any)[themeKey] = color;
+        (theme as Record<string, string>)[themeKey] = color;
       }
     } else if (key === "background") {
       theme.background = value;
@@ -97,4 +112,4 @@ function parseGhosttyTheme(config: string): ITheme {
   return theme;
 }
 
-export const terminalTheme: ITheme = parseGhosttyTheme(THEME_CONFIG);
+export const terminalTheme: TerminalThemeColors = parseGhosttyTheme(THEME_CONFIG);

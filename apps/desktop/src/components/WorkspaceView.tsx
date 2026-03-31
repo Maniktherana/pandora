@@ -1,97 +1,133 @@
-import { useCallback, useState } from "react";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import NativeTerminalSurface from "@/components/Terminal";
-import TabBar from "@/components/TabBar";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
+import { PanelResizeHandle } from "react-resizable-panels";
+import TerminalSurface from "@/components/Terminal";
+import TabBar from "@/components/dnd/TabBar";
+import { TabDragProvider } from "@/components/dnd/TabDragLayer";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { cn } from "@/lib/utils";
-import type { LayoutNode, LayoutLeaf, LayoutAxis } from "@/lib/types";
+import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from "@/lib/types";
 import { terminalTheme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
 import { RotateCcw, Trash2 } from "lucide-react";
+
+// ── Hoisted native terminals (stable React parent across split/merge layout moves) ──
+
+type TerminalAnchorInfo = {
+  el: HTMLElement;
+  workspaceId: string;
+  visible: boolean;
+  focused: boolean;
+  onFocus?: () => void;
+};
+
+const NativeTerminalRegContext = createContext<
+  ((sessionId: string, info: TerminalAnchorInfo | null) => void) | null
+>(null);
+
+function PaneTerminalAnchorSlot({
+  sessionForSlot,
+  isActiveTab,
+  isFocused,
+  workspaceId,
+  leafId,
+}: {
+  sessionForSlot: SessionState;
+  isActiveTab: boolean;
+  isFocused: boolean;
+  workspaceId: string;
+  leafId: string;
+}) {
+  const registerTerminalAnchor = useContext(NativeTerminalRegContext);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const { setFocusedPane, setNavigationArea } = useWorkspaceStore();
+
+  const handleFocus = useCallback(() => {
+    setFocusedPane(leafId);
+    setNavigationArea("workspace");
+  }, [leafId, setFocusedPane, setNavigationArea]);
+
+  useLayoutEffect(() => {
+    if (!registerTerminalAnchor) return;
+    const el = anchorRef.current;
+    if (!el) return;
+    registerTerminalAnchor(sessionForSlot.id, {
+      el,
+      workspaceId,
+      visible: isActiveTab,
+      focused: isFocused && isActiveTab,
+      onFocus: handleFocus,
+    });
+  }, [
+    registerTerminalAnchor,
+    sessionForSlot.id,
+    workspaceId,
+    isActiveTab,
+    isFocused,
+    handleFocus,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!registerTerminalAnchor) return;
+    return () => registerTerminalAnchor(sessionForSlot.id, null);
+  }, [registerTerminalAnchor, sessionForSlot.id]);
+
+  return (
+    <div
+      ref={anchorRef}
+      className="absolute inset-0"
+      style={{
+        visibility: isActiveTab ? "visible" : "hidden",
+        pointerEvents: isActiveTab ? "auto" : "none",
+      }}
+      aria-hidden={!isActiveTab}
+    />
+  );
+}
+
+// ── PaneView ───────────────────────────────────────────────────────────
 
 interface PaneViewProps {
   leaf: LayoutLeaf;
   isFocused: boolean;
   workspaceId: string;
+  isResizing?: boolean;
 }
 
-type DropZone = "center" | "left" | "right" | "top" | "bottom" | null;
-
-function PaneView({ leaf, isFocused, workspaceId }: PaneViewProps) {
-  const { setFocusedPane, setNavigationArea, slotsByID, sessionsByID, splitPane, addTabToPane } =
-    useWorkspaceStore();
+function PaneView({ leaf, isFocused, workspaceId, isResizing }: PaneViewProps) {
+  const { slotsByID, sessionsByID } = useWorkspaceStore();
   const slotsMap = slotsByID(workspaceId);
   const sessionsMap = sessionsByID(workspaceId);
   const activeSlotID = leaf.slotIDs[leaf.selectedIndex] ?? leaf.slotIDs[0];
   const slot = activeSlotID ? slotsMap[activeSlotID] : null;
-  const [dropZone, setDropZone] = useState<DropZone>(null);
-
-  // Find the running session for the active slot (used for fallback display)
-  const session = Object.values(sessionsMap).find(
-    (s) => s.slotID === activeSlotID && s.status === "running"
-  );
-
-  const handleFocus = useCallback(() => {
-    setFocusedPane(leaf.id);
-    setNavigationArea("workspace");
-  }, [leaf.id, setFocusedPane, setNavigationArea]);
-
-  // Drop zone detection for edge splits
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    const edgeThreshold = 0.25;
-
-    if (x < edgeThreshold) setDropZone("left");
-    else if (x > 1 - edgeThreshold) setDropZone("right");
-    else if (y < edgeThreshold) setDropZone("top");
-    else if (y > 1 - edgeThreshold) setDropZone("bottom");
-    else setDropZone("center");
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const slotID = e.dataTransfer.getData("text/plain");
-    if (!slotID || !dropZone) return;
-
-    const zone = dropZone;
-    setDropZone(null);
-
-    if (zone === "center") {
-      addTabToPane(leaf.id, slotID);
-    } else {
-      const axisMap: Record<string, LayoutAxis> = {
-        left: "horizontal",
-        right: "horizontal",
-        top: "vertical",
-        bottom: "vertical",
-      };
-      const posMap: Record<string, "before" | "after"> = {
-        left: "before",
-        right: "after",
-        top: "before",
-        bottom: "after",
-      };
-      splitPane(leaf.id, slotID, axisMap[zone], posMap[zone]);
-    }
-  }, [dropZone, leaf.id, addTabToPane, splitPane]);
 
   return (
     <div
+      data-pane-id={leaf.id}
       className="flex flex-col h-full overflow-hidden rounded-sm relative"
-      onDragOver={handleDragOver}
-      onDragLeave={() => setDropZone(null)}
-      onDrop={handleDrop}
     >
       <TabBar
         paneID={leaf.id}
         slotIDs={leaf.slotIDs}
         selectedIndex={leaf.selectedIndex}
         workspaceId={workspaceId}
+        isFocused={isFocused}
       />
 
-      <div className="flex-1 min-h-0 relative" style={{ background: terminalTheme.background ?? "#0a0a0a" }}>
+      <div
+        className="flex-1 min-h-0 relative"
+        style={{
+          background: terminalTheme.background ?? "#0a0a0a",
+          pointerEvents: isResizing ? "none" : undefined,
+        }}
+      >
         {leaf.slotIDs.map((slotID, idx) => {
           const isActiveTab = idx === leaf.selectedIndex;
           const sessionForSlot = Object.values(sessionsMap).find(
@@ -99,63 +135,59 @@ function PaneView({ leaf, isFocused, workspaceId }: PaneViewProps) {
           );
           if (!sessionForSlot) return null;
           return (
-            <div
+            <PaneTerminalAnchorSlot
               key={slotID}
-              className="absolute inset-0"
-              style={{
-                visibility: isActiveTab ? "visible" : "hidden",
-                pointerEvents: isActiveTab ? "auto" : "none",
-              }}
-              aria-hidden={!isActiveTab}
-            >
-              <NativeTerminalSurface
-                sessionID={sessionForSlot.id}
-                workspaceId={workspaceId}
-                visible={isActiveTab}
-                focused={isFocused && isActiveTab}
-                onFocus={handleFocus}
-              />
-            </div>
+              sessionForSlot={sessionForSlot}
+              isActiveTab={isActiveTab}
+              isFocused={isFocused}
+              workspaceId={workspaceId}
+              leafId={leaf.id}
+            />
           );
         })}
-        {/* Fallback when no session exists */}
-        {!Object.values(sessionsMap).some(s => leaf.slotIDs.includes(s.slotID) && s.status === "running") && (
+
+        {!Object.values(sessionsMap).some(
+          (s) => leaf.slotIDs.includes(s.slotID) && s.status === "running"
+        ) && (
           <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
             {slot ? (
-              <span>{slot.aggregateStatus === "stopped" ? "Terminal stopped" : "Connecting..."}</span>
+              <span>
+                {slot.aggregateStatus === "stopped"
+                  ? "Terminal stopped"
+                  : "Connecting..."}
+              </span>
             ) : (
               <span>No terminal</span>
             )}
           </div>
         )}
       </div>
-
-      {/* Drop zone overlay */}
-      {dropZone && (
-        <div
-          className={cn(
-            "absolute pointer-events-none border-2 border-blue-500/50 bg-blue-500/10 rounded",
-            dropZone === "center" && "inset-0",
-            dropZone === "left" && "inset-y-0 left-0 w-1/2",
-            dropZone === "right" && "inset-y-0 right-0 w-1/2",
-            dropZone === "top" && "inset-x-0 top-0 h-1/2",
-            dropZone === "bottom" && "inset-x-0 bottom-0 h-1/2"
-          )}
-        />
-      )}
     </div>
   );
 }
+
+// ── LayoutRenderer ─────────────────────────────────────────────────────
 
 interface LayoutRendererProps {
   node: LayoutNode;
   focusedPaneID: string | null;
   workspaceId: string;
+  isResizing?: boolean;
 }
 
-function LayoutRenderer({ node, focusedPaneID, workspaceId }: LayoutRendererProps) {
+function LayoutRenderer({ node, focusedPaneID, workspaceId, isResizing }: LayoutRendererProps) {
+  const [localResizing, setLocalResizing] = useState(false);
+  const anyResizing = isResizing || localResizing;
+
   if (node.type === "leaf") {
-    return <PaneView leaf={node} isFocused={node.id === focusedPaneID} workspaceId={workspaceId} />;
+    return (
+      <PaneView
+        leaf={node}
+        isFocused={node.id === focusedPaneID}
+        workspaceId={workspaceId}
+        isResizing={anyResizing}
+      />
+    );
   }
 
   const direction = node.axis === "horizontal" ? "horizontal" : "vertical";
@@ -165,16 +197,112 @@ function LayoutRenderer({ node, focusedPaneID, workspaceId }: LayoutRendererProp
       {node.children.map((child, i) => (
         <div key={child.id} className="contents">
           {i > 0 && (
-            <ResizableHandle className="bg-neutral-800 hover:bg-blue-500/50 transition-colors" />
+            <PanelResizeHandle
+              hitAreaMargins={{ coarse: 0, fine: 0 }}
+              className={cn(
+                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-blue-500",
+                direction === "horizontal"
+                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-neutral-500"
+                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-neutral-500"
+              )}
+              onDragging={setLocalResizing}
+            />
           )}
           <ResizablePanel defaultSize={node.ratios[i] * 100} minSize={10}>
-            <LayoutRenderer node={child} focusedPaneID={focusedPaneID} workspaceId={workspaceId} />
+            <LayoutRenderer
+              node={child}
+              focusedPaneID={focusedPaneID}
+              workspaceId={workspaceId}
+              isResizing={anyResizing}
+            />
           </ResizablePanel>
         </div>
       ))}
     </ResizablePanelGroup>
   );
 }
+
+function HoistedNativeTerminals({
+  runtime,
+  anchors,
+}: {
+  runtime: WorkspaceRuntimeState;
+  anchors: Record<string, TerminalAnchorInfo>;
+}) {
+  const runningSessions = useMemo(
+    () => runtime.sessions.filter((s) => s.status === "running"),
+    [runtime.sessions]
+  );
+
+  return (
+    <>
+      {runningSessions.map((s) => {
+        const a = anchors[s.id];
+        if (!a) return null;
+        return (
+          <TerminalSurface
+            key={s.id}
+            anchorElement={a.el}
+            sessionID={s.id}
+            surfaceId={s.id}
+            workspaceId={a.workspaceId}
+            visible={a.visible}
+            focused={a.focused}
+            onFocus={a.onFocus}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function WorkspaceRuntimeView({
+  workspaceId,
+  runtime,
+}: {
+  workspaceId: string;
+  runtime: WorkspaceRuntimeState;
+}) {
+  const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
+
+  const registerTerminalAnchor = useCallback((sessionId: string, info: TerminalAnchorInfo | null) => {
+    setAnchors((prev) => {
+      if (info === null) {
+        if (!(sessionId in prev)) return prev;
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      }
+      const p = prev[sessionId];
+      if (
+        p &&
+        p.el === info.el &&
+        p.visible === info.visible &&
+        p.focused === info.focused &&
+        p.workspaceId === info.workspaceId &&
+        p.onFocus === info.onFocus
+      ) {
+        return prev;
+      }
+      return { ...prev, [sessionId]: info };
+    });
+  }, []);
+
+  return (
+    <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
+      <div className="h-full w-full relative">
+        <LayoutRenderer
+          node={runtime.root!}
+          focusedPaneID={runtime.focusedPaneID}
+          workspaceId={workspaceId}
+        />
+        <HoistedNativeTerminals runtime={runtime} anchors={anchors} />
+      </div>
+    </NativeTerminalRegContext.Provider>
+  );
+}
+
+// ── EmptyWorkspaceState ────────────────────────────────────────────────
 
 function EmptyWorkspaceState() {
   const { selectedWorkspace, selectedProject } = useWorkspaceStore();
@@ -187,7 +315,9 @@ function EmptyWorkspaceState() {
         <div className="flex items-center justify-center h-full text-neutral-600">
           <div className="text-center">
             <p className="text-lg font-medium">No project selected</p>
-            <p className="text-sm mt-1">Add a project from the sidebar to get started</p>
+            <p className="text-sm mt-1">
+              Add a project from the sidebar to get started
+            </p>
           </div>
         </div>
       );
@@ -221,7 +351,9 @@ function EmptyWorkspaceState() {
         <div className="text-center max-w-md">
           <p className="text-sm text-red-400">Workspace creation failed</p>
           {workspace.failureMessage && (
-            <p className="text-xs text-neutral-600 mt-1 break-words">{workspace.failureMessage}</p>
+            <p className="text-xs text-neutral-600 mt-1 break-words">
+              {workspace.failureMessage}
+            </p>
           )}
           <div className="flex gap-2 justify-center mt-4">
             <button
@@ -247,22 +379,22 @@ function EmptyWorkspaceState() {
   return null;
 }
 
+// ── WorkspaceView ──────────────────────────────────────────────────────
+
 export default function WorkspaceView() {
   const selectedWorkspaceID = useWorkspaceStore((s) => s.selectedWorkspaceID);
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
-  const runtime = useWorkspaceStore((s) => (selectedWorkspaceID ? s.runtimes[selectedWorkspaceID] : null));
+  const runtime = useWorkspaceStore(
+    (s) => (selectedWorkspaceID ? s.runtimes[selectedWorkspaceID] : null)
+  );
 
   if (!selectedWs || selectedWs.status !== "ready" || !runtime?.root) {
     return <EmptyWorkspaceState />;
   }
 
   return (
-    <div className="h-full w-full">
-      <LayoutRenderer
-        node={runtime.root}
-        focusedPaneID={runtime.focusedPaneID}
-        workspaceId={selectedWorkspaceID!}
-      />
-    </div>
+    <TabDragProvider>
+      <WorkspaceRuntimeView workspaceId={selectedWorkspaceID!} runtime={runtime} />
+    </TabDragProvider>
   );
 }

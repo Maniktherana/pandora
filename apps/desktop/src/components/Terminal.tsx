@@ -1,211 +1,223 @@
-import { useEffect, useRef, useState } from "react";
-import { Terminal, FitAddon, init } from "@/lib/ghostty-web";
-import { getTerminalDaemonClient, subscribeTerminalOutput } from "@/lib/terminal-runtime";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { terminalTheme } from "@/lib/theme";
 
-interface WebTerminalSurfaceProps {
+interface TerminalSurfaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+}
+
+export interface TerminalSurfaceProps {
   sessionID: string;
   workspaceId: string;
+  surfaceId: string;
   visible: boolean;
   focused: boolean;
   onFocus?: () => void;
+  /** When set, geometry comes from this element and the instance can stay mounted across layout tree moves (split/merge). */
+  anchorElement?: HTMLElement | null;
 }
 
-let initPromise: Promise<void> | null = null;
-
-function ensureTerminalRuntime(): Promise<void> {
-  if (!initPromise) {
-    initPromise = init().catch((error) => {
-      initPromise = null;
-      throw error;
-    });
-  }
-
-  return initPromise;
-}
-
-function decodeBase64Chunk(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function encodeInputAsBase64(data: string): string {
-  const bytes = new TextEncoder().encode(data);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-/**
- * App-level keyboard shortcuts that the terminal should NOT consume.
- * Returns true if the event is an app shortcut (terminal should ignore it).
- */
-function isAppShortcut(e: KeyboardEvent): boolean {
-  if (e.metaKey && e.shiftKey) {
-    // Cmd+Shift+[ / ] — tab navigation
-    if (e.code === "BracketLeft" || e.code === "BracketRight") return true;
-  }
-  if (e.metaKey && !e.shiftKey) {
-    if (e.code === "KeyQ") return true;  // Cmd+Q — quit app
-    if (e.code === "KeyB") return true;  // Cmd+B — toggle sidebar
-    if (e.code === "KeyT") return true;  // Cmd+T — new terminal
-    if (e.code === "KeyW") return true;  // Cmd+W — close tab
-  }
-  return false;
-}
-
-export default function WebTerminalSurface({
+export default function TerminalSurface({
   sessionID,
   workspaceId,
+  surfaceId,
   visible,
   focused,
   onFocus,
-}: WebTerminalSurfaceProps) {
+  anchorElement = null,
+}: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const pendingOutputRef = useRef<string[]>([]);
-  const [initError, setInitError] = useState<string | null>(null);
+  const createdRef = useRef(false);
+  const lastRectRef = useRef("");
+  const lastDprRef = useRef(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+  const [nativeOk, setNativeOk] = useState<boolean | null>(null);
+
+  const nativeOkRef = useRef<boolean | null>(null);
+  nativeOkRef.current = nativeOk;
+
+  const ctxRef = useRef({ sessionID, workspaceId, surfaceId, visible, focused, anchorElement });
+  ctxRef.current = { sessionID, workspaceId, surfaceId, visible, focused, anchorElement };
 
   useEffect(() => {
-    let disposed = false;
-    const container = containerRef.current;
-    if (!container) return;
+    void invoke<boolean>("native_terminal_supported")
+      .then(setNativeOk)
+      .catch(() => setNativeOk(false));
+  }, []);
 
-    setInitError(null);
+  const performSync = useCallback((forceCreate: boolean) => {
+    if (nativeOkRef.current !== true) return;
+    const el = ctxRef.current.anchorElement ?? containerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    if (r.width <= 0 || r.height <= 0) return;
 
-    void ensureTerminalRuntime()
-      .then(() => {
-        if (disposed || !containerRef.current) return;
+    const rect: TerminalSurfaceRect = {
+      x: r.left,
+      y: r.top,
+      width: r.width,
+      height: r.height,
+      scaleFactor: dpr,
+    };
 
-        const terminal = new Terminal({
-          fontSize: 14,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          cursorBlink: false,
-          smoothScrollDuration: 40, // Short duration — smooths trackpad jitter without feeling laggy
-          theme: terminalTheme,
-        });
+    const { sessionID: sid, workspaceId: wid, surfaceId: sfid, visible: vis, focused: foc } =
+      ctxRef.current;
 
-        // ghostty-web API: true = "custom handler consumed it, stop", false = "continue normal processing"
-        terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-          // App-level shortcuts — let them bubble to the window handler
-          if (isAppShortcut(e)) {
-            return true;
-          }
+    if (!createdRef.current || forceCreate) {
+      createdRef.current = true;
+      lastRectRef.current = "";
+      void invoke("terminal_surface_create", {
+        surfaceId: sfid,
+        workspaceId: wid,
+        sessionId: sid,
+        rect,
+      }).catch((e) => console.error("Failed to create native surface:", e));
+    }
 
-          // Cmd+Arrow → line navigation, Cmd+Backspace → delete line
-          // These are macOS conventions not handled by the key encoder
-          if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey) {
-            let seq: string | null = null;
-            switch (e.code) {
-              case "ArrowLeft":  seq = "\x01"; break; // Ctrl+A — beginning of line
-              case "ArrowRight": seq = "\x05"; break; // Ctrl+E — end of line
-              case "ArrowUp":    seq = "\x1b[1;5A"; break; // scroll/move up (Ctrl+Up)
-              case "ArrowDown":  seq = "\x1b[1;5B"; break; // scroll/move down (Ctrl+Down)
-              case "Backspace":  seq = "\x15"; break; // Ctrl+U — kill line
-            }
-            if (seq) {
-              e.preventDefault();
-              getTerminalDaemonClient()?.input(workspaceId, sessionID, encodeInputAsBase64(seq));
-              return true;
-            }
-          }
+    const key = JSON.stringify({ rect, visible: vis, focused: foc });
+    if (!forceCreate && key === lastRectRef.current) return;
+    lastRectRef.current = key;
 
-          return false; // let terminal handle normally
-        });
+    void invoke("terminal_surface_update", {
+      surfaceId: sfid,
+      rect,
+      visible: vis,
+      focused: foc,
+    }).catch(() => {});
+  }, []);
 
-        const fitAddon = new FitAddon();
+  const performSyncRef = useRef(performSync);
+  performSyncRef.current = performSync;
 
-        terminal.loadAddon(fitAddon);
-        terminal.open(containerRef.current);
-        fitAddon.fit();
-        fitAddon.observeResize();
+  // Create once per (session, surface); destroy only when this effect cleans up — not on focus/visibility/sync churn.
+  useEffect(() => {
+    if (nativeOk !== true || !sessionID) return;
 
-        const client = getTerminalDaemonClient();
-
-        terminal.onData((data) => {
-          getTerminalDaemonClient()?.input(workspaceId, sessionID, encodeInputAsBase64(data));
-        });
-
-        terminal.onResize(({ cols, rows }) => {
-          getTerminalDaemonClient()?.resize(workspaceId, sessionID, cols, rows);
-        });
-
-        terminalRef.current = terminal;
-        fitAddonRef.current = fitAddon;
-
-        for (const chunk of pendingOutputRef.current) {
-          terminal.write(decodeBase64Chunk(chunk));
-        }
-        pendingOutputRef.current = [];
-
-        if (focused) {
-          terminal.focus();
-        }
-
-        // Trigger an initial PTY resize after fit settles.
-        const measuredClient = client ?? getTerminalDaemonClient();
-        if (measuredClient) {
-          window.setTimeout(() => {
-            measuredClient.resize(workspaceId, sessionID, terminal.cols, terminal.rows);
-          }, 0);
-        }
-      })
-      .catch((error) => {
-        if (disposed) return;
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("Failed to initialize web terminal:", error);
-        setInitError(message);
-      });
+    const bootstrap = () => performSyncRef.current(true);
+    bootstrap();
+    let innerRaf = 0;
+    const outerRaf = requestAnimationFrame(() => {
+      innerRaf = requestAnimationFrame(bootstrap);
+    });
 
     return () => {
-      disposed = true;
-      fitAddonRef.current?.dispose();
-      terminalRef.current?.dispose();
-      fitAddonRef.current = null;
-      terminalRef.current = null;
-      pendingOutputRef.current = [];
+      cancelAnimationFrame(outerRaf);
+      cancelAnimationFrame(innerRaf);
+      createdRef.current = false;
+      lastRectRef.current = "";
+      void invoke("terminal_surface_destroy", { surfaceId }).catch(() => {});
     };
-  }, [sessionID, workspaceId]);
+  }, [nativeOk, sessionID, surfaceId]);
 
+  // Geometry + scale: ResizeObserver, window resize, Tauri scale/window move, DPR poll (monitor changes).
   useEffect(() => {
-    return subscribeTerminalOutput(sessionID, (data) => {
-      const terminal = terminalRef.current;
-      if (!terminal) {
-        pendingOutputRef.current.push(data);
-        return;
+    if (nativeOk !== true) return;
+    const el = anchorElement ?? containerRef.current;
+    if (!el) return;
+
+    const sync = () => performSyncRef.current(false);
+
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+
+    const onWinResize = () => sync();
+    window.addEventListener("resize", onWinResize);
+
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    void getCurrentWindow()
+      .onScaleChanged(() => {
+        lastDprRef.current = window.devicePixelRatio || 1;
+        sync();
+      })
+      .then((u) => {
+        if (!cancelled) unlisteners.push(u);
+      })
+      .catch(() => {});
+    void getCurrentWindow()
+      .onResized(() => sync())
+      .then((u) => {
+        if (!cancelled) unlisteners.push(u);
+      })
+      .catch(() => {});
+
+    const dprTimer = window.setInterval(() => {
+      const d = window.devicePixelRatio || 1;
+      if (Math.abs(d - lastDprRef.current) > 0.001) {
+        lastDprRef.current = d;
+        sync();
       }
-      terminal.write(decodeBase64Chunk(data));
-    });
-  }, [sessionID]);
+    }, 200);
 
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+      window.removeEventListener("resize", onWinResize);
+      window.clearInterval(dprTimer);
+      for (const u of unlisteners) u();
+    };
+  }, [nativeOk, surfaceId, anchorElement]);
+
+  // Visibility / focus — update native surface without destroy/recreate.
   useEffect(() => {
-    if (focused && visible) {
-      terminalRef.current?.focus();
+    if (nativeOk !== true) return;
+    performSyncRef.current(false);
+    if (!visible) return;
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => performSyncRef.current(false));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [nativeOk, visible, focused]);
+
+  const errorUi = (
+    <div
+      className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-amber-200/90"
+      style={{ background: terminalTheme.background ?? "#0a0a0a" }}
+    >
+      <div>
+        <div>Native Ghostty runs only in the desktop app on Apple Silicon.</div>
+        <div className="mt-1 text-xs text-neutral-500">
+          Use <code className="text-neutral-400">bun run desktop:dev</code> on an arm64 Mac.
+        </div>
+      </div>
+    </div>
+  );
+
+  if (nativeOk === false) {
+    if (anchorElement) {
+      return createPortal(
+        <div className="absolute inset-0 overflow-hidden">{errorUi}</div>,
+        anchorElement
+      );
     }
-  }, [focused, visible]);
+    return errorUi;
+  }
+
+  if (anchorElement) {
+    return null;
+  }
 
   return (
     <div
-      ref={containerRef}
-      className="h-full w-full overflow-hidden text-neutral-300"
-      onMouseDown={onFocus}
+      className="relative h-full w-full overflow-hidden"
       style={{ background: terminalTheme.background ?? "#0a0a0a" }}
     >
-      {initError ? (
-        <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-red-300">
-          <div>
-            <div>Failed to load terminal runtime.</div>
-            <div className="mt-1 text-xs text-red-200/80">{initError}</div>
-          </div>
-        </div>
-      ) : null}
+      <div
+        ref={containerRef}
+        className="h-full w-full"
+        onMouseDown={onFocus}
+        style={{ background: "transparent" }}
+      />
     </div>
   );
 }

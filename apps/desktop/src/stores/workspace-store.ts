@@ -493,6 +493,19 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
 
+      // Remove slotID from its current location first (prevents duplicates)
+      let root: LayoutNode | null = removeSlotFromTree(runtime.root, slotID);
+      if (!root) {
+        // The tree collapsed entirely — recreate with just this slot
+        root = createLeaf([slotID]);
+        return {
+          runtimes: {
+            ...s.runtimes,
+            [wsId]: { ...runtime, root },
+          },
+        };
+      }
+
       function splitNode(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
           const newLeaf = createLeaf([slotID]);
@@ -514,7 +527,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: splitNode(runtime.root) },
+          [wsId]: { ...runtime, root: splitNode(root) },
         },
       };
     });
@@ -527,10 +540,22 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     set((s) => {
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
+      // Remove from current location first (prevents duplicates when dragging between panes)
+      let root: LayoutNode | null = removeSlotFromTree(runtime.root, slotID);
+      if (!root) {
+        root = createLeaf([slotID]);
+        return {
+          runtimes: {
+            ...s.runtimes,
+            [wsId]: { ...runtime, root },
+          },
+        };
+      }
+      root = addTabToNode(root, paneID, slotID);
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: addTabToNode(runtime.root, paneID, slotID) },
+          [wsId]: { ...runtime, root },
         },
       };
     });
@@ -654,10 +679,37 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (!wsId) return;
     const runtime = get().runtimes[wsId];
     if (!runtime?.root || !runtime.focusedPaneID) return;
-    const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
-    if (!leaf || leaf.slotIDs.length <= 1) return;
-    const newIndex = (leaf.selectedIndex + direction + leaf.slotIDs.length) % leaf.slotIDs.length;
-    get().selectTabInPane(leaf.id, newIndex);
+
+    const leaves = getAllLeaves(runtime.root);
+    if (leaves.length === 0) return;
+
+    const currentLeaf = leaves.find((l) => l.id === runtime.focusedPaneID);
+    if (!currentLeaf) return;
+
+    // Try cycling within the current pane first
+    const nextIndex = currentLeaf.selectedIndex + direction;
+    if (nextIndex >= 0 && nextIndex < currentLeaf.slotIDs.length) {
+      get().selectTabInPane(currentLeaf.id, nextIndex);
+      return;
+    }
+
+    // Overflow into the next/previous pane
+    const paneIdx = leaves.indexOf(currentLeaf);
+    const nextPaneIdx = paneIdx + direction;
+
+    if (nextPaneIdx < 0 || nextPaneIdx >= leaves.length) {
+      // Wrap: going left past first pane → last tab of last pane, and vice versa
+      const wrapPane = direction === 1 ? leaves[0] : leaves[leaves.length - 1];
+      const wrapTabIdx = direction === 1 ? 0 : wrapPane.slotIDs.length - 1;
+      get().selectTabInPane(wrapPane.id, wrapTabIdx);
+      get().setFocusedPane(wrapPane.id);
+      return;
+    }
+
+    const nextPane = leaves[nextPaneIdx];
+    const targetIndex = direction === 1 ? 0 : nextPane.slotIDs.length - 1;
+    get().selectTabInPane(nextPane.id, targetIndex);
+    get().setFocusedPane(nextPane.id);
   },
 
   persistLayout: () => {

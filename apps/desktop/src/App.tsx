@@ -4,7 +4,7 @@ import Sidebar from "@/components/Sidebar";
 import WorkspaceView from "@/components/WorkspaceView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { DaemonClient } from "@/lib/daemon-client";
-import { publishTerminalOutput, setTerminalDaemonClient } from "@/lib/terminal-runtime";
+import { setTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import type { LayoutNode, LayoutLeaf } from "@/lib/types";
 import { PanelLeft, Plus } from "lucide-react";
@@ -13,7 +13,8 @@ export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const clientRef = useRef<DaemonClient | null>(null);
   const store = useWorkspaceStore;
-  const hasSeededRef = useRef<Set<string>>(new Set());
+  // Survives HMR so we don't re-seed terminals on hot reload.
+  const hasSeeded = ((globalThis as any).__pandoraHasSeeded ??= new Set<string>()) as Set<string>;
 
   // Load persisted app state on mount
   useEffect(() => {
@@ -38,8 +39,8 @@ export default function App() {
       onSlotSnapshot: (workspaceId, slots) => {
         // On first connect the daemon may return stale slots from a previous session.
         // Ignore them and start fresh with a single terminal.
-        if (!hasSeededRef.current.has(workspaceId)) {
-          hasSeededRef.current.add(workspaceId);
+        if (!hasSeeded.has(workspaceId)) {
+          hasSeeded.add(workspaceId);
           // Clear any stale persisted slots
           for (const slot of slots) {
             client.send(workspaceId, { type: "remove_slot", slotID: slot.id });
@@ -77,9 +78,6 @@ export default function App() {
       onSessionClosed: (workspaceId, sessionID) => {
         store.getState().removeRuntimeSession(workspaceId, sessionID);
       },
-      onOutputChunk: (_workspaceId, sessionID, data) => {
-        publishTerminalOutput(sessionID, data);
-      },
       onError: (workspaceId, message) => {
         console.error(`Daemon error [${workspaceId}]:`, message);
       },
@@ -103,6 +101,11 @@ export default function App() {
     if (!client || !selectedWorkspaceID) return;
     seedTerminal(client, selectedWorkspaceID);
   }, []);
+
+  const handleNewTerminalRef = useRef(handleNewTerminal);
+  handleNewTerminalRef.current = handleNewTerminal;
+  const setSidebarVisibleRef = useRef(setSidebarVisible);
+  setSidebarVisibleRef.current = setSidebarVisible;
 
   const handleCloseFocusedTab = useCallback(() => {
     const client = clientRef.current;
@@ -209,10 +212,16 @@ export default function App() {
           handleCloseFocusedTab();
           break;
         case "previous-tab":
-          store.getState().cycleTab(1);
+          store.getState().cycleTab(-1);
           break;
         case "next-tab":
-          store.getState().cycleTab(-1);
+          store.getState().cycleTab(1);
+          break;
+        case "new-terminal":
+          handleNewTerminalRef.current();
+          break;
+        case "toggle-sidebar":
+          setSidebarVisibleRef.current((v) => !v);
           break;
       }
     }).then((fn) => {
@@ -278,31 +287,33 @@ export default function App() {
         </div>
 
         {/* Status bar */}
-        <div className="h-6 flex items-center px-3 border-t border-neutral-800 bg-neutral-900/50 text-[11px] text-neutral-500 shrink-0">
-          {selectedWs?.status === "ready" && (
-            <>
-              <div
-                className={cn(
-                  "w-1.5 h-1.5 rounded-full mr-2",
-                  connectionState === "connected"
-                    ? "bg-green-500"
+        <div className="h-6 flex items-center gap-3 px-3 border-t border-neutral-800 bg-neutral-900/50 text-[11px] text-neutral-500 shrink-0">
+          <div className="flex items-center min-w-0">
+            {selectedWs?.status === "ready" && (
+              <>
+                <div
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full mr-2 shrink-0",
+                    connectionState === "connected"
+                      ? "bg-green-500"
+                      : connectionState === "connecting"
+                      ? "bg-yellow-500"
+                      : "bg-red-500"
+                  )}
+                />
+                <span>
+                  {connectionState === "connected"
+                    ? "Connected"
                     : connectionState === "connecting"
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
-                )}
-              />
-              <span>
-                {connectionState === "connected"
-                  ? "Connected"
-                  : connectionState === "connecting"
-                  ? "Connecting..."
-                  : "Disconnected"}
-              </span>
-            </>
-          )}
-          {selectedWs && selectedWs.status !== "ready" && (
-            <span className="capitalize">{selectedWs.status}</span>
-          )}
+                    ? "Connecting..."
+                    : "Disconnected"}
+                </span>
+              </>
+            )}
+            {selectedWs && selectedWs.status !== "ready" && (
+              <span className="capitalize">{selectedWs.status}</span>
+            )}
+          </div>
         </div>
       </div>
     </div>
