@@ -172,6 +172,15 @@ function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: P
           );
         })}
 
+        {leaf.tabs.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-neutral-500">
+            <p>No open tabs</p>
+            <p className="max-w-xs text-xs text-neutral-600">
+              Open a file from the file tree, or add a terminal with + in the title bar.
+            </p>
+          </div>
+        )}
+
         {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && (
           <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
             {slot ? (

@@ -55,12 +55,15 @@ export function migrateLayoutNode(node: unknown): LayoutNode | null {
     } else {
       tabs = [];
     }
-    if (tabs.length === 0) return null;
+    if (!id) return null;
     return {
       type: "leaf",
       id,
       tabs,
-      selectedIndex: Math.min(Math.max(0, selectedIndex), tabs.length - 1),
+      selectedIndex:
+        tabs.length === 0
+          ? 0
+          : Math.min(Math.max(0, selectedIndex), tabs.length - 1),
     };
   }
   return null;
