@@ -278,8 +278,7 @@ impl AppDatabase {
         self.save_ui_state("selected_workspace_id", workspace_id);
     }
 
-    pub fn save_layout(&self, workspace_id: &str, layout: &PersistedWorkspaceLayout) -> Result<(), String> {
-        let payload = serde_json::to_string(layout).map_err(|e| e.to_string())?;
+    pub fn save_layout(&self, workspace_id: &str, payload: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO workspace_layouts (workspace_id, payload, updated_at) VALUES (?1, ?2, ?3)
@@ -290,18 +289,16 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn load_layout(&self, workspace_id: &str) -> Option<PersistedWorkspaceLayout> {
+    pub fn load_layout(&self, workspace_id: &str) -> Option<String> {
         let conn = self.conn.lock().unwrap();
-        let payload: Option<String> = conn
-            .query_row(
-                "SELECT payload FROM workspace_layouts WHERE workspace_id = ?1 LIMIT 1",
-                params![workspace_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten();
-        payload.and_then(|p| serde_json::from_str(&p).ok())
+        conn.query_row(
+            "SELECT payload FROM workspace_layouts WHERE workspace_id = ?1 LIMIT 1",
+            params![workspace_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
     }
 }
 

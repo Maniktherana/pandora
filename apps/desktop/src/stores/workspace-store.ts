@@ -6,60 +6,23 @@ import type {
   SlotState,
   SessionState,
   LayoutNode,
-  LayoutLeaf,
-  LayoutSplit,
   LayoutAxis,
   AppState,
-  PersistedWorkspaceLayout,
   WorkspaceRuntimeState,
 } from "../lib/types";
-
-function uuid(): string {
-  return crypto.randomUUID();
-}
-
-function createLeaf(slotIDs: string[]): LayoutLeaf {
-  return { type: "leaf", id: uuid(), slotIDs, selectedIndex: 0 };
-}
-
-function getAllLeaves(node: LayoutNode): LayoutLeaf[] {
-  if (node.type === "leaf") return [node];
-  return node.children.flatMap(getAllLeaves);
-}
-
-function getAllSlotIDs(node: LayoutNode): string[] {
-  if (node.type === "leaf") return node.slotIDs;
-  return node.children.flatMap(getAllSlotIDs);
-}
-
-function removeSlotFromTree(node: LayoutNode, slotID: string): LayoutNode | null {
-  if (node.type === "leaf") {
-    const filtered = node.slotIDs.filter((id) => id !== slotID);
-    if (filtered.length === 0) return null;
-    return {
-      ...node,
-      slotIDs: filtered,
-      selectedIndex: Math.min(node.selectedIndex, filtered.length - 1),
-    };
-  }
-  const newChildren: LayoutNode[] = [];
-  for (const child of node.children) {
-    const result = removeSlotFromTree(child, slotID);
-    if (result) newChildren.push(result);
-  }
-  if (newChildren.length === 0) return null;
-  if (newChildren.length === 1) return newChildren[0];
-  return { ...node, children: newChildren, ratios: newChildren.map(() => 1 / newChildren.length) };
-}
-
-function findLeaf(node: LayoutNode, paneID: string): LayoutLeaf | null {
-  if (node.type === "leaf") return node.id === paneID ? node : null;
-  for (const child of node.children) {
-    const found = findLeaf(child, paneID);
-    if (found) return found;
-  }
-  return null;
-}
+import { migratePersistedLayout } from "../lib/layout-migrate";
+import {
+  addTerminalTabToNode,
+  createLeaf,
+  findLeaf,
+  getAllLeaves,
+  getAllTerminalSlotIds,
+  insertTabInPane,
+  removeMatchingTabFromTree,
+  removeTabAtIndexInTree,
+  removeTerminalSlotFromTree,
+  splitPaneAroundTab,
+} from "../lib/layout-tree";
 
 export type NavigationArea = "sidebar" | "workspace";
 
@@ -116,12 +79,21 @@ interface WorkspaceStoreState {
   ensureRuntimeLayout: (workspaceId: string) => void;
 
   // ─── Layout actions ───
-  splitPane: (paneID: string, slotID: string, axis: LayoutAxis, position: "before" | "after") => void;
-  addTabToPane: (paneID: string, slotID: string) => void;
-  removeTabFromPane: (paneID: string, slotID: string) => void;
+  splitPane: (
+    targetPaneID: string,
+    sourcePaneID: string,
+    sourceTabIndex: number,
+    axis: LayoutAxis,
+    position: "before" | "after"
+  ) => void;
+  addTabToPane: (targetPaneID: string, sourcePaneID: string, sourceTabIndex: number) => void;
+  /** Remove tab by index (e.g. editor tab). Terminal tabs are usually removed via daemon `remove_slot`. */
+  removePaneTabByIndex: (paneID: string, tabIndex: number) => void;
   selectTabInPane: (paneID: string, index: number) => void;
-  moveTab: (fromPaneID: string, toPaneID: string, slotID: string) => void;
+  moveTab: (fromPaneID: string, toPaneID: string, fromIndex: number, toIndex: number) => void;
   reorderTab: (paneID: string, fromIndex: number, toIndex: number) => void;
+  /** Add or focus an editor tab in the focused pane (or first pane). */
+  addEditorTabForPath: (relativePath: string) => void;
   setFocusedPane: (paneID: string) => void;
   cycleTab: (direction: -1 | 1) => void;
   persistLayout: () => void;
@@ -391,7 +363,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
-      const newRoot = runtime.root ? removeSlotFromTree(runtime.root, slotID) : null;
+      const newRoot = runtime.root ? removeTerminalSlotFromTree(runtime.root, slotID) : null;
       return {
         runtimes: {
           ...s.runtimes,
@@ -453,20 +425,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     const runtime = get().runtimes[workspaceId];
     if (!runtime) return;
 
-    const existingSlotIDs = runtime.root ? new Set(getAllSlotIDs(runtime.root)) : new Set<string>();
+    const existingSlotIDs = runtime.root
+      ? new Set(getAllTerminalSlotIds(runtime.root))
+      : new Set<string>();
     const newSlots = runtime.slots.filter((s) => !existingSlotIDs.has(s.id));
     if (newSlots.length === 0) return;
 
     let root = runtime.root;
     for (const slot of newSlots) {
-      const leaf = createLeaf([slot.id]);
+      const leaf = createLeaf([{ kind: "terminal", slotId: slot.id }]);
       if (!root) {
         root = leaf;
       } else {
-        // Add as tab to focused pane if it exists, otherwise split
         const focusedPaneID = runtime.focusedPaneID;
         if (focusedPaneID && root) {
-          root = addTabToNode(root, focusedPaneID, slot.id);
+          root = addTerminalTabToNode(root, focusedPaneID, slot.id);
         } else {
           root = leaf;
         }
@@ -486,72 +459,27 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   // ─── Layout actions ───
-  splitPane: (paneID, slotID, axis, position) => {
+  splitPane: (targetPaneID, sourcePaneID, sourceTabIndex, axis, position) => {
     const wsId = get().selectedWorkspaceID;
     if (!wsId) return;
     set((s) => {
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
+      const srcLeaf = findLeaf(runtime.root, sourcePaneID);
+      const tab = srcLeaf?.tabs[sourceTabIndex];
+      if (!tab) return s;
 
-      // Remove slotID from its current location first (prevents duplicates)
-      let root: LayoutNode | null = removeSlotFromTree(runtime.root, slotID);
+      let root = removeTabAtIndexInTree(runtime.root, sourcePaneID, sourceTabIndex);
       if (!root) {
-        // The tree collapsed entirely — recreate with just this slot
-        root = createLeaf([slotID]);
+        root = createLeaf([tab]);
         return {
           runtimes: {
             ...s.runtimes,
-            [wsId]: { ...runtime, root },
+            [wsId]: { ...runtime, root, focusedPaneID: root.type === "leaf" ? root.id : runtime.focusedPaneID },
           },
         };
       }
-
-      function splitNode(node: LayoutNode): LayoutNode {
-        if (node.type === "leaf" && node.id === paneID) {
-          const newLeaf = createLeaf([slotID]);
-          const children = position === "before" ? [newLeaf, node] : [node, newLeaf];
-          return {
-            type: "split",
-            id: uuid(),
-            axis,
-            children,
-            ratios: [0.5, 0.5],
-          } as LayoutSplit;
-        }
-        if (node.type === "split") {
-          return { ...node, children: node.children.map(splitNode) };
-        }
-        return node;
-      }
-
-      return {
-        runtimes: {
-          ...s.runtimes,
-          [wsId]: { ...runtime, root: splitNode(root) },
-        },
-      };
-    });
-    get().persistLayout();
-  },
-
-  addTabToPane: (paneID, slotID) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
-    set((s) => {
-      const runtime = s.runtimes[wsId];
-      if (!runtime?.root) return s;
-      // Remove from current location first (prevents duplicates when dragging between panes)
-      let root: LayoutNode | null = removeSlotFromTree(runtime.root, slotID);
-      if (!root) {
-        root = createLeaf([slotID]);
-        return {
-          runtimes: {
-            ...s.runtimes,
-            [wsId]: { ...runtime, root },
-          },
-        };
-      }
-      root = addTabToNode(root, paneID, slotID);
+      root = splitPaneAroundTab(root, targetPaneID, tab, axis, position);
       return {
         runtimes: {
           ...s.runtimes,
@@ -562,17 +490,87 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     get().persistLayout();
   },
 
-  removeTabFromPane: (paneID, slotID) => {
+  addTabToPane: (targetPaneID, sourcePaneID, sourceTabIndex) => {
     const wsId = get().selectedWorkspaceID;
     if (!wsId) return;
     set((s) => {
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
-      const newRoot = removeSlotFromTree(runtime.root, slotID);
+      const srcLeaf = findLeaf(runtime.root, sourcePaneID);
+      const tab = srcLeaf?.tabs[sourceTabIndex];
+      if (!tab) return s;
+
+      let root = removeMatchingTabFromTree(runtime.root, tab);
+      if (!root) {
+        root = createLeaf([tab]);
+        return {
+          runtimes: {
+            ...s.runtimes,
+            [wsId]: { ...runtime, root },
+          },
+        };
+      }
+      const destLeaf = findLeaf(root, targetPaneID);
+      const insertAt = destLeaf?.tabs.length ?? 0;
+      root = insertTabInPane(root, targetPaneID, tab, insertAt);
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...runtime, root },
+        },
+      };
+    });
+    get().persistLayout();
+  },
+
+  removePaneTabByIndex: (paneID, tabIndex) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    set((s) => {
+      const runtime = s.runtimes[wsId];
+      if (!runtime?.root) return s;
+      const newRoot = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
       return {
         runtimes: {
           ...s.runtimes,
           [wsId]: { ...runtime, root: newRoot },
+        },
+      };
+    });
+    get().persistLayout();
+  },
+
+  addEditorTabForPath: (relativePath) => {
+    const wsId = get().selectedWorkspaceID;
+    if (!wsId) return;
+    const runtime = get().runtimes[wsId];
+    if (!runtime?.root) return;
+
+    const leaves = getAllLeaves(runtime.root);
+    let paneID = runtime.focusedPaneID;
+    if (!paneID || !findLeaf(runtime.root, paneID)) {
+      paneID = leaves[0]?.id ?? null;
+    }
+    if (!paneID) return;
+
+    const leaf = findLeaf(runtime.root, paneID);
+    if (!leaf) return;
+    const dup = leaf.tabs.findIndex((t) => t.kind === "editor" && t.path === relativePath);
+    if (dup >= 0) {
+      get().selectTabInPane(paneID, dup);
+      return;
+    }
+
+    set((s) => {
+      const rt = s.runtimes[wsId];
+      if (!rt?.root) return s;
+      const pl = findLeaf(rt.root, paneID!);
+      const at = pl?.tabs.length ?? 0;
+      const root = insertTabInPane(rt.root, paneID!, { kind: "editor", path: relativePath }, at);
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...rt, root, focusedPaneID: paneID },
         },
       };
     });
@@ -588,7 +586,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
       function selectTab(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
-          return { ...node, selectedIndex: Math.min(index, node.slotIDs.length - 1) };
+          return { ...node, selectedIndex: Math.min(index, node.tabs.length - 1) };
         }
         if (node.type === "split") {
           return { ...node, children: node.children.map(selectTab) };
@@ -606,15 +604,24 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     get().persistLayout();
   },
 
-  moveTab: (fromPaneID, toPaneID, slotID) => {
+  moveTab: (fromPaneID, toPaneID, fromIndex, toIndex) => {
     const wsId = get().selectedWorkspaceID;
     if (!wsId) return;
     set((s) => {
       const runtime = s.runtimes[wsId];
       if (!runtime?.root) return s;
-      let root = removeSlotFromTree(runtime.root, slotID);
+      const srcLeaf = findLeaf(runtime.root, fromPaneID);
+      const tab = srcLeaf?.tabs[fromIndex];
+      if (!tab) return s;
+
+      let root = removeTabAtIndexInTree(runtime.root, fromPaneID, fromIndex);
       if (!root) return s;
-      root = addTabToNode(root, toPaneID, slotID);
+
+      let insertIndex = toIndex;
+      if (fromPaneID === toPaneID && fromIndex < toIndex) {
+        insertIndex--;
+      }
+      root = insertTabInPane(root, toPaneID, tab, insertIndex);
       return {
         runtimes: {
           ...s.runtimes,
@@ -634,13 +641,17 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
       function reorder(node: LayoutNode): LayoutNode {
         if (node.type === "leaf" && node.id === paneID) {
-          const ids = [...node.slotIDs];
-          const [moved] = ids.splice(fromIndex, 1);
-          ids.splice(toIndex, 0, moved);
-          const newSelected = node.selectedIndex === fromIndex
-            ? toIndex
-            : node.selectedIndex;
-          return { ...node, slotIDs: ids, selectedIndex: newSelected };
+          const tabs = [...node.tabs];
+          const [moved] = tabs.splice(fromIndex, 1);
+          tabs.splice(toIndex, 0, moved);
+          let sel = node.selectedIndex;
+          if (sel === fromIndex) sel = toIndex;
+          else if (fromIndex < toIndex) {
+            if (sel > fromIndex && sel <= toIndex) sel--;
+          } else if (fromIndex > toIndex) {
+            if (sel >= toIndex && sel < fromIndex) sel++;
+          }
+          return { ...node, tabs, selectedIndex: Math.max(0, Math.min(sel, tabs.length - 1)) };
         }
         if (node.type === "split") {
           return { ...node, children: node.children.map(reorder) };
@@ -688,7 +699,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
     // Try cycling within the current pane first
     const nextIndex = currentLeaf.selectedIndex + direction;
-    if (nextIndex >= 0 && nextIndex < currentLeaf.slotIDs.length) {
+    if (nextIndex >= 0 && nextIndex < currentLeaf.tabs.length) {
       get().selectTabInPane(currentLeaf.id, nextIndex);
       return;
     }
@@ -700,14 +711,14 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (nextPaneIdx < 0 || nextPaneIdx >= leaves.length) {
       // Wrap: going left past first pane → last tab of last pane, and vice versa
       const wrapPane = direction === 1 ? leaves[0] : leaves[leaves.length - 1];
-      const wrapTabIdx = direction === 1 ? 0 : wrapPane.slotIDs.length - 1;
+      const wrapTabIdx = direction === 1 ? 0 : wrapPane.tabs.length - 1;
       get().selectTabInPane(wrapPane.id, wrapTabIdx);
       get().setFocusedPane(wrapPane.id);
       return;
     }
 
     const nextPane = leaves[nextPaneIdx];
-    const targetIndex = direction === 1 ? 0 : nextPane.slotIDs.length - 1;
+    const targetIndex = direction === 1 ? 0 : nextPane.tabs.length - 1;
     get().selectTabInPane(nextPane.id, targetIndex);
     get().setFocusedPane(nextPane.id);
   },
@@ -717,7 +728,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (!wsId) return;
     const runtime = get().runtimes[wsId];
     if (!runtime?.root) return;
-    const layout: PersistedWorkspaceLayout = {
+    const layout = {
       root: runtime.root,
       focusedPaneID: runtime.focusedPaneID,
     };
@@ -726,9 +737,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
   loadPersistedLayout: async (workspaceId) => {
     try {
-      const layout = await invoke<PersistedWorkspaceLayout | null>("load_workspace_layout", {
+      const raw = await invoke<unknown>("load_workspace_layout", {
         workspaceId,
       });
+      const layout = raw != null ? migratePersistedLayout(raw) : null;
       if (layout) {
         set((s) => {
           const runtime = s.runtimes[workspaceId];
@@ -762,15 +774,3 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (ws) get().selectWorkspace(ws);
   },
 }));
-
-// Helper: add a tab (slotID) to a specific pane within a layout tree
-function addTabToNode(node: LayoutNode, paneID: string, slotID: string): LayoutNode {
-  if (node.type === "leaf" && node.id === paneID) {
-    if (node.slotIDs.includes(slotID)) return node;
-    return { ...node, slotIDs: [...node.slotIDs, slotID], selectedIndex: node.slotIDs.length };
-  }
-  if (node.type === "split") {
-    return { ...node, children: node.children.map((c) => addTabToNode(c, paneID, slotID)) };
-  }
-  return node;
-}

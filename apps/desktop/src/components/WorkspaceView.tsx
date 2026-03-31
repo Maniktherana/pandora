@@ -17,7 +17,8 @@ import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from
 import { terminalTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { RotateCcw, Trash2 } from "lucide-react";
-
+import PaneEditor from "@/components/PaneEditor";
+import { tabKey } from "@/lib/layout-tree";
 // ── Hoisted native terminals (stable React parent across split/merge layout moves) ──
 
 type TerminalAnchorInfo = {
@@ -98,15 +99,28 @@ interface PaneViewProps {
   leaf: LayoutLeaf;
   isFocused: boolean;
   workspaceId: string;
+  workspaceRoot: string;
   isResizing?: boolean;
 }
 
-function PaneView({ leaf, isFocused, workspaceId, isResizing }: PaneViewProps) {
+function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: PaneViewProps) {
   const { slotsByID, sessionsByID } = useWorkspaceStore();
   const slotsMap = slotsByID(workspaceId);
   const sessionsMap = sessionsByID(workspaceId);
-  const activeSlotID = leaf.slotIDs[leaf.selectedIndex] ?? leaf.slotIDs[0];
-  const slot = activeSlotID ? slotsMap[activeSlotID] : null;
+  const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
+  const activeSlotId =
+    activeTab?.kind === "terminal" ? activeTab.slotId : null;
+  const slot = activeSlotId ? slotsMap[activeSlotId] : null;
+
+  const terminalSlots = leaf.tabs
+    .map((t, i) => (t.kind === "terminal" ? { slotId: t.slotId, idx: i } : null))
+    .filter((x): x is { slotId: string; idx: number } => x !== null);
+
+  const anyTerminalRunning = terminalSlots.some(({ slotId }) =>
+    Object.values(sessionsMap).some((s) => s.slotID === slotId && s.status === "running")
+  );
+
+  const onlyEditors = leaf.tabs.length > 0 && leaf.tabs.every((t) => t.kind === "editor");
 
   return (
     <div
@@ -115,9 +129,10 @@ function PaneView({ leaf, isFocused, workspaceId, isResizing }: PaneViewProps) {
     >
       <TabBar
         paneID={leaf.id}
-        slotIDs={leaf.slotIDs}
+        tabs={leaf.tabs}
         selectedIndex={leaf.selectedIndex}
         workspaceId={workspaceId}
+        workspaceRoot={workspaceRoot}
         isFocused={isFocused}
       />
 
@@ -128,15 +143,26 @@ function PaneView({ leaf, isFocused, workspaceId, isResizing }: PaneViewProps) {
           pointerEvents: isResizing ? "none" : undefined,
         }}
       >
-        {leaf.slotIDs.map((slotID, idx) => {
+        {leaf.tabs.map((tab, idx) => {
           const isActiveTab = idx === leaf.selectedIndex;
+          if (tab.kind === "editor") {
+            return (
+              <PaneEditor
+                key={tabKey(tab)}
+                workspaceId={workspaceId}
+                workspaceRoot={workspaceRoot}
+                relativePath={tab.path}
+                isActive={isActiveTab}
+              />
+            );
+          }
           const sessionForSlot = Object.values(sessionsMap).find(
-            (s) => s.slotID === slotID && s.status === "running"
+            (s) => s.slotID === tab.slotId && s.status === "running"
           );
           if (!sessionForSlot) return null;
           return (
             <PaneTerminalAnchorSlot
-              key={slotID}
+              key={tabKey(tab)}
               sessionForSlot={sessionForSlot}
               isActiveTab={isActiveTab}
               isFocused={isFocused}
@@ -146,9 +172,7 @@ function PaneView({ leaf, isFocused, workspaceId, isResizing }: PaneViewProps) {
           );
         })}
 
-        {!Object.values(sessionsMap).some(
-          (s) => leaf.slotIDs.includes(s.slotID) && s.status === "running"
-        ) && (
+        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && (
           <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
             {slot ? (
               <span>
@@ -172,10 +196,17 @@ interface LayoutRendererProps {
   node: LayoutNode;
   focusedPaneID: string | null;
   workspaceId: string;
+  workspaceRoot: string;
   isResizing?: boolean;
 }
 
-function LayoutRenderer({ node, focusedPaneID, workspaceId, isResizing }: LayoutRendererProps) {
+function LayoutRenderer({
+  node,
+  focusedPaneID,
+  workspaceId,
+  workspaceRoot,
+  isResizing,
+}: LayoutRendererProps) {
   const [localResizing, setLocalResizing] = useState(false);
   const anyResizing = isResizing || localResizing;
 
@@ -185,6 +216,7 @@ function LayoutRenderer({ node, focusedPaneID, workspaceId, isResizing }: Layout
         leaf={node}
         isFocused={node.id === focusedPaneID}
         workspaceId={workspaceId}
+        workspaceRoot={workspaceRoot}
         isResizing={anyResizing}
       />
     );
@@ -213,6 +245,7 @@ function LayoutRenderer({ node, focusedPaneID, workspaceId, isResizing }: Layout
               node={child}
               focusedPaneID={focusedPaneID}
               workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
               isResizing={anyResizing}
             />
           </ResizablePanel>
@@ -258,9 +291,11 @@ function HoistedNativeTerminals({
 
 function WorkspaceRuntimeView({
   workspaceId,
+  workspaceRoot,
   runtime,
 }: {
   workspaceId: string;
+  workspaceRoot: string;
   runtime: WorkspaceRuntimeState;
 }) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
@@ -290,11 +325,12 @@ function WorkspaceRuntimeView({
 
   return (
     <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
-      <div className="h-full w-full relative">
+      <div className="relative h-full w-full min-h-0">
         <LayoutRenderer
           node={runtime.root!}
           focusedPaneID={runtime.focusedPaneID}
           workspaceId={workspaceId}
+          workspaceRoot={workspaceRoot}
         />
         <HoistedNativeTerminals runtime={runtime} anchors={anchors} />
       </div>
@@ -379,6 +415,17 @@ function EmptyWorkspaceState() {
   return null;
 }
 
+function WorkspaceRuntimeLoading({ message }: { message: string }) {
+  return (
+    <div className="flex h-full items-center justify-center text-neutral-500">
+      <div className="text-center">
+        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-blue-500" />
+        <p className="text-sm">{message}</p>
+      </div>
+    </div>
+  );
+}
+
 // ── WorkspaceView ──────────────────────────────────────────────────────
 
 export default function WorkspaceView() {
@@ -388,13 +435,25 @@ export default function WorkspaceView() {
     (s) => (selectedWorkspaceID ? s.runtimes[selectedWorkspaceID] : null)
   );
 
-  if (!selectedWs || selectedWs.status !== "ready" || !runtime?.root) {
+  if (!selectedWs || selectedWs.status !== "ready") {
     return <EmptyWorkspaceState />;
+  }
+
+  // Ready workspace but runtime not yet created (e.g. one frame after loadAppState before
+  // selectWorkspace), or layout root not ready until the daemon reports slots.
+  if (!runtime?.root) {
+    return (
+      <WorkspaceRuntimeLoading message={runtime ? "Starting workspace…" : "Loading workspace…"} />
+    );
   }
 
   return (
     <TabDragProvider>
-      <WorkspaceRuntimeView workspaceId={selectedWorkspaceID!} runtime={runtime} />
+      <WorkspaceRuntimeView
+        workspaceId={selectedWorkspaceID!}
+        workspaceRoot={selectedWs.worktreePath}
+        runtime={runtime}
+      />
     </TabDragProvider>
   );
 }

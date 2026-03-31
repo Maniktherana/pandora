@@ -115,10 +115,15 @@ export interface WorkspaceRecord {
 
 export type LayoutAxis = "horizontal" | "vertical";
 
+/** One tab in a pane: native terminal (daemon slot) or editor file (path relative to workspace root). */
+export type PaneTab =
+  | { kind: "terminal"; slotId: string }
+  | { kind: "editor"; path: string };
+
 export interface LayoutLeaf {
   type: "leaf";
   id: string;
-  slotIDs: string[];
+  tabs: PaneTab[];
   selectedIndex: number;
 }
 

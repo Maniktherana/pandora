@@ -12,17 +12,38 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { DaemonClient } from "@/lib/daemon-client";
 import { setTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
-import type { LayoutNode, LayoutLeaf } from "@/lib/types";
+import { findLeaf } from "@/lib/layout-migrate";
+import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
 import { FolderTree, PanelLeft, Plus } from "lucide-react";
+import { loadPersistedSidebarVisible, persistSidebarVisible } from "@/lib/ui-persistence";
 
 export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarPersistHydrated, setSidebarPersistHydrated] = useState(false);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const clientRef = useRef<DaemonClient | null>(null);
   const store = useWorkspaceStore;
   // Survives HMR so we don't re-seed terminals on hot reload.
   const hasSeeded = ((globalThis as any).__pandoraHasSeeded ??= new Set<string>()) as Set<string>;
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPersistedSidebarVisible().then((visible) => {
+      if (!cancelled) {
+        setSidebarVisible(visible);
+        setSidebarPersistHydrated(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPersistHydrated) return;
+    void persistSidebarVisible(sidebarVisible);
+  }, [sidebarVisible, sidebarPersistHydrated]);
 
   // Load persisted app state on mount
   useEffect(() => {
@@ -119,21 +140,37 @@ export default function App() {
     const client = clientRef.current;
     const state = store.getState();
     const workspaceId = state.selectedWorkspaceID;
-    if (!client || !workspaceId) return;
+    if (!workspaceId) return;
+
+    const ws = state.workspaces.find((w) => w.id === workspaceId);
+    if (!ws || ws.status !== "ready") return;
+    const workspaceRoot = ws.worktreePath;
 
     const runtime = state.runtimes[workspaceId];
     if (!runtime?.root || !runtime.focusedPaneID) return;
 
     const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
-    if (!leaf) return;
+    if (!leaf || leaf.tabs.length === 0) return;
 
-    const activeSlotId = leaf.slotIDs[leaf.selectedIndex] ?? leaf.slotIDs[0];
-    if (!activeSlotId) return;
-
-    client.send(workspaceId, {
-      type: "remove_slot",
-      slotID: activeSlotId,
-    });
+    const idx = leaf.selectedIndex;
+    const tab = leaf.tabs[idx] ?? leaf.tabs[0];
+    if (tab.kind === "terminal") {
+      if (!client) return;
+      client.send(workspaceId, {
+        type: "remove_slot",
+        slotID: tab.slotId,
+      });
+    } else {
+      const label = tab.path.split("/").pop() ?? tab.path;
+      void tryCloseEditorTab({
+        workspaceId,
+        workspaceRoot,
+        paneID: runtime.focusedPaneID,
+        tabIndex: idx,
+        relativePath: tab.path,
+        displayName: label,
+      });
+    }
   }, []);
 
   // Global keyboard shortcuts — use capture phase so app shortcuts fire
@@ -340,7 +377,11 @@ export default function App() {
             >
               <div className="h-full min-h-0 min-w-0">
                 {fileTreeOpen && selectedWs?.status === "ready" ? (
-                  <WorkspaceFileTreePanel workspaceRoot={selectedWs.worktreePath} />
+                  <WorkspaceFileTreePanel
+                    key={selectedWs.id}
+                    workspaceRoot={selectedWs.worktreePath}
+                    workspaceId={selectedWs.id}
+                  />
                 ) : null}
               </div>
             </ResizablePanel>
@@ -434,11 +475,3 @@ function seedTerminalWithName(client: DaemonClient, workspaceId: string, name: s
   setTimeout(() => client.openSessionInstance(workspaceId, sessionDefID), 100);
 }
 
-function findLeaf(node: LayoutNode, paneID: string): LayoutLeaf | null {
-  if (node.type === "leaf") return node.id === paneID ? node : null;
-  for (const child of node.children) {
-    const found = findLeaf(child, paneID);
-    if (found) return found;
-  }
-  return null;
-}

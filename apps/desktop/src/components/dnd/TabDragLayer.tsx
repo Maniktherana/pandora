@@ -13,7 +13,7 @@
  *                              actions on pointer-up.
  *
  * Panes add  data-pane-id={leaf.id}  to their root div.
- * Tabs  add  data-tab-slot={slotID} data-tab-pane={paneID} data-tab-index={i}.
+ * Tabs  add  data-tab-pane={paneID} data-tab-index={i}.
  */
 
 import {
@@ -30,13 +30,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { cn } from "@/lib/utils";
 import type { LayoutAxis } from "@/lib/types";
+import { findLeaf } from "@/lib/layout-migrate";
+import { tabsEqual } from "@/lib/layout-tree";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface DragState {
-  slotID: string;
   sourcePaneID: string;
-  slotName: string;
+  sourceIndex: number;
+  tabLabel: string;
 }
 
 type DropZone = "center" | "left" | "right" | "top" | "bottom";
@@ -96,7 +98,7 @@ function hitTestPanes(x: number, y: number): { paneID: string; rect: DOMRect; zo
 }
 
 function hitTestTabs(x: number, y: number): TabDropTarget | null {
-  const tabs = document.querySelectorAll<HTMLElement>("[data-tab-slot]");
+  const tabs = document.querySelectorAll<HTMLElement>("[data-tab-pane][data-tab-index]");
   if (tabs.length === 0) return null;
 
   // Group tabs by pane
@@ -199,41 +201,33 @@ function TabDragOverlay({
     }
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
+      const runtime = useWorkspaceStore.getState().activeRuntime();
+      if (!runtime?.root) return;
+
       if (tgt.kind === "tab") {
         if (tgt.paneID === drag.sourcePaneID) {
-          // Reorder within same pane — find current index of this slot
-          const runtime = useWorkspaceStore.getState().activeRuntime();
-          if (!runtime?.root) return;
-          const leaf = findLeafInTree(runtime.root, tgt.paneID);
-          if (!leaf) return;
-          const fromIndex = leaf.slotIDs.indexOf(drag.slotID);
-          if (fromIndex === -1) return;
+          const fromIndex = drag.sourceIndex;
           let toIndex = tgt.insertIndex;
           if (fromIndex < toIndex) toIndex--;
           if (fromIndex !== toIndex) {
             reorderTab(tgt.paneID, fromIndex, toIndex);
           }
         } else {
-          // Move to another pane
-          moveTab(drag.sourcePaneID, tgt.paneID, drag.slotID);
+          moveTab(drag.sourcePaneID, tgt.paneID, drag.sourceIndex, tgt.insertIndex);
         }
       } else {
-        // Pane drop
         const { zone, paneID } = tgt;
         if (zone === "center") {
-          // Don't add if already there
-          const runtime = useWorkspaceStore.getState().activeRuntime();
-          const leaf = runtime?.root ? findLeafInTree(runtime.root, paneID) : null;
-          if (leaf?.slotIDs.includes(drag.slotID)) return;
-          addTabToPane(paneID, drag.slotID);
+          const leaf = findLeaf(runtime.root, paneID);
+          const srcLeaf = findLeaf(runtime.root, drag.sourcePaneID);
+          const moving = srcLeaf?.tabs[drag.sourceIndex];
+          if (!moving) return;
+          if (leaf?.tabs.some((t) => tabsEqual(t, moving))) return;
+          addTabToPane(paneID, drag.sourcePaneID, drag.sourceIndex);
         } else {
-          // Prevent splitting a single-tab pane onto itself
-          if (
-            drag.sourcePaneID === paneID
-          ) {
-            const runtime = useWorkspaceStore.getState().activeRuntime();
-            const leaf = runtime?.root ? findLeafInTree(runtime.root, paneID) : null;
-            if (leaf && leaf.slotIDs.length === 1) return;
+          if (drag.sourcePaneID === paneID) {
+            const leaf = findLeaf(runtime.root, paneID);
+            if (leaf && leaf.tabs.length === 1) return;
           }
           const axisMap: Record<string, LayoutAxis> = {
             left: "horizontal",
@@ -247,7 +241,7 @@ function TabDragOverlay({
             top: "before",
             bottom: "after",
           };
-          splitPane(paneID, drag.slotID, axisMap[zone], posMap[zone]);
+          splitPane(paneID, drag.sourcePaneID, drag.sourceIndex, axisMap[zone], posMap[zone]);
         }
       }
     }
@@ -275,7 +269,7 @@ function TabDragOverlay({
           top: cursor.y - 10,
         }}
       >
-        {dragState.slotName}
+        {dragState.tabLabel}
       </div>
 
       {/* Pane drop zone highlight */}
@@ -319,20 +313,6 @@ function TabDragOverlay({
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-function findLeafInTree(
-  node: { type: string; id: string; slotIDs?: string[]; children?: any[] },
-  paneID: string
-): { slotIDs: string[] } | null {
-  if (node.type === "leaf" && node.id === paneID) return node as any;
-  if (node.type === "split" && node.children) {
-    for (const child of node.children) {
-      const found = findLeafInTree(child, paneID);
-      if (found) return found;
-    }
-  }
-  return null;
-}
 
 // ── Provider ───────────────────────────────────────────────────────────
 

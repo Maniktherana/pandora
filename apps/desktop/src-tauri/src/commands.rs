@@ -249,23 +249,35 @@ pub fn save_selection(
     );
 }
 
+#[tauri::command]
+pub fn get_ui_state(db: tauri::State<'_, DbState>, key: String) -> Option<String> {
+    db.0.load_ui_state(&key)
+}
+
+#[tauri::command]
+pub fn set_ui_state(db: tauri::State<'_, DbState>, key: String, value: Option<String>) {
+    db.0.save_ui_state(&key, value.as_deref());
+}
+
 // ─── Layout commands ───
 
 #[tauri::command]
 pub fn save_workspace_layout(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
-    layout: PersistedWorkspaceLayout,
+    layout: serde_json::Value,
 ) -> Result<(), String> {
-    db.0.save_layout(&workspace_id, &layout)
+    let payload = serde_json::to_string(&layout).map_err(|e| e.to_string())?;
+    db.0.save_layout(&workspace_id, &payload)
 }
 
 #[tauri::command]
 pub fn load_workspace_layout(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
-) -> Option<PersistedWorkspaceLayout> {
-    db.0.load_layout(&workspace_id)
+) -> Option<serde_json::Value> {
+    let raw = db.0.load_layout(&workspace_id)?;
+    serde_json::from_str(&raw).ok()
 }
 
 // ─── Workspace runtime start (called when selecting a ready workspace) ───
@@ -349,6 +361,43 @@ pub fn list_workspace_directory(
     });
 
     Ok(entries)
+}
+
+const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+#[tauri::command]
+pub fn read_workspace_text_file(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<String, String> {
+    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+    if !path.is_file() {
+        return Err("Not a file".to_string());
+    }
+    let len = path.metadata().map_err(|e| e.to_string())?.len();
+    if len > MAX_TEXT_FILE_BYTES {
+        return Err(format!(
+            "File is too large for the editor (max {} MB)",
+            MAX_TEXT_FILE_BYTES / (1024 * 1024)
+        ));
+    }
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn write_workspace_text_file(
+    workspace_root: String,
+    relative_path: String,
+    contents: String,
+) -> Result<(), String> {
+    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+    if contents.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
+        return Err("Content is too large to save".to_string());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
 // ─── Reload all data (convenience for frontend) ───

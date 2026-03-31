@@ -138,6 +138,8 @@ fn main() {
             // Selection
             commands::load_selection,
             commands::save_selection,
+            commands::get_ui_state,
+            commands::set_ui_state,
             // Layout
             commands::save_workspace_layout,
             commands::load_workspace_layout,
@@ -147,6 +149,8 @@ fn main() {
             commands::load_app_state,
             commands::native_terminal_supported,
             commands::list_workspace_directory,
+            commands::read_workspace_text_file,
+            commands::write_workspace_text_file,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());
