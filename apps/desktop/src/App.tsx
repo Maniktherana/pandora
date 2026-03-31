@@ -15,13 +15,20 @@ import { cn } from "@/lib/utils";
 import { findLeaf } from "@/lib/layout-migrate";
 import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
 import { FolderTree, PanelLeft, Plus } from "lucide-react";
-import { loadPersistedSidebarVisible, persistSidebarVisible } from "@/lib/ui-persistence";
+import {
+  loadPersistedSidebarVisible,
+  persistSidebarVisible,
+  loadFileTreeOpenForWorkspace,
+  persistFileTreeOpenForWorkspace,
+} from "@/lib/ui-persistence";
 
 export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarPersistHydrated, setSidebarPersistHydrated] = useState(false);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
+  const prevFileTreeWorkspaceIdRef = useRef<string | null>(null);
+  const fileTreeLoadTicketRef = useRef(0);
   const clientRef = useRef<DaemonClient | null>(null);
   const store = useWorkspaceStore;
   // Survives HMR so we don't re-seed terminals on hot reload.
@@ -284,6 +291,36 @@ export default function App() {
   );
   const connectionState = runtime?.connectionState ?? "disconnected";
 
+  // Restore per-workspace file-tree open state (right panel). Avoid resetting on first hydrate
+  // so launch does not flash closed-then-open.
+  useEffect(() => {
+    const id =
+      selectedWs?.status === "ready" ? selectedWs.id : null;
+    if (!id) {
+      setFileTreeOpen(false);
+      prevFileTreeWorkspaceIdRef.current = null;
+      return;
+    }
+
+    const prev = prevFileTreeWorkspaceIdRef.current;
+    prevFileTreeWorkspaceIdRef.current = id;
+    if (prev !== null && prev !== id) {
+      setFileTreeOpen(false);
+    }
+
+    const ticket = ++fileTreeLoadTicketRef.current;
+    let cancelled = false;
+    void loadFileTreeOpenForWorkspace(id).then((open) => {
+      if (cancelled) return;
+      if (fileTreeLoadTicketRef.current !== ticket) return;
+      if (useWorkspaceStore.getState().selectedWorkspaceID !== id) return;
+      setFileTreeOpen(open);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWs?.id, selectedWs?.status]);
+
   // Keep WorkspaceView mounted: collapsing the file-tree panel instead of swapping trees avoids
   // destroying native Ghostty surfaces (which caused a full flash on every toggle).
   useLayoutEffect(() => {
@@ -337,7 +374,17 @@ export default function App() {
           {selectedWs?.status === "ready" && (
             <button
               type="button"
-              onClick={() => setFileTreeOpen((v) => !v)}
+              onClick={() => {
+                fileTreeLoadTicketRef.current += 1;
+                setFileTreeOpen((v) => {
+                  const next = !v;
+                  const ws = useWorkspaceStore.getState().selectedWorkspace();
+                  if (ws?.status === "ready") {
+                    void persistFileTreeOpenForWorkspace(ws.id, next);
+                  }
+                  return next;
+                });
+              }}
               className={cn(
                 "mr-3 shrink-0 p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
                 fileTreeOpen && "bg-neutral-800 text-neutral-200"

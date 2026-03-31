@@ -32,7 +32,13 @@ function parseExpansionMap(raw: string | null): FileTreeExpansionMap {
   try {
     const o = JSON.parse(raw) as unknown;
     if (!o || typeof o !== "object" || Array.isArray(o)) return {};
-    return o as FileTreeExpansionMap;
+    const out: FileTreeExpansionMap = {};
+    for (const [k, v] of Object.entries(o)) {
+      if (!Array.isArray(v)) continue;
+      const paths = v.filter((x): x is string => typeof x === "string");
+      if (paths.length > 0) out[k] = paths;
+    }
+    return out;
   } catch {
     return {};
   }
@@ -41,17 +47,32 @@ function parseExpansionMap(raw: string | null): FileTreeExpansionMap {
 export async function loadFileTreeExpandedPaths(workspaceId: string): Promise<string[]> {
   const raw = await getUiState(UI_KEYS.workspaceFileTreeExpanded);
   const map = parseExpansionMap(raw);
-  return map[workspaceId] ?? [];
+  const v = map[workspaceId];
+  return Array.isArray(v) ? v : [];
 }
 
-export async function persistFileTreeExpandedPaths(
+/** Serialize expanded-map updates so concurrent read-modify-write cannot drop a workspace's paths. */
+let persistExpandedChain: Promise<void> = Promise.resolve();
+
+export function persistFileTreeExpandedPaths(
   workspaceId: string,
   paths: Iterable<string>
 ): Promise<void> {
-  const raw = await getUiState(UI_KEYS.workspaceFileTreeExpanded);
-  const map = parseExpansionMap(raw);
-  map[workspaceId] = Array.from(new Set(paths)).sort();
-  await setUiState(UI_KEYS.workspaceFileTreeExpanded, JSON.stringify(map));
+  const nextPaths = Array.from(new Set(paths)).sort();
+  const run = async () => {
+    const raw = await getUiState(UI_KEYS.workspaceFileTreeExpanded);
+    const map = parseExpansionMap(raw);
+    if (nextPaths.length === 0) {
+      delete map[workspaceId];
+    } else {
+      map[workspaceId] = nextPaths;
+    }
+    await setUiState(UI_KEYS.workspaceFileTreeExpanded, JSON.stringify(map));
+  };
+  persistExpandedChain = persistExpandedChain.then(run).catch((e) => {
+    console.error("persistFileTreeExpandedPaths failed", e);
+  });
+  return persistExpandedChain;
 }
 
 type FileTreeOpenMap = Record<string, boolean>;

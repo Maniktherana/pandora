@@ -8,6 +8,7 @@ import { X } from "lucide-react";
 import type { PaneTab } from "@/lib/types";
 import { tabKey } from "@/lib/layout-tree";
 import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 
 interface TabBarProps {
   paneID: string;
@@ -189,6 +190,9 @@ export default function TabBar({
               isBeingDragged && "opacity-30"
             )}
           >
+            {tab.kind === "editor" ? (
+              <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
+            ) : null}
             <span className="pointer-events-none max-w-[120px] truncate">
               {tabLabel(tab, slotsMap)}
             </span>

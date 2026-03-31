@@ -1,0 +1,27 @@
+import spriteUrl from "@/assets/file-icons-sprite.svg?url";
+import { chooseIconName } from "@/lib/file-icon";
+import { cn } from "@/lib/utils";
+
+export function FileTypeIcon({
+  path,
+  kind,
+  expanded = false,
+  className,
+}: {
+  path: string;
+  kind: "file" | "directory";
+  expanded?: boolean;
+  className?: string;
+}) {
+  const symbolId = chooseIconName(path, kind === "directory" ? "directory" : "file", expanded);
+  return (
+    <svg
+      className={cn("size-3.5 shrink-0 overflow-visible", className)}
+      width={14}
+      height={14}
+      aria-hidden
+    >
+      <use href={`${spriteUrl}#${symbolId}`} width="100%" height="100%" />
+    </svg>
+  );
+}
