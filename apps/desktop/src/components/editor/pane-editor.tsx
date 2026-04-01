@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
-import ReviewFileViewer from "@/components/editor/review-file-viewer";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { languageFromRelativePath } from "@/lib/editor/editor-language";
 import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
-import type { CodePresentationMode } from "@/lib/shared/types";
 
 const editorOptions = {
   minimap: { enabled: false },
@@ -29,13 +27,11 @@ export default function PaneEditor({
   workspaceRoot,
   relativePath,
   isActive,
-  presentationMode,
 }: {
   workspaceId: string;
   workspaceRoot: string;
   relativePath: string;
   isActive: boolean;
-  presentationMode: CodePresentationMode;
 }) {
   const buffer = useEditorStore(
     (s) => s.bufferByWorkspace[workspaceId]?.[relativePath] ?? ""
@@ -44,7 +40,7 @@ export default function PaneEditor({
   const mergeSaved = useEditorStore((s) => s.mergeDiskContent);
 
   useEffect(() => {
-    if (!isActive || presentationMode !== "edit") return;
+    if (!isActive) return;
     const has = useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath];
     if (has !== undefined) return;
     let cancelled = false;
@@ -59,7 +55,7 @@ export default function PaneEditor({
     return () => {
       cancelled = true;
     };
-  }, [isActive, presentationMode, workspaceId, workspaceRoot, relativePath, mergeSaved]);
+  }, [isActive, workspaceId, workspaceRoot, relativePath, mergeSaved]);
   const saveFile = useEditorStore((s) => s.saveFile);
   const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
   const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
@@ -104,17 +100,6 @@ export default function PaneEditor({
           backgroundColor: PANDORA_EDITOR_BG,
         }}
         aria-hidden
-      />
-    );
-  }
-
-  if (presentationMode === "review") {
-    return (
-      <ReviewFileViewer
-        workspaceId={workspaceId}
-        workspaceRoot={workspaceRoot}
-        relativePath={relativePath}
-        isActive={isActive}
       />
     );
   }

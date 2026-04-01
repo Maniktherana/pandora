@@ -21,7 +21,7 @@ import {
   seedWorkspaceTerminal,
 } from "@/lib/terminal/terminal-seed";
 import { setTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
-import { Eye, FolderTree, PanelBottom, PanelLeft, PencilLine, Plus } from "lucide-react";
+import { FolderTree, PanelBottom, PanelLeft, Plus } from "lucide-react";
 import {
   loadPersistedSidebarVisible,
   persistSidebarVisible,
@@ -410,8 +410,6 @@ export default function App() {
   }, [handleCloseFocusedTab, toggleBottomPanel]);
 
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
-  const presentationMode = useWorkspaceStore((s) => s.presentationMode);
-  const setPresentationMode = useWorkspaceStore((s) => s.setPresentationMode);
   const runtime = useWorkspaceStore((s) =>
     s.selectedWorkspaceID ? s.runtimes[s.selectedWorkspaceID] : null
   );
@@ -511,34 +509,6 @@ export default function App() {
             <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
             {selectedWs?.status === "ready" && (
               <div className="mr-3 flex shrink-0 items-center gap-1">
-                <div className="mr-2 inline-flex items-center rounded-md border border-[var(--oc-border)] bg-[var(--oc-panel)] p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPresentationMode("edit")}
-                    className={cn(
-                      "inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-[var(--oc-text-muted)] transition-colors hover:text-[var(--oc-text)]",
-                      presentationMode === "edit" &&
-                        "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
-                    )}
-                    title="Edit mode"
-                  >
-                    <PencilLine className="h-3.5 w-3.5" />
-                    <span>Edit</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPresentationMode("review")}
-                    className={cn(
-                      "inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-[var(--oc-text-muted)] transition-colors hover:text-[var(--oc-text)]",
-                      presentationMode === "review" &&
-                        "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
-                    )}
-                    title="Review mode"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                    <span>Review</span>
-                  </button>
-                </div>
                 <button
                   type="button"
                   onClick={toggleBottomPanel}

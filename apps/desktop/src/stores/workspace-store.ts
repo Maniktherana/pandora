@@ -5,7 +5,6 @@ import type {
   WorkspaceRecord,
   WorkspaceKind,
   DiffSource,
-  CodePresentationMode,
   SlotState,
   SessionState,
   LayoutNode,
@@ -93,10 +92,8 @@ interface WorkspaceStoreState {
   // ─── UI state ───
   navigationArea: NavigationArea;
   searchText: string;
-  presentationMode: CodePresentationMode;
   /** When set, layout shortcuts / tab DnD target this runtime (`project:…` or workspace id). */
   layoutTargetRuntimeId: string | null;
-  setPresentationMode: (mode: CodePresentationMode) => void;
   setLayoutTargetRuntimeId: (id: string | null) => void;
   effectiveLayoutRuntimeId: () => string | null;
 
@@ -236,10 +233,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
   runtimes: {},
   navigationArea: "sidebar",
   searchText: "",
-  presentationMode: "edit",
   layoutTargetRuntimeId: null,
 
-  setPresentationMode: (presentationMode) => set({ presentationMode }),
   setLayoutTargetRuntimeId: (id) => set({ layoutTargetRuntimeId: id }),
   effectiveLayoutRuntimeId: () => {
     const { layoutTargetRuntimeId, selectedWorkspaceID } = get();

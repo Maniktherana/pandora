@@ -3,7 +3,6 @@ import {
   registerCustomTheme,
   type FileContents,
   type FileDiffOptions,
-  type FileOptions,
 } from "@pierre/diffs";
 import { oc2CodeSurfaceTokens, toPierreVariables } from "@/lib/theme/oc2";
 
@@ -206,18 +205,6 @@ const pierreUnsafeCSS = `
 `;
 
 type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
-
-export function createPierreFileOptions(): FileOptions<unknown> {
-  return {
-    theme: PANDORA_PIERRE_THEME,
-    themeType: "dark",
-    disableLineNumbers: false,
-    overflow: "wrap",
-    disableFileHeader: true,
-    lineHoverHighlight: "both",
-    unsafeCSS: pierreUnsafeCSS,
-  };
-}
 
 export function createPierreDiffOptions(diffStyle: PierreDiffStyle): FileDiffOptions<unknown> {
   return {

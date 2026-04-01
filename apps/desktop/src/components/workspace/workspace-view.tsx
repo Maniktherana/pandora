@@ -115,7 +115,6 @@ function PaneView({
   isResizing,
 }: PaneViewProps) {
   const { slotsByID, sessionsByID } = useWorkspaceStore();
-  const presentationMode = useWorkspaceStore((s) => s.presentationMode);
   const slotsMap = slotsByID(workspaceId);
   const sessionsMap = sessionsByID(workspaceId);
   const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
@@ -168,7 +167,6 @@ function PaneView({
                 workspaceRoot={workspaceRoot}
                 relativePath={tab.path}
                 isActive={isActiveTab}
-                presentationMode={presentationMode}
               />
             );
           }
