@@ -17,9 +17,11 @@ import {
   scmCommit,
   scmDiscardTracked,
   scmDiscardUntracked,
+  scmToneTextClass,
   scmStage,
   scmStageAll,
   scmStatus,
+  statusTone,
   scmUnstage,
   scmUnstageAll,
   type ScmStatusEntry,
@@ -39,13 +41,17 @@ function statusBadge(text: string, className?: string) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded px-1 font-mono text-[10px] font-medium text-neutral-400",
+        "shrink-0 rounded px-1 font-mono text-[10px] font-medium text-[var(--oc-text-muted)]",
         className
       )}
     >
       {text}
     </span>
   );
+}
+
+function entryTone(entry: ScmStatusEntry) {
+  return statusTone(entry);
 }
 
 export default function WorkspaceChangesPanel({
@@ -122,13 +128,13 @@ export default function WorkspaceChangesPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800 px-1.5 py-1">
+    <div className="flex h-full min-h-0 select-none flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--oc-border)] px-1.5 py-1">
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 px-2 text-[11px] text-neutral-400 hover:text-neutral-100"
+          className="h-7 gap-1 px-2 text-[11px] text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
           disabled={busy}
           title="Refresh"
           onClick={() => refresh()}
@@ -139,7 +145,7 @@ export default function WorkspaceChangesPanel({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-[11px] text-neutral-400 hover:text-neutral-100"
+          className="h-7 px-2 text-[11px] text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
           disabled={busy || !unstagedList.length}
           title="Stage all"
           onClick={() => void run(() => scmStageAll(workspaceRoot))}
@@ -150,7 +156,7 @@ export default function WorkspaceChangesPanel({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-[11px] text-neutral-400 hover:text-neutral-100"
+          className="h-7 px-2 text-[11px] text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
           disabled={busy || !stagedList.length}
           title="Unstage all"
           onClick={() => {
@@ -172,10 +178,10 @@ export default function WorkspaceChangesPanel({
 
       <div className="min-h-0 flex-1 overflow-auto py-1">
         {entries === null && (
-          <div className="px-2 py-2 text-xs text-neutral-500">Loading changes…</div>
+          <div className="px-2 py-2 text-xs text-[var(--oc-text-subtle)]">Loading changes…</div>
         )}
         {entries && entries.length === 0 && (
-          <div className="px-2 py-2 text-xs text-neutral-500">No changes</div>
+          <div className="px-2 py-2 text-xs text-[var(--oc-text-subtle)]">No changes</div>
         )}
 
         {entries && stagedList.length > 0 && (
@@ -186,7 +192,7 @@ export default function WorkspaceChangesPanel({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-neutral-400 hover:bg-neutral-800/80 hover:text-neutral-200 data-[panel-open]:bg-neutral-800/40"
+                  className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-[var(--oc-text-muted)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)] data-[panel-open]:bg-[var(--oc-panel-hover)]"
                 >
                   <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
                   <span className="text-[11px] font-medium uppercase tracking-wide">
@@ -200,13 +206,13 @@ export default function WorkspaceChangesPanel({
                 {stagedList.map((e) => (
                   <li
                     key={`s:${e.path}`}
-                    className="flex min-w-0 items-center gap-0.5 border-b border-neutral-800/50 py-0.5 pl-1 pr-1 last:border-b-0"
+                    className="flex min-w-0 items-center gap-0.5 border-b border-[var(--oc-border)]/60 py-0.5 pl-1 pr-1 last:border-b-0"
                   >
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100"
+                      className="h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
                       title="Open staged diff"
                       disabled={busy}
                       onClick={() => onOpenDiff(e.path, "staged")}
@@ -215,10 +221,13 @@ export default function WorkspaceChangesPanel({
                     </Button>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1">
-                        {e.stagedKind ? statusBadge(e.stagedKind, "bg-emerald-950/50 text-emerald-200/80") : null}
+                        {e.stagedKind ? statusBadge(e.stagedKind, cn("bg-transparent", scmToneTextClass(entryTone(e)))) : null}
                         <button
                           type="button"
-                          className="min-w-0 truncate text-left font-mono text-[11px] text-neutral-300 hover:text-neutral-100 hover:underline"
+                          className={cn(
+                            "min-w-0 truncate text-left font-mono text-[11px] hover:opacity-80 hover:underline",
+                            scmToneTextClass(entryTone(e))
+                          )}
                           title={e.path}
                           disabled={busy}
                           onClick={() => onOpenDiff(e.path, "staged")}
@@ -227,7 +236,7 @@ export default function WorkspaceChangesPanel({
                         </button>
                       </div>
                       {e.origPath ? (
-                        <div className="truncate pl-1 font-mono text-[10px] text-neutral-600" title={e.origPath}>
+                        <div className="truncate pl-1 font-mono text-[10px] text-[var(--oc-text-faint)]" title={e.origPath}>
                           ← {e.origPath}
                         </div>
                       ) : null}
@@ -237,7 +246,7 @@ export default function WorkspaceChangesPanel({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-neutral-500 hover:text-neutral-200"
+                        className="h-7 w-7 p-0 text-[var(--oc-text-subtle)] hover:text-[var(--oc-text)]"
                         title="Open file"
                         disabled={busy}
                         onClick={() => void openFile(workspaceId, workspaceRoot, e.path)}
@@ -248,7 +257,7 @@ export default function WorkspaceChangesPanel({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-neutral-500 hover:text-neutral-200"
+                        className="h-7 w-7 p-0 text-[var(--oc-text-subtle)] hover:text-[var(--oc-text)]"
                         title="Unstage"
                         disabled={busy}
                         onClick={() => void run(() => scmUnstage(workspaceRoot, [e.path]))}
@@ -271,7 +280,7 @@ export default function WorkspaceChangesPanel({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-neutral-400 hover:bg-neutral-800/80 hover:text-neutral-200 data-[panel-open]:bg-neutral-800/40"
+                  className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-[var(--oc-text-muted)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)] data-[panel-open]:bg-[var(--oc-panel-hover)]"
                 >
                   <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
                   <span className="text-[11px] font-medium uppercase tracking-wide">
@@ -285,13 +294,13 @@ export default function WorkspaceChangesPanel({
                 {unstagedList.map((e) => (
                   <li
                     key={`u:${e.path}`}
-                    className="flex min-w-0 items-center gap-0.5 border-b border-neutral-800/50 py-0.5 pl-1 pr-1 last:border-b-0"
+                    className="flex min-w-0 items-center gap-0.5 border-b border-[var(--oc-border)]/60 py-0.5 pl-1 pr-1 last:border-b-0"
                   >
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100"
+                      className="h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
                       title="Open diff (working tree)"
                       disabled={busy}
                       onClick={() => onOpenDiff(e.path, "working")}
@@ -301,13 +310,16 @@ export default function WorkspaceChangesPanel({
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1">
                         {e.untracked
-                          ? statusBadge("?", "bg-amber-950/50 text-amber-200/80")
+                          ? statusBadge("?", cn("bg-transparent", scmToneTextClass("added")))
                           : e.worktreeKind
-                            ? statusBadge(e.worktreeKind, "bg-sky-950/50 text-sky-200/80")
+                            ? statusBadge(e.worktreeKind, cn("bg-transparent", scmToneTextClass(entryTone(e))))
                             : null}
                         <button
                           type="button"
-                          className="min-w-0 truncate text-left font-mono text-[11px] text-neutral-300 hover:text-neutral-100 hover:underline"
+                          className={cn(
+                            "min-w-0 truncate text-left font-mono text-[11px] hover:opacity-80 hover:underline",
+                            scmToneTextClass(entryTone(e))
+                          )}
                           title={e.path}
                           disabled={busy}
                           onClick={() => onOpenDiff(e.path, "working")}
@@ -316,7 +328,7 @@ export default function WorkspaceChangesPanel({
                         </button>
                       </div>
                       {e.origPath ? (
-                        <div className="truncate pl-1 font-mono text-[10px] text-neutral-600" title={e.origPath}>
+                        <div className="truncate pl-1 font-mono text-[10px] text-[var(--oc-text-faint)]" title={e.origPath}>
                           ← {e.origPath}
                         </div>
                       ) : null}
@@ -326,7 +338,7 @@ export default function WorkspaceChangesPanel({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-neutral-500 hover:text-neutral-200"
+                        className="h-7 w-7 p-0 text-[var(--oc-text-subtle)] hover:text-[var(--oc-text)]"
                         title="Open file"
                         disabled={busy}
                         onClick={() => void openFile(workspaceId, workspaceRoot, e.path)}
@@ -337,7 +349,7 @@ export default function WorkspaceChangesPanel({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-neutral-500 hover:text-neutral-200"
+                        className="h-7 w-7 p-0 text-[var(--oc-text-subtle)] hover:text-[var(--oc-text)]"
                         title="Stage"
                         disabled={busy}
                         onClick={() => void run(() => scmStage(workspaceRoot, [e.path]))}
@@ -348,7 +360,7 @@ export default function WorkspaceChangesPanel({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-neutral-500 hover:text-amber-200"
+                        className="h-7 w-7 p-0 text-[var(--oc-text-subtle)] hover:text-[var(--oc-warning)]"
                         title={e.untracked ? "Delete untracked" : "Discard changes"}
                         disabled={busy}
                         onClick={() => onDiscard(e)}
@@ -364,9 +376,9 @@ export default function WorkspaceChangesPanel({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-neutral-800 bg-neutral-950/80 p-2">
+      <div className="shrink-0 border-t border-[var(--oc-border)] bg-[#121212] p-2">
         <textarea
-          className="mb-2 min-h-[52px] w-full resize-y rounded border border-neutral-800 bg-neutral-900/80 px-2 py-1.5 font-sans text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
+          className="mb-2 min-h-[52px] w-full resize-y rounded border border-[var(--oc-border)] bg-[var(--oc-panel-elevated)] px-2 py-1.5 font-sans text-[12px] text-[var(--oc-text)] placeholder:text-[var(--oc-text-faint)] focus:border-[var(--oc-interactive)] focus:outline-none"
           placeholder="Commit message"
           rows={2}
           value={commitMessage}

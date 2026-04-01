@@ -173,7 +173,7 @@ export default function BottomTerminalSidebar({
   if (!panel || panel.groups.length === 0) {
     return (
       <div className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-neutral-800 bg-neutral-900/90">
-        <div className="border-b border-neutral-800 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-neutral-500">
+        <div className="select-none border-b border-neutral-800 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-neutral-500">
           Terminals
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-neutral-500">
@@ -192,7 +192,7 @@ export default function BottomTerminalSidebar({
         pendingDragRef.current = null;
       }}
     >
-      <div className="border-b border-neutral-800 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-neutral-500">
+      <div className="select-none border-b border-neutral-800 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-neutral-500">
         Terminals
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -222,7 +222,7 @@ export default function BottomTerminalSidebar({
                     data-bottom-terminal-slot-id={row.slotId}
                     data-bottom-terminal-slot-index={row.slotIndex}
                     className={cn(
-                      "flex min-h-7 w-full cursor-default items-center gap-1.5 rounded-md px-2 text-left text-[11px] outline-none",
+                      "flex min-h-7 w-full cursor-default select-none items-center gap-1.5 rounded-md px-2 text-left text-[11px] outline-none",
                       active
                         ? "bg-[#1e3a5f] text-neutral-100"
                         : "text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200",

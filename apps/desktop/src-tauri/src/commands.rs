@@ -2,7 +2,10 @@ use crate::daemon_bridge::{self, DaemonState};
 use crate::database::{now_iso8601, AppDatabase};
 use crate::git;
 use crate::models::*;
+use std::collections::HashSet;
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tauri::AppHandle;
 
@@ -332,6 +335,80 @@ pub async fn stop_project_runtime(
 pub struct WorkspaceDirEntry {
     pub name: String,
     pub is_directory: bool,
+    pub is_ignored: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhosttyConfigSource {
+    pub path: Option<String>,
+    pub config: Option<String>,
+}
+
+fn read_system_ghostty_config_file() -> GhosttyConfigSource {
+    let home = std::env::var("HOME").ok();
+    let xdg = std::env::var("XDG_CONFIG_HOME").ok();
+    let mut candidates = Vec::new();
+
+    if let Some(xdg_home) = xdg {
+        candidates.push(format!("{xdg_home}/ghostty/config"));
+    }
+    if let Some(home_dir) = &home {
+        candidates.push(format!("{home_dir}/.config/ghostty/config"));
+        candidates.push(format!(
+            "{home_dir}/Library/Application Support/com.mitchellh.ghostty/config"
+        ));
+    }
+
+    for path in candidates {
+        let candidate = std::path::PathBuf::from(&path);
+        if !candidate.is_file() {
+            continue;
+        }
+        if let Ok(config) = std::fs::read_to_string(&candidate) {
+            return GhosttyConfigSource {
+                path: Some(candidate.to_string_lossy().into_owned()),
+                config: Some(config),
+            };
+        }
+    }
+
+    GhosttyConfigSource {
+        path: None,
+        config: None,
+    }
+}
+
+fn git_ignored_paths(workspace_root: &str, relative_paths: &[String]) -> HashSet<String> {
+    if relative_paths.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut child = match Command::new("git")
+        .args(["-C", workspace_root, "check-ignore", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return HashSet::new(),
+    };
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        let input = relative_paths.join("\n");
+        let _ = stdin.write_all(input.as_bytes());
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(_) => return HashSet::new(),
+    };
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 fn resolve_path_under_workspace_root(
@@ -366,12 +443,15 @@ pub fn list_workspace_directory(
     workspace_root: String,
     relative_path: String,
 ) -> Result<Vec<WorkspaceDirEntry>, String> {
+    let root_abs = Path::new(&workspace_root)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {e}"))?;
     let dir = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
     if !dir.is_dir() {
         return Err("Not a directory".to_string());
     }
 
-    let mut entries: Vec<WorkspaceDirEntry> = std::fs::read_dir(&dir)
+    let raw_entries: Vec<(String, bool, String)> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter_map(|e| {
@@ -380,10 +460,25 @@ pub fn list_workspace_directory(
                 return None;
             }
             let meta = e.file_type().ok()?;
-            Some(WorkspaceDirEntry {
-                name,
-                is_directory: meta.is_dir(),
-            })
+            let child_path = dir.join(&name);
+            let rel = child_path
+                .strip_prefix(&root_abs)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some((name, meta.is_dir(), rel))
+        })
+        .collect();
+
+    let rel_paths: Vec<String> = raw_entries.iter().map(|(_, _, rel)| rel.clone()).collect();
+    let ignored = git_ignored_paths(&workspace_root, &rel_paths);
+
+    let mut entries: Vec<WorkspaceDirEntry> = raw_entries
+        .into_iter()
+        .map(|(name, is_directory, rel)| WorkspaceDirEntry {
+            name,
+            is_directory,
+            is_ignored: ignored.contains(&rel),
         })
         .collect();
 
@@ -394,6 +489,11 @@ pub fn list_workspace_directory(
     });
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub fn read_system_ghostty_config() -> GhosttyConfigSource {
+    read_system_ghostty_config_file()
 }
 
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;

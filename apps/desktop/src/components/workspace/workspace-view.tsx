@@ -115,6 +115,7 @@ function PaneView({
   isResizing,
 }: PaneViewProps) {
   const { slotsByID, sessionsByID } = useWorkspaceStore();
+  const presentationMode = useWorkspaceStore((s) => s.presentationMode);
   const slotsMap = slotsByID(workspaceId);
   const sessionsMap = sessionsByID(workspaceId);
   const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
@@ -167,6 +168,7 @@ function PaneView({
                 workspaceRoot={workspaceRoot}
                 relativePath={tab.path}
                 isActive={isActiveTab}
+                presentationMode={presentationMode}
               />
             );
           }
@@ -208,9 +210,9 @@ function PaneView({
         })}
 
         {leaf.tabs.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-neutral-500">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-[var(--oc-text-subtle)]">
             <p>No open tabs</p>
-            <p className="max-w-xs text-xs text-neutral-600">
+            <p className="max-w-xs text-xs text-[var(--oc-text-faint)]">
               Open a file from the file tree, or add a terminal with + in the title bar.
             </p>
           </div>
@@ -220,7 +222,7 @@ function PaneView({
           !anyTerminalRunning &&
           terminalSlots.length > 0 &&
           slot?.aggregateStatus !== "stopped" && (
-          <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
+          <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)] text-sm">
             {slot ? <span>Connecting...</span> : <span>No terminal</span>}
           </div>
         )}
@@ -275,10 +277,10 @@ function LayoutRenderer({
             <PanelResizeHandle
               hitAreaMargins={{ coarse: 0, fine: 0 }}
               className={cn(
-                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-blue-500",
+                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-[var(--oc-interactive)]",
                 direction === "horizontal"
-                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-neutral-500"
-                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-neutral-500"
+                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-[var(--oc-text-faint)]"
+                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-[var(--oc-text-faint)]"
               )}
               onDragging={setLocalResizing}
             />
@@ -396,7 +398,7 @@ function EmptyWorkspaceState() {
     const project = selectedProject();
     if (!project) {
       return (
-        <div className="flex items-center justify-center h-full text-neutral-600">
+        <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)]">
           <div className="text-center">
             <p className="text-lg font-medium">No project selected</p>
             <p className="text-sm mt-1">
@@ -407,7 +409,7 @@ function EmptyWorkspaceState() {
       );
     }
     return (
-      <div className="flex items-center justify-center h-full text-neutral-600">
+      <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)]">
         <div className="text-center">
           <p className="text-lg font-medium">No workspace selected</p>
           <p className="text-sm mt-1">Create a workspace in the sidebar</p>
@@ -418,11 +420,11 @@ function EmptyWorkspaceState() {
 
   if (workspace.status === "creating") {
     return (
-      <div className="flex items-center justify-center h-full text-neutral-500">
+      <div className="flex items-center justify-center h-full text-[var(--oc-text-subtle)]">
         <div className="text-center">
-          <div className="w-6 h-6 border-2 border-neutral-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-3" />
+          <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--oc-text-faint)] border-t-[var(--oc-interactive)]" />
           <p className="text-sm">Creating workspace...</p>
-          <p className="text-xs text-neutral-600 mt-1">Setting up git worktree</p>
+          <p className="mt-1 text-xs text-[var(--oc-text-faint)]">Setting up git worktree</p>
         </div>
       </div>
     );
@@ -431,25 +433,25 @@ function EmptyWorkspaceState() {
   if (workspace.status === "failed") {
     const { retryWorkspace, removeWorkspace } = useWorkspaceStore.getState();
     return (
-      <div className="flex items-center justify-center h-full text-neutral-500">
+      <div className="flex items-center justify-center h-full text-[var(--oc-text-subtle)]">
         <div className="text-center max-w-md">
           <p className="text-sm text-red-400">Workspace creation failed</p>
           {workspace.failureMessage && (
-            <p className="text-xs text-neutral-600 mt-1 break-words">
+            <p className="mt-1 break-words text-xs text-[var(--oc-text-faint)]">
               {workspace.failureMessage}
             </p>
           )}
           <div className="flex gap-2 justify-center mt-4">
             <button
               onClick={() => void retryWorkspace(workspace.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm text-neutral-300 transition-colors"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Retry
             </button>
             <button
               onClick={() => void removeWorkspace(workspace.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm text-neutral-300 transition-colors"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Remove
@@ -465,9 +467,9 @@ function EmptyWorkspaceState() {
 
 function WorkspaceRuntimeLoading({ message }: { message: string }) {
   return (
-    <div className="flex h-full items-center justify-center text-neutral-500">
+    <div className="flex h-full items-center justify-center text-[var(--oc-text-subtle)]">
       <div className="text-center">
-        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-blue-500" />
+        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--oc-text-faint)] border-t-[var(--oc-interactive)]" />
         <p className="text-sm">{message}</p>
       </div>
     </div>

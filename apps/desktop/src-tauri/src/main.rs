@@ -149,6 +149,7 @@ fn main() {
             // Full state reload
             commands::load_app_state,
             commands::native_terminal_supported,
+            commands::read_system_ghostty_config,
             commands::list_workspace_directory,
             commands::read_workspace_text_file,
             commands::write_workspace_text_file,

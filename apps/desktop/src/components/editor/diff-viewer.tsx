@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
-import { languageFromRelativePath } from "@/lib/editor/editor-language";
-import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
+import { FileDiff as PierreFileDiff } from "@pierre/diffs/react";
+import { parseDiffFromFile } from "@pierre/diffs";
+import type { FileDiffOptions } from "@pierre/diffs";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { readWorkspaceTextFile, scmReadGitBlob } from "@/lib/workspace/scm";
+import {
+  createPierreDiffOptions,
+  createPierreFile,
+  getLargeDiffOptions,
+  getPierreSurfaceStyle,
+} from "@/lib/editor/pierre-pandora";
+import { oc2CodeSurfaceTokens } from "@/lib/theme/oc2";
 import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -21,9 +28,7 @@ function loadIgnoreTrim(): boolean {
   return window.localStorage.getItem(STORAGE_TRIM) === "1";
 }
 
-const diffLoading = (
-  <div className="h-full w-full" style={{ backgroundColor: PANDORA_EDITOR_BG }} aria-hidden />
-);
+type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
 
 export default function DiffViewer({
   workspaceRoot,
@@ -34,17 +39,13 @@ export default function DiffViewer({
   workspaceRoot: string;
   relativePath: string;
   source: DiffSource;
-  /** Avoid mounting Monaco when the tab is hidden (saves memory). */
   isActive?: boolean;
 }) {
   const staged = source === "staged";
-  const language = useMemo(() => languageFromRelativePath(relativePath), [relativePath]);
-
   const [original, setOriginal] = useState("");
   const [modified, setModified] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [sideBySide, setSideBySide] = useState(loadSideBySide);
   const [ignoreTrimWhitespace, setIgnoreTrimWhitespace] = useState(loadIgnoreTrim);
 
@@ -95,74 +96,88 @@ export default function DiffViewer({
     } finally {
       setLoading(false);
     }
-  }, [workspaceRoot, relativePath, staged]);
+  }, [relativePath, staged, workspaceRoot]);
 
   useEffect(() => {
     if (!isActive) return;
     void load();
   }, [isActive, load]);
 
-  const diffOptions = useMemo(
-    () => ({
-      readOnly: true,
-      minimap: { enabled: false },
-      fontSize: 13,
-      wordWrap: "off" as const,
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      tabSize: 2,
-      padding: { top: 8 },
-      folding: true,
-      foldingStrategy: "auto" as const,
-      glyphMargin: true,
-      lineNumbers: "on" as const,
-      renderSideBySide: sideBySide,
-      enableSplitViewResizing: true,
-      ignoreTrimWhitespace,
-      renderOverviewRuler: true,
-      diffAlgorithm: "advanced" as const,
-      renderValidationDecorations: "off" as const,
-    }),
-    [sideBySide, ignoreTrimWhitespace]
-  );
+  const noDiff = !loading && !error && original === modified;
+  const diffStyle: PierreDiffStyle = sideBySide ? "split" : "unified";
+  const isLarge = Math.max(original.length, modified.length) > 500_000;
 
-  const onMountDiff = useCallback<DiffOnMount>((_editor, monaco) => {
-    monaco.editor.setTheme("pandora-dark");
-  }, []);
+  const parsed = useMemo(() => {
+    if (loading || error || original === modified) {
+      return { diffMetadata: null, parseError: null as string | null };
+    }
+    try {
+      return {
+        diffMetadata: parseDiffFromFile(
+          createPierreFile(relativePath, original),
+          createPierreFile(relativePath, modified),
+          ignoreTrimWhitespace ? { ignoreWhitespace: true } : undefined
+        ),
+        parseError: null as string | null,
+      };
+    } catch (parseError) {
+      return { diffMetadata: null, parseError: String(parseError) };
+    }
+  }, [error, ignoreTrimWhitespace, loading, modified, original, relativePath]);
+
+  const diffMetadata = parsed.diffMetadata;
+  const displayError = error ?? parsed.parseError;
+
+  const options = useMemo(() => {
+    const base = createPierreDiffOptions(diffStyle);
+    return isLarge ? { ...base, ...getLargeDiffOptions(diffStyle) } : base;
+  }, [diffStyle, isLarge]);
 
   if (!isActive) {
     return (
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{ backgroundColor: PANDORA_EDITOR_BG }}
+        style={{ backgroundColor: oc2CodeSurfaceTokens.surface.base }}
         aria-hidden
       />
     );
   }
 
-  const noDiff = !loading && !error && original === modified;
-
   return (
-    <div className="flex h-full min-h-0 flex-col" style={{ backgroundColor: PANDORA_EDITOR_BG }}>
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800 px-1.5 py-1">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      style={{
+        ...getPierreSurfaceStyle(),
+        backgroundColor: oc2CodeSurfaceTokens.surface.base,
+      }}
+    >
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--oc-code-surface-separator)] bg-[var(--oc-code-surface-chrome)] px-1.5 py-1">
         <span
-          className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-500"
+          className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--oc-text-subtle)]"
           title={relativePath}
         >
           {relativePath}
         </span>
-        <span className="shrink-0 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
-          {staged ? "Staged" : "Working tree"}
-        </span>
+        {staged ? (
+          <span className="shrink-0 rounded bg-[var(--oc-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--oc-text-muted)]">
+            Staged
+          </span>
+        ) : null}
+        {isLarge && (
+          <span className="shrink-0 rounded bg-[var(--oc-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--oc-warning)]">
+            Large diff
+          </span>
+        )}
         <Button
           type="button"
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100",
-            sideBySide && "bg-neutral-800 text-neutral-200"
+            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
+            sideBySide && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
           )}
-          title={sideBySide ? "Side-by-side (on)" : "Side-by-side"}
+          title={sideBySide ? "Split diff (on)" : "Split diff"}
+          aria-label={sideBySide ? "Split diff (on)" : "Split diff"}
           onClick={() => setSideBySidePersist(true)}
           disabled={loading}
         >
@@ -173,10 +188,11 @@ export default function DiffViewer({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100",
-            !sideBySide && "bg-neutral-800 text-neutral-200"
+            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
+            !sideBySide && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
           )}
-          title={!sideBySide ? "Inline / unified (on)" : "Inline / unified"}
+          title={!sideBySide ? "Unified diff (on)" : "Unified diff"}
+          aria-label={!sideBySide ? "Unified diff (on)" : "Unified diff"}
           onClick={() => setSideBySidePersist(false)}
           disabled={loading}
         >
@@ -187,13 +203,18 @@ export default function DiffViewer({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100",
-            ignoreTrimWhitespace && "bg-neutral-800 text-neutral-200"
+            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
+            ignoreTrimWhitespace && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
           )}
           title={
             ignoreTrimWhitespace
-              ? "Ignore trim whitespace (on)"
-              : "Ignore trim whitespace"
+              ? "Ignore whitespace (on)"
+              : "Ignore whitespace"
+          }
+          aria-label={
+            ignoreTrimWhitespace
+              ? "Ignore whitespace (on)"
+              : "Ignore whitespace"
           }
           onClick={() => setIgnoreTrimPersist(!ignoreTrimWhitespace)}
           disabled={loading}
@@ -204,8 +225,9 @@ export default function DiffViewer({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 w-7 shrink-0 p-0 text-neutral-400 hover:text-neutral-100"
+          className="h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
           title="Refresh"
+          aria-label="Refresh"
           onClick={() => void load()}
           disabled={loading}
         >
@@ -213,32 +235,24 @@ export default function DiffViewer({
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1">
-        {error && (
-          <div className="flex items-start gap-2 p-3 text-sm text-red-300/90">
+      <div className="min-h-0 flex-1 overflow-auto">
+        {displayError && (
+          <div className="flex items-start gap-2 p-3 text-sm text-[var(--oc-error)]">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span>{error}</span>
+            <span>{displayError}</span>
           </div>
         )}
-        {!error && loading && (
-          <div className="p-3 text-sm text-neutral-500">Loading diff…</div>
+        {!displayError && loading && (
+          <div className="p-3 text-sm text-[var(--oc-text-subtle)]">Loading diff…</div>
         )}
-        {!error && !loading && noDiff && (
-          <div className="p-3 text-sm text-neutral-500">No changes to show for this file.</div>
+        {!displayError && !loading && noDiff && (
+          <div className="p-3 text-sm text-[var(--oc-text-subtle)]">No changes to show for this file.</div>
         )}
-        {!error && !loading && !noDiff && (
-          <DiffEditor
-            height="100%"
-            theme="pandora-dark"
-            language={language}
-            original={original}
-            modified={modified}
-            originalModelPath={`pandora-diff://original/${relativePath}`}
-            modifiedModelPath={`pandora-diff://modified/${relativePath}`}
-            loading={diffLoading}
-            beforeMount={pandoraMonacoBeforeMount}
-            onMount={onMountDiff}
-            options={diffOptions}
+        {!displayError && !loading && diffMetadata && (
+          <PierreFileDiff
+            fileDiff={diffMetadata}
+            options={options}
+            className="block h-full min-h-full w-full"
           />
         )}
       </div>

@@ -13,32 +13,83 @@ import { ChevronRight } from "lucide-react";
 import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
+import { FileTypeIcon } from "@/components/files/file-type-icon";
 import { cn } from "@/lib/shared/utils";
+import {
+  decorationForScmEntry,
+  scmToneTextClass,
+  scmStatus,
+  type ScmStatusEntry,
+  type TreeScmDecoration,
+} from "@/lib/workspace/scm";
+import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
+import { findLeaf } from "@/lib/layout/layout-tree";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
-import { FileTypeIcon } from "@/components/files/file-type-icon";
 
-type DirEntry = { name: string; isDirectory: boolean };
-
+type DirEntry = { name: string; isDirectory: boolean; isIgnored?: boolean };
 type LeftPanelMode = "files" | "changes";
+type ExpansionCtx = {
+  isPathExpanded: (relPath: string) => boolean;
+  setPathExpanded: (relPath: string, expanded: boolean) => void;
+};
+type ScmDecorationResolver = (
+  relPath: string,
+  isDirectory: boolean,
+  isIgnored?: boolean
+) => TreeScmDecoration;
+
+const FileTreeExpansionContext = createContext<ExpansionCtx | null>(null);
 
 function joinRel(parent: string, name: string): string {
   return parent ? `${parent}/${name}` : name;
 }
 
-type ExpansionCtx = {
-  isPathExpanded: (relPath: string) => boolean;
-  setPathExpanded: (relPath: string, expanded: boolean) => void;
-};
+function scoreTone(tone: TreeScmDecoration["tone"]): number {
+  switch (tone) {
+    case "conflict":
+      return 5;
+    case "deleted":
+      return 4;
+    case "modified":
+      return 3;
+    case "renamed":
+      return 2;
+    case "added":
+      return 1;
+    default:
+      return 0;
+  }
+}
 
-const FileTreeExpansionContext = createContext<ExpansionCtx | null>(null);
+function createDecorationResolver(entries: ScmStatusEntry[]): ScmDecorationResolver {
+  const visibleEntries = entries.filter((entry) => decorationForScmEntry(entry, { includeDeleted: false }).tone !== null);
+  const exact = new Map(
+    visibleEntries.map((entry) => [entry.path, decorationForScmEntry(entry, { includeDeleted: false })])
+  );
+  return (relPath, isDirectory, isIgnored) => {
+    if (isIgnored) return { badge: null, tone: "ignored", dimmed: true };
+    const hit = exact.get(relPath);
+    if (hit) return hit;
+    if (!isDirectory) return { badge: null, tone: null, dimmed: false };
+
+    const prefix = `${relPath}/`;
+    let winner: TreeScmDecoration = { badge: null, tone: null, dimmed: false };
+    for (const entry of visibleEntries) {
+      if (entry.path.startsWith(prefix) || entry.origPath?.startsWith(prefix)) {
+        const next = decorationForScmEntry(entry, { includeDeleted: false });
+        if (scoreTone(next.tone) > scoreTone(winner.tone)) {
+          winner = next;
+        }
+      }
+    }
+    return winner;
+  };
+}
 
 function useFileTreeExpansion(): ExpansionCtx {
   const ctx = useContext(FileTreeExpansionContext);
-  if (!ctx) {
-    throw new Error("useFileTreeExpansion outside provider");
-  }
+  if (!ctx) throw new Error("useFileTreeExpansion outside provider");
   return ctx;
 }
 
@@ -46,28 +97,48 @@ function FileTreeRow({
   depth,
   icon,
   label,
+  decoration,
   className,
   onOpen,
   fileRelPath,
   onOpenDiffMenu,
+  active,
 }: {
   depth: number;
   icon: React.ReactNode;
   label: string;
+  decoration: TreeScmDecoration;
   className?: string;
   onOpen?: () => void;
-  /** When set with `onOpen`, right-click opens the diff menu at the pointer. */
   fileRelPath?: string;
   onOpenDiffMenu?: (clientX: number, clientY: number, relPath: string) => void;
+  active?: boolean;
 }) {
+  const content = (
+    <>
+      {icon}
+      <span className="truncate">{label}</span>
+      {decoration.badge ? (
+        <span className={cn("ml-auto shrink-0 font-mono text-[10px] font-semibold", scmToneTextClass(decoration.tone, false))}>
+          {decoration.badge}
+        </span>
+      ) : null}
+    </>
+  );
+
+  const rowClassName = cn(
+    "flex min-w-0 w-full select-none items-center gap-1.5 rounded-sm py-0.5 pr-1 text-left text-xs hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+    scmToneTextClass(decoration.tone, decoration.dimmed),
+    decoration.dimmed && "opacity-55",
+    active && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]",
+    className
+  );
+
   if (onOpen) {
     return (
       <button
         type="button"
-        className={cn(
-          "flex min-w-0 w-full items-center gap-1.5 rounded-sm py-0.5 pr-1 text-left text-xs text-neutral-400 hover:bg-neutral-800/80 hover:text-neutral-200",
-          className
-        )}
+        className={rowClassName}
         style={{ paddingLeft: 6 + depth * 12 }}
         onClick={onOpen}
         onContextMenu={(e) => {
@@ -76,21 +147,14 @@ function FileTreeRow({
           onOpenDiffMenu(e.clientX, e.clientY, fileRelPath);
         }}
       >
-        {icon}
-        <span className="truncate">{label}</span>
+        {content}
       </button>
     );
   }
+
   return (
-    <div
-      className={cn(
-        "flex min-w-0 items-center gap-1.5 rounded-sm py-0.5 pr-1 text-xs text-neutral-400 hover:bg-neutral-800/80 hover:text-neutral-200",
-        className
-      )}
-      style={{ paddingLeft: 6 + depth * 12 }}
-    >
-      {icon}
-      <span className="truncate">{label}</span>
+    <div className={rowClassName} style={{ paddingLeft: 6 + depth * 12 }}>
+      {content}
     </div>
   );
 }
@@ -101,23 +165,30 @@ function DirectoryNode({
   relPath,
   name,
   depth,
+  isIgnored,
+  resolveDecoration,
   onOpenDiffMenu,
+  activePath,
 }: {
   workspaceRoot: string;
   workspaceId: string;
   relPath: string;
   name: string;
   depth: number;
+  isIgnored?: boolean;
+  resolveDecoration: ScmDecorationResolver;
   onOpenDiffMenu?: (clientX: number, clientY: number, fileRelPath: string) => void;
+  activePath: string | null;
 }) {
   const openFile = useEditorStore((s) => s.openFile);
   const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
   const open = isPathExpanded(relPath);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const decoration = resolveDecoration(relPath, true, isIgnored);
 
   useEffect(() => {
-    if (!open || children !== null) return;
+    if (!open) return;
     let cancelled = false;
     void invoke<DirEntry[]>("list_workspace_directory", {
       workspaceRoot,
@@ -138,34 +209,38 @@ function DirectoryNode({
     return () => {
       cancelled = true;
     };
-  }, [open, children, workspaceRoot, relPath]);
+  }, [open, workspaceRoot, relPath]);
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={(next) => {
-        setPathExpanded(relPath, next);
-      }}
-    >
+    <Collapsible open={open} onOpenChange={(next) => setPathExpanded(relPath, next)}>
       <CollapsibleTrigger
         nativeButton={false}
         render={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="group h-auto min-h-0 w-full justify-start gap-1.5 rounded-sm py-0.5 pr-1 pl-0 font-normal text-neutral-400 hover:bg-neutral-800/80 hover:text-neutral-200 data-[panel-open]:bg-neutral-800/40"
+            <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+              "group h-auto min-h-0 w-full select-none justify-start gap-1.5 rounded-sm py-0.5 pr-1 pl-0 font-normal hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+              scmToneTextClass(decoration.tone, decoration.dimmed),
+              decoration.dimmed && "opacity-55"
+            )}
             style={{ paddingLeft: 6 + depth * 12 }}
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
             <FileTypeIcon path={relPath} kind="directory" expanded={open} />
             <span className="truncate text-xs">{name}</span>
+            {decoration.badge ? (
+              <span className={cn("ml-auto shrink-0 font-mono text-[10px] font-semibold", scmToneTextClass(decoration.tone, false))}>
+                {decoration.badge}
+              </span>
+            ) : null}
           </Button>
         }
       />
       <CollapsibleContent>
         <div className="flex flex-col gap-0.5 pb-0.5">
           {loadError && (
-            <div className="px-2 py-1 text-[11px] text-red-400/90" style={{ paddingLeft: 18 + depth * 12 }}>
+            <div className="px-2 py-1 text-[11px] text-[var(--oc-error)]" style={{ paddingLeft: 18 + depth * 12 }}>
               {loadError}
             </div>
           )}
@@ -178,21 +253,22 @@ function DirectoryNode({
                 relPath={joinRel(relPath, entry.name)}
                 name={entry.name}
                 depth={depth + 1}
+                isIgnored={entry.isIgnored}
+                resolveDecoration={resolveDecoration}
                 onOpenDiffMenu={onOpenDiffMenu}
+                activePath={activePath}
               />
             ) : (
               <FileTreeRow
                 key={joinRel(relPath, entry.name)}
                 depth={depth + 1}
-                icon={
-                  <FileTypeIcon path={joinRel(relPath, entry.name)} kind="file" />
-                }
+                icon={<FileTypeIcon path={joinRel(relPath, entry.name)} kind="file" />}
                 label={entry.name}
+                decoration={resolveDecoration(joinRel(relPath, entry.name), false, entry.isIgnored)}
                 fileRelPath={joinRel(relPath, entry.name)}
                 onOpenDiffMenu={onOpenDiffMenu}
-                onOpen={() =>
-                  void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))
-                }
+                active={activePath === joinRel(relPath, entry.name)}
+                onOpen={() => void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))}
               />
             )
           )}
@@ -212,20 +288,24 @@ export default function WorkspaceFileTreePanel({
   const [leftMode, setLeftMode] = useState<LeftPanelMode>("files");
   const [rootEntries, setRootEntries] = useState<DirEntry[] | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
-  const [diffMenu, setDiffMenu] = useState<{
-    x: number;
-    y: number;
-    relPath: string;
-  } | null>(null);
+  const [diffMenu, setDiffMenu] = useState<{ x: number; y: number; relPath: string } | null>(null);
+  const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const openFile = useEditorStore((s) => s.openFile);
   const addDiffTabForPath = useWorkspaceStore((s) => s.addDiffTabForPath);
+  const runtime = useWorkspaceStore((s) => s.runtimes[workspaceId] ?? null);
 
-  const onOpenDiffMenu = useCallback(
-    (clientX: number, clientY: number, relPath: string) => {
-      setDiffMenu({ x: clientX, y: clientY, relPath });
-    },
-    []
-  );
+  const activePath = useMemo(() => {
+    if (!runtime?.root || !runtime.focusedPaneID) return null;
+    const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
+    if (!leaf) return null;
+    const tab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
+    if (!tab || (tab.kind !== "editor" && tab.kind !== "diff")) return null;
+    return tab.path;
+  }, [runtime]);
+
+  const onOpenDiffMenu = useCallback((clientX: number, clientY: number, relPath: string) => {
+    setDiffMenu({ x: clientX, y: clientY, relPath });
+  }, []);
 
   useEffect(() => {
     if (!diffMenu) return;
@@ -244,7 +324,6 @@ export default function WorkspaceFileTreePanel({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const expandedPathsRef = useRef(expandedPaths);
   expandedPathsRef.current = expandedPaths;
-
   const expansionLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -305,6 +384,20 @@ export default function WorkspaceFileTreePanel({
     () => ({ isPathExpanded, setPathExpanded }),
     [isPathExpanded, setPathExpanded]
   );
+  const resolveDecoration = useMemo(() => createDecorationResolver(scmEntries), [scmEntries]);
+
+  useEffect(() => {
+    const refreshScm = () => {
+      void scmStatus(workspaceRoot)
+        .then((list) => setScmEntries(list))
+        .catch(() => setScmEntries([]));
+    };
+    refreshScm();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshScm();
+    }, 2000);
+    return () => clearInterval(id);
+  }, [workspaceRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,11 +422,11 @@ export default function WorkspaceFileTreePanel({
   }, [workspaceRoot]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col border-l border-neutral-800 bg-neutral-950/95">
+    <div className="flex h-full min-w-0 flex-col border-l border-[var(--oc-border)] bg-[#151515] select-none">
       {diffMenu &&
         createPortal(
           <div
-            className="fixed z-[200] min-w-[200px] overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 py-1 text-xs shadow-lg"
+            className="fixed z-[200] min-w-[200px] overflow-hidden rounded-md border border-[var(--oc-border)] bg-[var(--oc-panel-elevated)] py-1 text-xs shadow-lg"
             style={{
               left: Math.max(8, Math.min(diffMenu.x, window.innerWidth - 228)),
               top: Math.max(8, Math.min(diffMenu.y, window.innerHeight - 100)),
@@ -343,17 +436,7 @@ export default function WorkspaceFileTreePanel({
           >
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
-              onClick={() => {
-                addDiffTabForPath(diffMenu.relPath, "working");
-                setDiffMenu(null);
-              }}
-            >
-              Open diff (working tree)
-            </button>
-            <button
-              type="button"
-              className="block w-full px-3 py-1.5 text-left text-neutral-200 hover:bg-neutral-800"
+              className="block w-full px-3 py-1.5 text-left text-[var(--oc-text)] hover:bg-[var(--oc-panel-hover)]"
               onClick={() => {
                 addDiffTabForPath(diffMenu.relPath, "staged");
                 setDiffMenu(null);
@@ -364,7 +447,8 @@ export default function WorkspaceFileTreePanel({
           </div>,
           document.body
         )}
-      <div className="flex shrink-0 gap-0 border-b border-neutral-800 p-1">
+
+      <div className="flex shrink-0 gap-0 border-b border-[var(--oc-border)] p-1">
         <Button
           type="button"
           variant="ghost"
@@ -372,8 +456,8 @@ export default function WorkspaceFileTreePanel({
           className={cn(
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "files"
-              ? "bg-neutral-800 text-neutral-100"
-              : "text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-200"
+              ? "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+              : "text-[var(--oc-text-subtle)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
           )}
           onClick={() => setLeftMode("files")}
         >
@@ -386,25 +470,22 @@ export default function WorkspaceFileTreePanel({
           className={cn(
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "changes"
-              ? "bg-neutral-800 text-neutral-100"
-              : "text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-200"
+              ? "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+              : "text-[var(--oc-text-subtle)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
           )}
           onClick={() => setLeftMode("changes")}
         >
           Changes
         </Button>
       </div>
+
       {leftMode === "changes" ? (
         <WorkspaceChangesPanel workspaceRoot={workspaceRoot} workspaceId={workspaceId} />
       ) : (
         <FileTreeExpansionContext.Provider value={expansionValue}>
           <div className="min-h-0 flex-1 overflow-auto py-1">
-            {rootEntries === null && (
-              <div className="px-2 py-2 text-xs text-neutral-500">Loading…</div>
-            )}
-            {rootError && (
-              <div className="px-2 py-2 text-xs text-red-400/90">{rootError}</div>
-            )}
+            {rootEntries === null && <div className="px-2 py-2 text-xs text-[var(--oc-text-subtle)]">Loading…</div>}
+            {rootError && <div className="px-2 py-2 text-xs text-[var(--oc-error)]">{rootError}</div>}
             {rootEntries?.map((entry) =>
               entry.isDirectory ? (
                 <DirectoryNode
@@ -414,7 +495,10 @@ export default function WorkspaceFileTreePanel({
                   relPath={entry.name}
                   name={entry.name}
                   depth={0}
+                  isIgnored={entry.isIgnored}
+                  resolveDecoration={resolveDecoration}
                   onOpenDiffMenu={onOpenDiffMenu}
+                  activePath={activePath}
                 />
               ) : (
                 <FileTreeRow
@@ -422,8 +506,10 @@ export default function WorkspaceFileTreePanel({
                   depth={0}
                   icon={<FileTypeIcon path={entry.name} kind="file" />}
                   label={entry.name}
+                  decoration={resolveDecoration(entry.name, false, entry.isIgnored)}
                   fileRelPath={entry.name}
                   onOpenDiffMenu={onOpenDiffMenu}
+                  active={activePath === entry.name}
                   onOpen={() => void openFile(workspaceId, workspaceRoot, entry.name)}
                 />
               )

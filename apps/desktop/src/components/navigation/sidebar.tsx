@@ -40,10 +40,10 @@ const WORKSPACE_KIND_TITLE: Record<WorkspaceKind, string> = {
 
 function StatusDot({ status }: { status: WorkspaceStatus }) {
   const colors: Record<WorkspaceStatus, string> = {
-    ready: "bg-green-500",
-    creating: "bg-yellow-500 animate-pulse",
-    failed: "bg-red-500",
-    deleting: "bg-neutral-500",
+    ready: "bg-[var(--oc-success)]",
+    creating: "bg-[var(--oc-warning)] animate-pulse",
+    failed: "bg-[var(--oc-error)]",
+    deleting: "bg-[var(--oc-text-faint)]",
   };
   return <div className={cn("w-2 h-2 rounded-full shrink-0", colors[status])} />;
 }
@@ -73,16 +73,16 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
           setNavigationArea("workspace");
         }}
         className={cn(
-          "w-full text-left px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-2",
+          "flex w-full select-none items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
           isActive
-            ? "bg-blue-500/25 border border-blue-400/35"
+            ? "bg-[var(--oc-panel-interactive)] border border-[var(--oc-interactive)]/35"
             : isSelected
-            ? "bg-white/[0.08] border border-white/[0.06]"
-            : "hover:bg-white/[0.06] border border-transparent"
+            ? "bg-[var(--oc-panel-hover)] border border-[var(--oc-border)]"
+            : "hover:bg-[var(--oc-panel-hover)] border border-transparent"
         )}
       >
         <StatusDot status={workspace.status} />
-        <span className="text-[13px] text-neutral-300 truncate min-w-0 flex-1">{workspace.name}</span>
+        <span className="text-[13px] text-[var(--oc-text)] truncate min-w-0 flex-1">{workspace.name}</span>
         <span
           className={cn(
             "shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded",
@@ -101,20 +101,20 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
                 e.stopPropagation();
                 void retryWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-white/10"
+              className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
               title="Retry"
             >
-              <RotateCcw className="w-3 h-3 text-neutral-400" />
+              <RotateCcw className="w-3 h-3 text-[var(--oc-text-muted)]" />
             </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 void removeWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-white/10"
+              className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
               title="Remove"
             >
-              <Trash2 className="w-3 h-3 text-neutral-400" />
+              <Trash2 className="w-3 h-3 text-[var(--oc-text-muted)]" />
             </button>
           </div>
         )}
@@ -145,8 +145,8 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
       {/* Project header */}
       <div
         className={cn(
-          "flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer group",
-          isSelected ? "bg-white/[0.07]" : "hover:bg-white/[0.05]"
+          "group flex select-none cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5",
+          isSelected ? "bg-[var(--oc-panel-hover)]" : "hover:bg-[var(--oc-panel-hover)]"
         )}
         onClick={() => {
           selectProject(project.id);
@@ -154,16 +154,16 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
         }}
       >
         {project.isExpanded ? (
-          <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-[var(--oc-text-subtle)] shrink-0" />
         ) : (
-          <ChevronRight className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+          <ChevronRight className="w-3.5 h-3.5 text-[var(--oc-text-subtle)] shrink-0" />
         )}
         <div
-          className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-[10px] font-bold text-neutral-200 shrink-0"
+          className="w-5 h-5 rounded bg-[var(--oc-panel-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--oc-text)] shrink-0"
         >
           {project.displayName.charAt(0).toUpperCase()}
         </div>
-        <span className="text-sm font-medium text-neutral-200 truncate flex-1">
+        <span className="text-sm font-medium text-[var(--oc-text)] truncate flex-1">
           {project.displayName}
         </span>
         <div
@@ -268,25 +268,25 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
       {/* Header — pt-11 clears macOS traffic lights in overlay titlebar */}
       <div className="flex items-center gap-2 px-3 pt-11 pb-2" data-tauri-drag-region>
         <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--oc-text-subtle)]" />
           <input
             type="text"
             placeholder="Search..."
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            className="w-full bg-transparent border border-white/10 rounded-md pl-7 pr-2 py-1 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-white/20"
+            className="w-full rounded-md border border-[var(--oc-border)] bg-transparent pl-7 pr-2 py-1 text-xs text-[var(--oc-text)] placeholder:text-[var(--oc-text-subtle)] focus:border-[var(--oc-interactive)] focus:outline-none"
           />
         </div>
         <button
           onClick={() => void handleAddProject()}
-          className="p-1.5 rounded-md hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-colors"
+          className="p-1.5 rounded-md text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
           title="Add Project"
         >
           <FolderPlus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={onCollapse}
-          className="p-1.5 rounded-md hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-colors"
+          className="p-1.5 rounded-md text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
           title="Hide Sidebar"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
@@ -300,7 +300,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
         ))}
 
         {projects.length === 0 && (
-          <div className="text-center text-neutral-600 text-xs mt-8 px-4">
+          <div className="mt-8 px-4 text-center text-xs text-[var(--oc-text-faint)]">
             {searchText ? (
               "No matching projects"
             ) : (
@@ -308,7 +308,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
                 <p>No projects yet</p>
                 <button
                   onClick={() => void handleAddProject()}
-                  className="text-blue-400 hover:text-blue-300 transition-colors"
+                  className="text-[var(--oc-interactive)] transition-colors hover:opacity-80"
                 >
                   Add a project
                 </button>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, X } from "lucide-react";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -8,6 +8,7 @@ import { tabKey } from "@/lib/layout/layout-tree";
 import type { PaneTab } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
+import { scmStatus, scmToneTextClass, statusTone, type ScmStatusEntry } from "@/lib/workspace/scm";
 import { useTabDrag } from "./tab-drag-layer";
 
 interface TabBarProps {
@@ -96,6 +97,7 @@ export default function PaneTabBar({
   const { selectTabInPane, setFocusedPane, slotsByID, removePaneTabByIndex } = useWorkspaceStore();
   const { startDrag, dragState } = useTabDrag();
   const slotsMap = slotsByID(workspaceId);
+  const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const pendingDragRef = useRef<{
     sourceIndex: number;
     label: string;
@@ -161,6 +163,29 @@ export default function PaneTabBar({
     [tabs, workspaceId]
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void scmStatus(workspaceRoot)
+        .then((list) => {
+          if (!cancelled) setScmEntries(list);
+        })
+        .catch(() => {
+          if (!cancelled) setScmEntries([]);
+        });
+    };
+    refresh();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [workspaceRoot]);
+
+  const scmByPath = useMemo(() => new Map(scmEntries.map((entry) => [entry.path, entry])), [scmEntries]);
+
   if (tabs.length === 0) return null;
 
   return (
@@ -196,14 +221,23 @@ export default function PaneTabBar({
               isBeingDragged && "opacity-30"
             )}
           >
+            {(() => {
+              const scmEntry =
+                tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined;
+              const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
+              return (
+                <>
             {tab.kind === "editor" ? (
               <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
             ) : tab.kind === "diff" ? (
-              <GitCompare className="size-3.5 shrink-0 text-neutral-500" aria-hidden />
+              <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
             ) : null}
-            <span className="pointer-events-none max-w-[120px] truncate">
+            <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
               {tabLabel(tab, slotsMap)}
             </span>
+                </>
+              );
+            })()}
 
             {tab.kind === "editor" ? (
               <EditorTabCloseControl

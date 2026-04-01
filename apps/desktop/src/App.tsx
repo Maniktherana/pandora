@@ -21,7 +21,7 @@ import {
   seedWorkspaceTerminal,
 } from "@/lib/terminal/terminal-seed";
 import { setTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
-import { FolderTree, PanelBottom, PanelLeft, Plus } from "lucide-react";
+import { Eye, FolderTree, PanelBottom, PanelLeft, PencilLine, Plus } from "lucide-react";
 import {
   loadPersistedSidebarVisible,
   persistSidebarVisible,
@@ -389,6 +389,8 @@ export default function App() {
   }, [handleCloseFocusedTab, toggleBottomPanel]);
 
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
+  const presentationMode = useWorkspaceStore((s) => s.presentationMode);
+  const setPresentationMode = useWorkspaceStore((s) => s.setPresentationMode);
   const runtime = useWorkspaceStore((s) =>
     s.selectedWorkspaceID ? s.runtimes[s.selectedWorkspaceID] : null
   );
@@ -454,30 +456,30 @@ export default function App() {
             onPointerDown={handleSidebarResizeStart}
             className="group absolute inset-y-0 right-0 z-20 w-px cursor-col-resize bg-transparent"
           >
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-neutral-600/80 to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-[var(--oc-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
           </div>
         </div>
       )}
 
-      <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-950/90">
-          <div className="h-10 flex items-center shrink-0 border-b border-neutral-800">
+      <div className="flex h-full min-w-0 flex-1 flex-col bg-[#151515]">
+          <div className="h-10 flex items-center shrink-0 border-b border-[var(--oc-border)] bg-[#121212]">
             {!sidebarVisible && (
               <button
                 onClick={() => setSidebarVisible(true)}
-                className="ml-20 p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                className="ml-20 rounded-md p-1.5 text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
               >
                 <PanelLeft className="w-4 h-4" />
               </button>
             )}
             {selectedWs && (
               <div className="flex items-center gap-2 ml-3" data-tauri-drag-region>
-                <span className="text-sm text-neutral-400" data-tauri-drag-region>
+                <span className="text-sm text-[var(--oc-text-muted)]" data-tauri-drag-region>
                   {selectedWs.name}
                 </span>
                 {selectedWs.status === "ready" && (
                   <button
                     onClick={handleNewWorkspaceTerminal}
-                    className="p-1 rounded hover:bg-neutral-800 text-neutral-500 hover:text-neutral-300 transition-colors"
+                    className="rounded p-1 text-[var(--oc-text-subtle)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text-muted)]"
                     title="New Terminal (Cmd+Shift+T)"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -488,12 +490,40 @@ export default function App() {
             <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
             {selectedWs?.status === "ready" && (
               <div className="mr-3 flex shrink-0 items-center gap-1">
+                <div className="mr-2 inline-flex items-center rounded-md border border-[var(--oc-border)] bg-[var(--oc-panel)] p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setPresentationMode("edit")}
+                    className={cn(
+                      "inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-[var(--oc-text-muted)] transition-colors hover:text-[var(--oc-text)]",
+                      presentationMode === "edit" &&
+                        "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+                    )}
+                    title="Edit mode"
+                  >
+                    <PencilLine className="h-3.5 w-3.5" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresentationMode("review")}
+                    className={cn(
+                      "inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-[var(--oc-text-muted)] transition-colors hover:text-[var(--oc-text)]",
+                      presentationMode === "review" &&
+                        "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+                    )}
+                    title="Review mode"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Review</span>
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={toggleBottomPanel}
                   className={cn(
-                    "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
-                    bottomPanelOpen && "bg-neutral-800 text-neutral-200"
+                    "rounded-md p-1.5 text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+                    bottomPanelOpen && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
                   )}
                   title="Toggle terminal panel (Ctrl+`)"
                 >
@@ -513,8 +543,8 @@ export default function App() {
                     });
                   }}
                   className={cn(
-                    "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
-                    fileTreeOpen && "bg-neutral-800 text-neutral-200"
+                    "rounded-md p-1.5 text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+                    fileTreeOpen && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
                   )}
                   title="Toggle file tree"
                 >
@@ -542,7 +572,7 @@ export default function App() {
                     <PanelResizeHandle
                       hitAreaMargins={{ coarse: 0, fine: 0 }}
                       className={cn(
-                        "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                        "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-[var(--oc-text-faint)] transition-colors hover:bg-[var(--oc-interactive)]",
                         fileTreeOpen && selectedWs?.status === "ready"
                           ? "cursor-col-resize"
                           : "hidden"
@@ -579,7 +609,7 @@ export default function App() {
                     <PanelResizeHandle
                       hitAreaMargins={{ coarse: 0, fine: 0 }}
                       className={cn(
-                        "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                        "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-[var(--oc-text-faint)] transition-colors hover:bg-[var(--oc-interactive)]",
                         bottomPanelOpen ? "cursor-row-resize" : "hidden"
                       )}
                     />
@@ -600,7 +630,7 @@ export default function App() {
             </TabDragProvider>
           </div>
 
-          <div className="h-6 flex items-center gap-3 px-3 border-t border-neutral-800 bg-neutral-900/50 text-[11px] text-neutral-500 shrink-0">
+          <div className="flex h-6 shrink-0 items-center gap-3 border-t border-[var(--oc-border)] bg-[#121212] px-3 text-[11px] text-[var(--oc-text-subtle)]">
             <div className="flex items-center min-w-0">
               {selectedWs?.status === "ready" && (
                 <>
@@ -608,10 +638,10 @@ export default function App() {
                     className={cn(
                       "w-1.5 h-1.5 rounded-full mr-2 shrink-0",
                       connectionState === "connected"
-                        ? "bg-green-500"
+                        ? "bg-[var(--oc-success)]"
                         : connectionState === "connecting"
-                          ? "bg-yellow-500"
-                          : "bg-red-500"
+                          ? "bg-[var(--oc-warning)]"
+                          : "bg-[var(--oc-error)]"
                     )}
                   />
                   <span>

@@ -255,9 +255,9 @@ export default function BottomPanel() {
     >
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-neutral-800 px-2">
         {(["terminal", "ports"] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
+        <button
+          key={id}
+          type="button"
             onClick={() => {
               setTab(id);
               if (id === "terminal") {
@@ -268,7 +268,7 @@ export default function BottomPanel() {
               }
             }}
             className={cn(
-              "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+              "select-none rounded px-2.5 py-1 text-xs font-medium transition-colors",
               tab === id
                 ? "bg-neutral-800 text-neutral-100"
                 : "text-neutral-500 hover:bg-neutral-800/80 hover:text-neutral-300"
@@ -279,7 +279,7 @@ export default function BottomPanel() {
         ))}
         {tab === "terminal" && (
           <span
-            className="ml-1 truncate text-[10px] text-neutral-500"
+            className="ml-1 truncate select-none text-[10px] text-neutral-500"
             title="Shared shell at the git repository root (separate from the worktree checkout above)."
           >
             · git root

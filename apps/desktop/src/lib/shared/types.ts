@@ -1,6 +1,7 @@
 export type SlotKind = "process_slot" | "agent_slot" | "terminal_slot";
 export type SessionKind = "process" | "agent" | "terminal";
 export type PresentationMode = "single" | "tabs" | "split";
+export type CodePresentationMode = "edit" | "review";
 export type SessionStatus = "stopped" | "running" | "crashed" | "restarting" | "paused";
 export type AggregateStatus = "stopped" | "running" | "crashed" | "restarting";
 
