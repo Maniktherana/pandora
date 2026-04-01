@@ -81,6 +81,7 @@ const pierreUnsafeCSS = `
 [data-file] {
   --diffs-bg: var(--oc-code-surface-base);
   --diffs-bg-buffer: color-mix(in srgb, var(--oc-code-surface-base) 74%, var(--oc-code-surface-separator));
+  --diffs-hatch-line: color-mix(in srgb, var(--diffs-bg-buffer) 52%, var(--oc-code-surface-separator));
   --diffs-bg-hover: var(--oc-code-surface-hover);
   --diffs-bg-context: var(--oc-code-surface-base);
   --diffs-bg-separator: var(--oc-code-surface-chrome);
@@ -176,17 +177,32 @@ const pierreUnsafeCSS = `
   overflow-y: hidden !important;
 }
 
-[data-diff][data-diff-type='split'] [data-content-buffer],
-[data-diff][data-diff-type='split'] [data-gutter-buffer='buffer'] {
-  background-color: var(--oc-code-surface-base) !important;
+/* Pierre defaults: 8×8px tile, 3–4px stops. Stronger scale for legibility. */
+[data-diff] [data-content-buffer],
+[data-file] [data-content-buffer] {
+  background-size: 15px 15px !important;
+  background-position: 9px 0 !important;
   background-image: repeating-linear-gradient(
     -45deg,
-    transparent 0,
-    transparent 8px,
-    rgb(from var(--oc-code-surface-separator) r g b / 0.72) 8px,
-    rgb(from var(--oc-code-surface-separator) r g b / 0.72) 10px
+    transparent,
+    transparent calc(6px * 1.414),
+    var(--diffs-hatch-line) calc(6px * 1.414),
+    var(--diffs-hatch-line) calc(8px * 1.414)
   ) !important;
 }
+
+[data-diff] [data-gutter-buffer='buffer'],
+[data-file] [data-gutter-buffer='buffer'] {
+  background-size: 15px 15px !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent calc(6px * 1.414),
+    rgb(from var(--diffs-hatch-line) r g b / 0.8) calc(6px * 1.414),
+    rgb(from var(--diffs-hatch-line) r g b / 0.8) calc(8px * 1.414)
+  ) !important;
+}
+
 `;
 
 type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
