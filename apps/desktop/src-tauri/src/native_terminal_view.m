@@ -91,6 +91,10 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     return YES;
 }
 
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+    return YES;
+}
+
 - (BOOL)canBecomeKeyView {
     return YES;
 }
