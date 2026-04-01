@@ -185,6 +185,8 @@ fn start_daemon_runtime(
                 rt.connected = true;
             }
 
+            tlog!("DAEMON", "runtime={} CONNECTED via {}", runtime_id, socket_path);
+
             // Emit connection event scoped to workspace
             let _ = app.emit(
                 "daemon-connection",
@@ -196,9 +198,16 @@ fn start_daemon_runtime(
             );
 
             // Read loop
+            let mut msg_count: u64 = 0;
+            let mut output_chunk_count: u64 = 0;
+            let mut output_bytes_total: u64 = 0;
             loop {
+                let t0 = std::time::Instant::now();
                 match read_lp_message(&mut reader).await {
                     Ok(msg) => {
+                        msg_count += 1;
+                        let read_us = t0.elapsed().as_micros();
+
                         // Wrap message with workspaceId
                         let wrapped = if let Ok(mut parsed) =
                             serde_json::from_str::<serde_json::Value>(&msg)
@@ -216,7 +225,9 @@ fn start_daemon_runtime(
 
                         let mut emitted_to_surface = false;
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&wrapped) {
-                            if parsed.get("type").and_then(|v| v.as_str()) == Some("output_chunk") {
+                            let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+
+                            if msg_type == "output_chunk" {
                                 if let (Some(session_id), Some(data)) = (
                                     parsed.get("sessionID").and_then(|v| v.as_str()),
                                     parsed.get("data").and_then(|v| v.as_str()),
@@ -224,11 +235,27 @@ fn start_daemon_runtime(
                                     if let Ok(bytes) =
                                         base64::engine::general_purpose::STANDARD.decode(data)
                                     {
+                                        output_chunk_count += 1;
+                                        output_bytes_total += bytes.len() as u64;
                                         let registry = app.state::<Arc<SurfaceRegistry>>();
+                                        let t_feed = std::time::Instant::now();
                                         emitted_to_surface =
                                             registry.inner().feed_output(&app, session_id, &bytes);
+                                        let feed_us = t_feed.elapsed().as_micros();
+
+                                        // Log every 100th chunk or if feed was slow.
+                                        if output_chunk_count % 100 == 0 || feed_us > 1000 {
+                                            tlog!("DAEMON", "runtime={} output_chunk #{} session={} bytes={} routed={} read={}µs feed={}µs total_bytes={}",
+                                                runtime_id, output_chunk_count, session_id,
+                                                bytes.len(), emitted_to_surface, read_us, feed_us,
+                                                output_bytes_total);
+                                        }
                                     }
                                 }
+                            } else {
+                                // Log non-output messages (these are infrequent).
+                                tlog!("DAEMON", "runtime={} msg #{} type={} len={} read={}µs",
+                                    runtime_id, msg_count, msg_type, wrapped.len(), read_us);
                             }
                         }
 
@@ -237,6 +264,8 @@ fn start_daemon_runtime(
                         }
                     }
                     Err(e) => {
+                        tlog!("DAEMON", "runtime={} READ ERROR after {} msgs ({} output chunks, {} bytes): {}",
+                            runtime_id, msg_count, output_chunk_count, output_bytes_total, e);
                         eprintln!("Daemon read error for runtime {}: {}", runtime_id, e);
                         break;
                     }
@@ -244,6 +273,7 @@ fn start_daemon_runtime(
             }
 
             // Disconnected
+            tlog!("DAEMON", "runtime={} DISCONNECTED", runtime_id);
             {
                 let mut rt = runtime.lock().await;
                 rt.writer = None;

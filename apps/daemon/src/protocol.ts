@@ -1,4 +1,15 @@
 import type { Socket } from "node:net";
+import { appendFileSync } from "node:fs";
+
+const LOG_PATH = "/tmp/pandora-terminal.log";
+const T0 = Date.now();
+
+export function dlog(tag: string, msg: string): void {
+  const elapsed = ((Date.now() - T0) / 1000).toFixed(3);
+  try {
+    appendFileSync(LOG_PATH, `${elapsed.padStart(10)} [${tag}] (daemon:${process.pid}) ${msg}\n`);
+  } catch {}
+}
 
 export function writeMessage(socket: Socket, message: object): void {
   const payload = Buffer.from(JSON.stringify(message), "utf8");

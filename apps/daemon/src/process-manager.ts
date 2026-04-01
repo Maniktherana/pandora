@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { dlog } from "./protocol";
 import type {
   ActionCapabilities,
   AggregateStatus,
@@ -259,11 +260,19 @@ export class ProcessManager {
 
   writeToSession(sessionID: string, data: Buffer): void {
     const session = this.sessions.get(sessionID);
-    session?.process?.terminal?.write(data);
+    if (session?.process) {
+      // Log user input — shows what's being typed/sent to the PTY
+      const preview = data.length <= 64 ? JSON.stringify(data.toString("utf8")) : `${data.length} bytes`;
+      dlog("PTY_WRITE", `session=${sessionID} pid=${session.instance.pid} cmd="${session.definition.command}" input=${preview}`);
+      session.process.terminal?.write(data);
+    }
   }
 
   resizeSession(sessionID: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionID);
+    if (session) {
+      dlog("PTY_RESIZE", `session=${sessionID} pid=${session.instance.pid} cmd="${session.definition.command}" cols=${cols} rows=${rows}`);
+    }
     session?.process?.terminal?.resize(Math.max(cols, 1), Math.max(rows, 1));
   }
 
@@ -279,17 +288,38 @@ export class ProcessManager {
       TERM: "xterm-256color"
     };
 
+    const sid = session.instance.id;
+    const cmd = session.definition.command;
     const normalizedCwd = session.definition.cwd?.trim();
-    const subprocess = Bun.spawn([shell, "-lc", session.definition.command], {
-      cwd: normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : process.cwd(),
+    const cwd = normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : process.cwd();
+
+    dlog("SPAWN", `session=${sid} cmd="${cmd}" cwd=${cwd} shell=${shell}`);
+
+    let outputCount = 0;
+    let outputBytes = 0;
+    let lastLogTime = Date.now();
+    const subprocess = Bun.spawn([shell, "-lc", cmd], {
+      cwd,
       env,
       terminal: {
         cols: 120,
         rows: 40,
         name: "xterm-256color",
         data: (_terminal, data) => {
+          const buf = Buffer.from(data);
+          outputCount++;
+          outputBytes += buf.length;
           session.instance.lastOutputAt = new Date().toISOString();
-          this.onOutput(session.instance.id, Buffer.from(data));
+          const now = Date.now();
+          // Log first 5 chunks (show content), then every 50th, or every 500ms, or large chunks
+          if (outputCount <= 5) {
+            const preview = buf.length <= 200 ? JSON.stringify(buf.toString("utf8").slice(0, 200)) : `[${buf.length} bytes]`;
+            dlog("PTY_OUT", `session=${sid} cmd="${cmd}" chunk#${outputCount} bytes=${buf.length} total=${outputBytes} data=${preview}`);
+          } else if (outputCount % 50 === 0 || buf.length > 4096 || now - lastLogTime > 500) {
+            dlog("PTY_OUT", `session=${sid} cmd="${cmd}" chunk#${outputCount} bytes=${buf.length} total=${outputBytes}`);
+            lastLogTime = now;
+          }
+          this.onOutput(sid, buf);
         },
       },
     });
@@ -299,9 +329,12 @@ export class ProcessManager {
     session.instance.status = "running";
     session.instance.startedAt = new Date().toISOString();
     session.instance.exitCode = null;
+
+    dlog("SPAWN", `session=${sid} pid=${subprocess.pid} status=running cmd="${cmd}"`);
     this.onSessionStateChanged(this.sessionState(session));
 
     void subprocess.exited.then((exitCode) => {
+      dlog("EXIT", `session=${sid} pid=${session.instance.pid} exitCode=${exitCode} outputChunks=${outputCount} outputBytes=${outputBytes}`);
       session.process?.terminal?.close();
       session.process = null;
       session.instance.pid = null;
@@ -312,11 +345,13 @@ export class ProcessManager {
       }
 
       if (session.instance.status === "restarting") {
+        dlog("EXIT", `session=${sid} restarting...`);
         this.spawnSession(session);
         return;
       }
 
       session.instance.status = session.instance.status === "stopped" ? "stopped" : "crashed";
+      dlog("EXIT", `session=${sid} final_status=${session.instance.status}`);
       this.onSessionStateChanged(this.sessionState(session));
     });
   }

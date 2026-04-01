@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod terminal_log;
 mod commands;
 mod daemon_bridge;
 mod database;
@@ -90,6 +92,10 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
 }
 
 fn main() {
+    // Truncate terminal diagnostic log on fresh launch.
+    let _ = std::fs::write("/tmp/pandora-terminal.log", b"");
+    tlog!("INIT", "pandora-tauri starting pid={}", std::process::id());
+
     let pandora_home = git::pandora_home();
     let db = AppDatabase::open(&pandora_home).expect("Failed to open database");
     let db = Arc::new(db);
@@ -210,6 +216,19 @@ fn main() {
                         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
                     }
                 });
+            });
+
+            // Main-thread heartbeat: proves the main thread is alive.
+            // When this stops appearing in the log, the main thread is frozen.
+            let hb_handle = handle.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let hb = hb_handle.clone();
+                    let _ = hb.run_on_main_thread(move || {
+                        tlog!("HEARTBEAT", "main thread alive");
+                    });
+                }
             });
 
             Ok(())

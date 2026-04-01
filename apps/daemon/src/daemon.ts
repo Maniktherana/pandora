@@ -15,7 +15,7 @@ import {
   updateSlotDefinition
 } from "./db";
 import { ProcessManager } from "./process-manager";
-import { createMessageReader, writeMessage } from "./protocol";
+import { createMessageReader, dlog, writeMessage } from "./protocol";
 import type { ClientMessage, DaemonMessage, SessionState, SlotState } from "./types";
 
 export class DaemonServer {
@@ -41,16 +41,24 @@ export class DaemonServer {
 
     const slotDefinitions = listSlotDefinitions(this.db);
     const sessionDefinitions = listSessionDefinitions(this.db);
+    let broadcastOutputCount = 0;
+    let broadcastOutputBytes = 0;
     this.processManager = new ProcessManager(
       slotDefinitions,
       sessionDefinitions,
       (session) => this.broadcast({ type: "session_state_changed", session }),
-      (sessionID, data) =>
+      (sessionID, data) => {
+        broadcastOutputCount++;
+        broadcastOutputBytes += data.length;
+        if (broadcastOutputCount % 100 === 0) {
+          dlog("BROADCAST", `output_chunk #${broadcastOutputCount} session=${sessionID} bytes=${data.length} total_bytes=${broadcastOutputBytes} clients=${this.clients.size}`);
+        }
         this.broadcast({
           type: "output_chunk",
           sessionID,
           data: data.toString("base64")
-        })
+        });
+      }
     );
   }
 
@@ -112,6 +120,7 @@ export class DaemonServer {
 
   private handleConnection(socket: net.Socket): void {
     this.clients.add(socket);
+    dlog("CONN", `client connected, total=${this.clients.size}`);
     writeMessage(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
     writeMessage(socket, { type: "session_snapshot", sessions: this.processManager.listSessionStates() });
 
@@ -120,6 +129,7 @@ export class DaemonServer {
         this.handleMessage(socket, message as ClientMessage);
       },
       (error) => {
+        dlog("CONN", `message parse error: ${error.message}`);
         writeMessage(socket, { type: "error", message: error.message });
       }
     );
@@ -127,13 +137,18 @@ export class DaemonServer {
     socket.on("data", reader);
     socket.on("close", () => {
       this.clients.delete(socket);
+      dlog("CONN", `client disconnected, total=${this.clients.size}`);
     });
-    socket.on("error", () => {
+    socket.on("error", (err) => {
+      dlog("CONN", `client error: ${err.message}, total=${this.clients.size}`);
       this.clients.delete(socket);
     });
   }
 
   private handleMessage(socket: net.Socket, message: ClientMessage): void {
+    if (message.type !== "input" && message.type !== "resize") {
+      dlog("MSG", `type=${message.type} ${JSON.stringify(message).slice(0, 200)}`);
+    }
     switch (message.type) {
       case "create_slot": {
         const slot = createSlotDefinition(this.db, {
@@ -284,9 +299,17 @@ export class DaemonServer {
     this.broadcast({ type: "session_snapshot", sessions: this.processManager.listSessionStates() });
   }
 
+  private broadcastCount = 0;
   private broadcast(message: DaemonMessage): void {
+    this.broadcastCount++;
+    const t0 = Date.now();
     for (const client of this.clients) {
       writeMessage(client, message);
+    }
+    const elapsed = Date.now() - t0;
+    // Log if broadcast is slow (>5ms) — indicates socket backpressure
+    if (elapsed > 5) {
+      dlog("BROADCAST", `SLOW type=${message.type} #${this.broadcastCount} clients=${this.clients.size} took=${elapsed}ms`);
     }
   }
 }

@@ -155,7 +155,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     key.composing = false;
 
     NSString *text = [event characters];
-    if (text.length > 0) {
+    // Control/command chords should be delivered as key events only. Passing printable
+    // text here makes Ghostty treat shortcuts like Ctrl+C as modified text input.
+    if (!ctrl && !cmd && text.length > 0) {
         key.text = text.UTF8String;
     }
 
