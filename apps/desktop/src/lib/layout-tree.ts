@@ -4,12 +4,16 @@ import { findLeaf } from "@/lib/layout-migrate";
 export { findLeaf };
 
 export function tabKey(tab: PaneTab): string {
-  return tab.kind === "terminal" ? `t:${tab.slotId}` : `e:${tab.path}`;
+  if (tab.kind === "terminal") return `t:${tab.slotId}`;
+  if (tab.kind === "diff") return `d:${tab.source}:${tab.path}`;
+  return `e:${tab.path}`;
 }
 
 export function tabsEqual(a: PaneTab, b: PaneTab): boolean {
   if (a.kind !== b.kind) return false;
-  return a.kind === "terminal" ? a.slotId === b.slotId : a.path === b.path;
+  if (a.kind === "terminal") return a.slotId === b.slotId;
+  if (a.kind === "diff") return a.path === b.path && a.source === b.source;
+  return a.path === b.path;
 }
 
 export function getAllLeaves(node: LayoutNode): LayoutLeaf[] {
@@ -34,7 +38,7 @@ export function removeMatchingTabFromTree(node: LayoutNode, tab: PaneTab): Layou
     const removedIndex = node.tabs.findIndex((t) => tabsEqual(t, tab));
     const tabs = node.tabs.filter((t) => !tabsEqual(t, tab));
     if (tabs.length === 0) {
-      return { ...node, tabs: [], selectedIndex: 0 };
+      return null;
     }
     let sel = node.selectedIndex;
     if (removedIndex >= 0) {
@@ -61,7 +65,7 @@ export function removeTabAtIndexInTree(node: LayoutNode, paneID: string, tabInde
   if (node.type === "leaf" && node.id === paneID) {
     const tabs = node.tabs.filter((_, i) => i !== tabIndex);
     if (tabs.length === 0) {
-      return { ...node, tabs: [], selectedIndex: 0 };
+      return null;
     }
     let sel = node.selectedIndex;
     if (tabIndex < sel) sel--;

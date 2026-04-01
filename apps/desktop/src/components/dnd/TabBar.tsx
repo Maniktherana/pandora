@@ -4,7 +4,7 @@ import { useEditorStore } from "@/stores/editor-store";
 import { getTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { useRef, useCallback } from "react";
 import { useTabDrag } from "./TabDragLayer";
-import { X } from "lucide-react";
+import { GitCompare, X } from "lucide-react";
 import type { PaneTab } from "@/lib/types";
 import { tabKey } from "@/lib/layout-tree";
 import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
@@ -27,6 +27,9 @@ function tabLabel(tab: PaneTab, slotsMap: Record<string, { name: string } | unde
     return slot?.name ?? tab.slotId.slice(0, 8);
   }
   const base = tab.path.split("/").pop() ?? tab.path;
+  if (tab.kind === "diff") {
+    return tab.source === "staged" ? `${base} · staged` : `${base} · diff`;
+  }
   return base;
 }
 
@@ -90,7 +93,7 @@ export default function TabBar({
   workspaceRoot,
   isFocused,
 }: TabBarProps) {
-  const { selectTabInPane, setFocusedPane, slotsByID } = useWorkspaceStore();
+  const { selectTabInPane, setFocusedPane, slotsByID, removePaneTabByIndex } = useWorkspaceStore();
   const { startDrag, dragState } = useTabDrag();
   const slotsMap = slotsByID(workspaceId);
   const pendingDragRef = useRef<{
@@ -124,6 +127,7 @@ export default function TabBar({
       const dy = e.clientY - pending.startY;
       if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) {
         startDrag({
+          kind: "pane-tab",
           sourcePaneID: paneID,
           sourceIndex: pending.sourceIndex,
           tabLabel: pending.label,
@@ -170,7 +174,9 @@ export default function TabBar({
       {tabs.map((tab, index) => {
         const isActive = index === selectedIndex;
         const isBeingDragged =
-          dragState?.sourcePaneID === paneID && dragState.sourceIndex === index;
+          dragState?.kind === "pane-tab" &&
+          dragState.sourcePaneID === paneID &&
+          dragState.sourceIndex === index;
 
         return (
           <div
@@ -192,6 +198,8 @@ export default function TabBar({
           >
             {tab.kind === "editor" ? (
               <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
+            ) : tab.kind === "diff" ? (
+              <GitCompare className="size-3.5 shrink-0 text-neutral-500" aria-hidden />
             ) : null}
             <span className="pointer-events-none max-w-[120px] truncate">
               {tabLabel(tab, slotsMap)}
@@ -207,6 +215,25 @@ export default function TabBar({
                 label={tabLabel(tab, slotsMap)}
                 isActive={isActive}
               />
+            ) : tab.kind === "diff" ? (
+              <div
+                role="button"
+                tabIndex={-1}
+                aria-label={`Close ${tabLabel(tab, slotsMap)}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removePaneTabByIndex(paneID, index);
+                }}
+                className={cn(
+                  "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
+                  isActive
+                    ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                    : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                )}
+              >
+                <X className="h-3 w-3" aria-hidden />
+              </div>
             ) : (
               <div
                 role="button"

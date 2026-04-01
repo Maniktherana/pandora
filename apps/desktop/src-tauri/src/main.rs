@@ -145,12 +145,24 @@ fn main() {
             commands::load_workspace_layout,
             // Runtime
             commands::start_workspace_runtime,
+            commands::start_project_runtime,
+            commands::stop_project_runtime,
             // Full state reload
             commands::load_app_state,
             commands::native_terminal_supported,
             commands::list_workspace_directory,
             commands::read_workspace_text_file,
             commands::write_workspace_text_file,
+            commands::scm_git_diff,
+            commands::scm_read_git_blob,
+            commands::scm_status,
+            commands::scm_stage,
+            commands::scm_stage_all,
+            commands::scm_unstage,
+            commands::scm_unstage_all,
+            commands::scm_discard_tracked,
+            commands::scm_discard_untracked,
+            commands::scm_commit,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());

@@ -7,6 +7,8 @@ import {
 import Sidebar from "@/components/Sidebar";
 import WorkspaceView from "@/components/WorkspaceView";
 import WorkspaceFileTreePanel from "@/components/WorkspaceFileTreePanel";
+import BottomPanel from "@/components/BottomPanel";
+import { TabDragProvider } from "@/components/dnd/TabDragLayer";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { DaemonClient } from "@/lib/daemon-client";
@@ -14,7 +16,14 @@ import { setTerminalDaemonClient } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { findLeaf } from "@/lib/layout-migrate";
 import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
-import { FolderTree, PanelLeft, Plus } from "lucide-react";
+import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime-keys";
+import {
+  seedFirstProjectTerminal,
+  seedFirstWorkspaceTerminal,
+  seedProjectTerminal,
+  seedWorkspaceTerminal,
+} from "@/lib/terminal-seed";
+import { FolderTree, PanelBottom, PanelLeft, Plus } from "lucide-react";
 import {
   loadPersistedSidebarVisible,
   persistSidebarVisible,
@@ -26,7 +35,9 @@ export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarPersistHydrated, setSidebarPersistHydrated] = useState(false);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
+  const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const prevFileTreeWorkspaceIdRef = useRef<string | null>(null);
   const fileTreeLoadTicketRef = useRef(0);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -82,7 +93,11 @@ export default function App() {
             client.send(workspaceId, { type: "remove_slot", slotID: slot.id });
           }
           store.getState().setRuntimeSlots(workspaceId, []);
-          seedFirstTerminal(client, workspaceId);
+          if (workspaceId.startsWith("project:")) {
+            seedFirstProjectTerminal(client, workspaceId);
+          } else {
+            seedFirstWorkspaceTerminal(client, workspaceId);
+          }
           return;
         }
         store.getState().setRuntimeSlots(workspaceId, slots);
@@ -135,7 +150,7 @@ export default function App() {
     const client = clientRef.current;
     const { selectedWorkspaceID } = store.getState();
     if (!client || !selectedWorkspaceID) return;
-    seedTerminal(client, selectedWorkspaceID);
+    seedWorkspaceTerminal(client, selectedWorkspaceID);
   }, []);
 
   const handleNewTerminalRef = useRef(handleNewTerminal);
@@ -143,18 +158,41 @@ export default function App() {
   const setSidebarVisibleRef = useRef(setSidebarVisible);
   setSidebarVisibleRef.current = setSidebarVisible;
 
+  const toggleBottomPanel = useCallback(() => {
+    const state = store.getState();
+    const project = state.selectedProject();
+    const selectedWs = state.selectedWorkspace();
+    if (!project || selectedWs?.status !== "ready") return;
+
+    const projectKey = projectRuntimeKey(project.id);
+    if (!bottomPanelOpen) {
+      state.setProjectTerminalPanelVisible(projectKey, true);
+      const runtime = state.runtimes[projectKey];
+      if ((runtime?.terminalPanel?.groups.length ?? 0) === 0 && clientRef.current) {
+        const seeded = seedProjectTerminal(clientRef.current, projectKey);
+        state.addProjectTerminalGroup(projectKey, seeded.slotID);
+      }
+    }
+    setBottomPanelOpen((v) => !v);
+  }, [bottomPanelOpen]);
+
   const handleCloseFocusedTab = useCallback(() => {
     const client = clientRef.current;
     const state = store.getState();
-    const workspaceId = state.selectedWorkspaceID;
-    if (!workspaceId) return;
+    const runtimeId = state.effectiveLayoutRuntimeId();
+    if (!runtimeId) return;
 
-    const ws = state.workspaces.find((w) => w.id === workspaceId);
-    if (!ws || ws.status !== "ready") return;
-    const workspaceRoot = ws.worktreePath;
+    const runtime = state.runtimes[runtimeId];
+    if (!runtime) return;
 
-    const runtime = state.runtimes[workspaceId];
-    if (!runtime?.root || !runtime.focusedPaneID) return;
+    if (isProjectRuntimeKey(runtimeId)) {
+      const slotId = runtime.terminalPanel?.activeSlotId;
+      if (!slotId || !client) return;
+      state.closeProjectTerminal(runtimeId, slotId);
+      return;
+    }
+
+    if (!runtime.root || !runtime.focusedPaneID) return;
 
     const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
     if (!leaf || leaf.tabs.length === 0) return;
@@ -163,15 +201,20 @@ export default function App() {
     const tab = leaf.tabs[idx] ?? leaf.tabs[0];
     if (tab.kind === "terminal") {
       if (!client) return;
-      client.send(workspaceId, {
+      client.send(runtimeId, {
         type: "remove_slot",
         slotID: tab.slotId,
       });
+    } else if (tab.kind === "diff") {
+      store.getState().removePaneTabByIndex(runtime.focusedPaneID, idx);
     } else {
+      if (isProjectRuntimeKey(runtimeId)) return;
+      const ws = state.workspaces.find((w) => w.id === state.selectedWorkspaceID);
+      if (!ws || ws.status !== "ready") return;
       const label = tab.path.split("/").pop() ?? tab.path;
       void tryCloseEditorTab({
-        workspaceId,
-        workspaceRoot,
+        workspaceId: ws.id,
+        workspaceRoot: ws.worktreePath,
         paneID: runtime.focusedPaneID,
         tabIndex: idx,
         relativePath: tab.path,
@@ -249,11 +292,16 @@ export default function App() {
             break;
         }
       }
+
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "`") {
+        e.preventDefault();
+        toggleBottomPanel();
+      }
     };
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [handleNewTerminal]);
+  }, [handleNewTerminal, handleCloseFocusedTab, toggleBottomPanel]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -275,6 +323,9 @@ export default function App() {
         case "toggle-sidebar":
           setSidebarVisibleRef.current((v) => !v);
           break;
+        case "toggle-bottom-terminal":
+          toggleBottomPanel();
+          break;
       }
     }).then((fn) => {
       unlisten = fn;
@@ -283,7 +334,7 @@ export default function App() {
     return () => {
       unlisten?.();
     };
-  }, [handleCloseFocusedTab]);
+  }, [handleCloseFocusedTab, toggleBottomPanel]);
 
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
   const runtime = useWorkspaceStore((s) =>
@@ -333,6 +384,16 @@ export default function App() {
     }
   }, [fileTreeOpen, selectedWs?.status]);
 
+  useLayoutEffect(() => {
+    const p = bottomPanelRef.current;
+    if (!p || selectedWs?.status !== "ready") return;
+    if (bottomPanelOpen) {
+      p.expand(28);
+    } else {
+      p.collapse();
+    }
+  }, [bottomPanelOpen, selectedWs?.status]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {/* Sidebar — column stays transparent so native window translucency / vibrancy shows through */}
@@ -372,67 +433,118 @@ export default function App() {
           )}
           <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
           {selectedWs?.status === "ready" && (
-            <button
-              type="button"
-              onClick={() => {
-                fileTreeLoadTicketRef.current += 1;
-                setFileTreeOpen((v) => {
-                  const next = !v;
-                  const ws = useWorkspaceStore.getState().selectedWorkspace();
-                  if (ws?.status === "ready") {
-                    void persistFileTreeOpenForWorkspace(ws.id, next);
-                  }
-                  return next;
-                });
-              }}
-              className={cn(
-                "mr-3 shrink-0 p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
-                fileTreeOpen && "bg-neutral-800 text-neutral-200"
-              )}
-              title="Toggle file tree"
-            >
-              <FolderTree className="w-4 h-4" />
-            </button>
+            <div className="mr-3 flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleBottomPanel}
+                className={cn(
+                  "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
+                  bottomPanelOpen && "bg-neutral-800 text-neutral-200"
+                )}
+                title="Toggle terminal panel (Ctrl+`)"
+              >
+                <PanelBottom className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  fileTreeLoadTicketRef.current += 1;
+                  setFileTreeOpen((v) => {
+                    const next = !v;
+                    const ws = useWorkspaceStore.getState().selectedWorkspace();
+                    if (ws?.status === "ready") {
+                      void persistFileTreeOpenForWorkspace(ws.id, next);
+                    }
+                    return next;
+                  });
+                }}
+                className={cn(
+                  "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
+                  fileTreeOpen && "bg-neutral-800 text-neutral-200"
+                )}
+                title="Toggle file tree"
+              >
+                <FolderTree className="w-4 h-4" />
+              </button>
+            </div>
           )}
         </div>
 
-        {/* Workspace area (file tree is a collapsible panel — same tree always so native surfaces stay alive) */}
+        {/* Workspace + optional bottom panel (TabDragProvider spans main + bottom terminals) */}
         <div className="flex-1 min-h-0 flex flex-col">
-          <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-            <ResizablePanel defaultSize={72} minSize={45}>
-              <div className="h-full min-h-0 min-w-0">
-                <WorkspaceView />
-              </div>
-            </ResizablePanel>
-            <PanelResizeHandle
-              hitAreaMargins={{ coarse: 0, fine: 0 }}
-              className={cn(
-                "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
-                fileTreeOpen && selectedWs?.status === "ready"
-                  ? "cursor-col-resize"
-                  : "hidden"
-              )}
-            />
-            <ResizablePanel
-              ref={fileTreePanelRef}
-              collapsible
-              collapsedSize={0}
-              defaultSize={28}
-              minSize={12}
-              maxSize={50}
-              className="min-h-0 min-w-0"
-            >
-              <div className="h-full min-h-0 min-w-0">
-                {fileTreeOpen && selectedWs?.status === "ready" ? (
-                  <WorkspaceFileTreePanel
-                    key={selectedWs.id}
-                    workspaceRoot={selectedWs.worktreePath}
-                    workspaceId={selectedWs.id}
+          <TabDragProvider>
+            <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
+              <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
+                <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                  <ResizablePanel defaultSize={72} minSize={45}>
+                    <div
+                      className="h-full min-h-0 min-w-0"
+                      onPointerDownCapture={() =>
+                        useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
+                      }
+                    >
+                      <WorkspaceView />
+                    </div>
+                  </ResizablePanel>
+                  <PanelResizeHandle
+                    hitAreaMargins={{ coarse: 0, fine: 0 }}
+                    className={cn(
+                      "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                      fileTreeOpen && selectedWs?.status === "ready"
+                        ? "cursor-col-resize"
+                        : "hidden"
+                    )}
                   />
-                ) : null}
-              </div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+                  <ResizablePanel
+                    ref={fileTreePanelRef}
+                    collapsible
+                    collapsedSize={0}
+                    defaultSize={28}
+                    minSize={12}
+                    maxSize={50}
+                    className="min-h-0 min-w-0"
+                  >
+                    <div
+                      className="h-full min-h-0 min-w-0"
+                      onPointerDownCapture={() =>
+                        useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
+                      }
+                    >
+                      {fileTreeOpen && selectedWs?.status === "ready" ? (
+                        <WorkspaceFileTreePanel
+                          key={selectedWs.id}
+                          workspaceRoot={selectedWs.worktreePath}
+                          workspaceId={selectedWs.id}
+                        />
+                      ) : null}
+                    </div>
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </ResizablePanel>
+              {selectedWs?.status === "ready" && (
+                <>
+                  <PanelResizeHandle
+                    hitAreaMargins={{ coarse: 0, fine: 0 }}
+                    className={cn(
+                      "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                      bottomPanelOpen ? "cursor-row-resize" : "hidden"
+                    )}
+                  />
+                  <ResizablePanel
+                    ref={bottomPanelRef}
+                    collapsible
+                    collapsedSize={0}
+                    defaultSize={28}
+                    minSize={12}
+                    maxSize={55}
+                    className="min-h-0"
+                  >
+                    {bottomPanelOpen ? <BottomPanel /> : null}
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
+          </TabDragProvider>
         </div>
 
         {/* Status bar */}
@@ -468,57 +580,3 @@ export default function App() {
     </div>
   );
 }
-
-// ─── Terminal seeding helpers ───
-
-let terminalCounter = 0;
-
-function seedFirstTerminal(client: DaemonClient, workspaceId: string) {
-  seedTerminalWithName(client, workspaceId, "Local Terminal");
-}
-
-function seedTerminal(client: DaemonClient, workspaceId: string) {
-  terminalCounter++;
-  seedTerminalWithName(client, workspaceId, `Terminal ${terminalCounter}`);
-}
-
-function seedTerminalWithName(client: DaemonClient, workspaceId: string, name: string) {
-  const slotID = crypto.randomUUID();
-  const sessionDefID = crypto.randomUUID();
-  const shell = "/bin/zsh";
-
-  client.send(workspaceId, {
-    type: "create_slot",
-    slot: {
-      id: slotID,
-      kind: "terminal_slot",
-      name,
-      autostart: true,
-      presentationMode: "single",
-      primarySessionDefID: sessionDefID,
-      sessionDefIDs: [sessionDefID],
-      persisted: false,
-      sortOrder: Date.now(),
-    },
-  });
-
-  client.send(workspaceId, {
-    type: "create_session_def",
-    session: {
-      id: sessionDefID,
-      slotID,
-      kind: "terminal",
-      name,
-      command: `exec ${shell} -i`,
-      cwd: null,
-      port: null,
-      envOverrides: {},
-      restartPolicy: "manual",
-      pauseSupported: false,
-      resumeSupported: false,
-    },
-  });
-
-  setTimeout(() => client.openSessionInstance(workspaceId, sessionDefID), 100);
-}
-

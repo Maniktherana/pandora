@@ -1,8 +1,37 @@
-import { Search, Plus, ChevronLeft, ChevronDown, ChevronRight, FolderPlus, RotateCcw, Trash2 } from "lucide-react";
+import {
+  Search,
+  Plus,
+  ChevronLeft,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { cn } from "@/lib/utils";
-import type { ProjectRecord, WorkspaceRecord, WorkspaceStatus } from "@/lib/types";
+import type { ProjectRecord, WorkspaceRecord, WorkspaceStatus, WorkspaceKind } from "@/lib/types";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const WORKSPACE_KIND_LABEL: Record<WorkspaceKind, string> = {
+  worktree: "Worktree",
+  linked: "Local",
+};
+
+const WORKSPACE_KIND_TITLE: Record<WorkspaceKind, string> = {
+  worktree:
+    "Separate git worktree (own branch and folder under ~/.pandora/workspaces). Editor and workspace terminals use this path.",
+  linked:
+    "Linked to the project folder on disk — same checkout as the repo root. No extra worktree.",
+};
 
 function StatusDot({ status }: { status: WorkspaceStatus }) {
   const colors: Record<WorkspaceStatus, string> = {
@@ -48,7 +77,18 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
         )}
       >
         <StatusDot status={workspace.status} />
-        <span className="text-[13px] text-neutral-300 truncate flex-1">{workspace.name}</span>
+        <span className="text-[13px] text-neutral-300 truncate min-w-0 flex-1">{workspace.name}</span>
+        <span
+          className={cn(
+            "shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded",
+            (workspace.workspaceKind ?? "worktree") === "linked"
+              ? "bg-sky-500/15 text-sky-400/90"
+              : "bg-violet-500/15 text-violet-300/90"
+          )}
+          title={WORKSPACE_KIND_TITLE[workspace.workspaceKind ?? "worktree"]}
+        >
+          {WORKSPACE_KIND_LABEL[workspace.workspaceKind ?? "worktree"]}
+        </span>
         {workspace.status === "failed" && (
           <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -121,16 +161,43 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
         <span className="text-sm font-medium text-neutral-200 truncate flex-1">
           {project.displayName}
         </span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            void createWorkspace(project.id);
-          }}
-          className="p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
-          title="New Workspace"
+        <div
+          className="shrink-0"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
-          <Plus className="w-3.5 h-3.5 text-neutral-400" />
-        </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button variant="ghost" size="icon-xs" className="text-muted-foreground" />}
+              title="Add workspace — worktree or local"
+              aria-label="Add workspace"
+            >
+              <Plus />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  className="flex flex-col items-start gap-0.5 py-2"
+                  onClick={() => void createWorkspace(project.id, "worktree")}
+                >
+                  <span className="font-medium text-foreground">Worktree</span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    New branch, ~/.pandora/workspaces/…
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="flex flex-col items-start gap-0.5 py-2"
+                  onClick={() => void createWorkspace(project.id, "linked")}
+                >
+                  <span className="font-medium text-foreground">Local workspace</span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    Same folder as project (no extra worktree)
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* Workspace children */}
@@ -140,8 +207,24 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
             <WorkspaceRow key={ws.id} workspace={ws} />
           ))}
           {workspaces.length === 0 && (
-            <div className="text-[11px] text-neutral-600 px-2.5 py-1">
-              No workspaces yet
+            <div className="flex flex-col gap-1.5 px-2.5 py-1.5">
+              <p className="text-[11px] text-muted-foreground">No workspaces yet</p>
+              <div className="flex flex-col items-start gap-1">
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-left text-[11px] font-normal"
+                  onClick={() => void createWorkspace(project.id, "worktree")}
+                >
+                  + Worktree workspace
+                </Button>
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-left text-[11px] font-normal"
+                  onClick={() => void createWorkspace(project.id, "linked")}
+                >
+                  + Local workspace
+                </Button>
+              </div>
             </div>
           )}
         </div>

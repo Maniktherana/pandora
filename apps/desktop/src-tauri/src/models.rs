@@ -33,6 +33,33 @@ impl WorkspaceStatus {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceKind {
+    #[serde(rename = "linked")]
+    Linked,
+    #[default]
+    #[serde(rename = "worktree")]
+    Worktree,
+}
+
+impl WorkspaceKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Linked => "linked",
+            Self::Worktree => "worktree",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "linked" => Some(Self::Linked),
+            "worktree" => Some(Self::Worktree),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectRecord {
@@ -58,6 +85,8 @@ pub struct WorkspaceRecord {
     pub git_worktree_slug: String,
     pub worktree_path: String,
     pub workspace_context_subpath: Option<String>,
+    #[serde(default)]
+    pub workspace_kind: WorkspaceKind,
     pub status: WorkspaceStatus,
     pub failure_message: Option<String>,
     pub created_at: String,

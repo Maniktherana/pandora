@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { TauriEvent } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { terminalTheme } from "@/lib/theme";
 
@@ -207,6 +207,25 @@ export default function TerminalSurface({
       cancelAnimationFrame(inner);
     };
   }, [nativeOk, visible, focused]);
+
+  // Native terminal surfaces are hosted outside the React tree, so layout changes can leave them
+  // with stale geometry for a frame if we only rely on resize events. Sync again after every render.
+  useLayoutEffect(() => {
+    if (nativeOk !== true) return;
+    performSyncRef.current(false);
+    let rafA = 0;
+    let rafB = 0;
+    rafA = requestAnimationFrame(() => {
+      performSyncRef.current(false);
+      rafB = requestAnimationFrame(() => {
+        performSyncRef.current(false);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(rafA);
+      cancelAnimationFrame(rafB);
+    };
+  });
 
   const errorUi = (
     <div

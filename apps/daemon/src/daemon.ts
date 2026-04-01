@@ -25,13 +25,18 @@ export class DaemonServer {
   private readonly socketPath: string;
   private server: net.Server | null = null;
 
-  constructor(workspacePath: string, defaultCwd?: string) {
+  constructor(workspacePath: string, defaultCwd?: string, runtimeId?: string) {
     const normalizedPath = path.resolve(workspacePath);
-    const hash = createHash("sha256").update(normalizedPath).digest("hex").slice(0, 8);
+    const rid = runtimeId ?? "legacy";
+    const hash = createHash("sha256")
+      .update(`${normalizedPath}\0${rid}`)
+      .digest("hex")
+      .slice(0, 8);
     this.socketPath = `/tmp/pandora-${hash}.sock`;
     this.db = openDatabase({
       workspacePath: normalizedPath,
-      defaultCwd: defaultCwd ?? normalizedPath
+      defaultCwd: defaultCwd ?? normalizedPath,
+      runtimeId: rid
     });
 
     const slotDefinitions = listSlotDefinitions(this.db);
@@ -64,7 +69,8 @@ export class DaemonServer {
 
       if (alreadyListening) {
         console.log(`pandorad already running on ${this.socketPath}`);
-        return;
+        this.db.close();
+        process.exit(0);
       }
 
       unlinkSync(this.socketPath);

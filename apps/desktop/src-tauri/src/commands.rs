@@ -64,7 +64,13 @@ pub fn toggle_project(db: tauri::State<'_, DbState>, project_id: String) -> Resu
 }
 
 #[tauri::command]
-pub fn remove_project(db: tauri::State<'_, DbState>, project_id: String) -> Result<(), String> {
+pub async fn remove_project(
+    db: tauri::State<'_, DbState>,
+    daemon_state: tauri::State<'_, DaemonState>,
+    project_id: String,
+) -> Result<(), String> {
+    let runtime_key = format!("project:{}", project_id);
+    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &runtime_key).await;
     db.0.remove_project(&project_id)
 }
 
@@ -78,13 +84,14 @@ pub fn list_workspaces(
     db.0.load_workspaces(project_id.as_deref())
 }
 
-/// Creates a workspace: inserts an optimistic `creating` record, then spawns
-/// a blocking task to create the git worktree.  The frontend polls/reloads
-/// to pick up the status change to `ready` or `failed`.
+/// Creates a workspace: for `worktree`, inserts an optimistic `creating` record and runs
+/// `git worktree add` in a blocking task; for `linked`, persists a ready row at the project
+/// git root (no new worktree).
 #[tauri::command]
 pub async fn create_workspace(
     db: tauri::State<'_, DbState>,
     project_id: String,
+    workspace_kind: Option<WorkspaceKind>,
 ) -> Result<WorkspaceRecord, String> {
     let projects = db.0.load_projects();
     let project = projects
@@ -93,12 +100,21 @@ pub async fn create_workspace(
         .ok_or("Project not found")?;
 
     let existing_count = db.0.load_workspaces(Some(&project_id)).len();
+    let kind = workspace_kind.unwrap_or(WorkspaceKind::Worktree);
+
+    if kind == WorkspaceKind::Linked {
+        let linked = git::make_linked_workspace(&project, existing_count)?;
+        db.0.upsert_workspace(&linked)?;
+        return Ok(linked);
+    }
+
     let optimistic = git::make_optimistic_workspace(&project, existing_count);
     db.0.upsert_workspace(&optimistic)?;
 
     let workspace = optimistic.clone();
     let project_clone = project.clone();
     let db_arc = db.0.clone();
+    let optimistic_id = optimistic.id.clone();
 
     tokio::task::spawn_blocking(move || {
         match git::create_worktree(&workspace, &project_clone) {
@@ -117,12 +133,11 @@ pub async fn create_workspace(
     .await
     .map_err(|e| e.to_string())?;
 
-    // Return the final state
     let final_ws = db
         .0
         .load_workspaces(None)
         .into_iter()
-        .find(|w| w.id == optimistic.id)
+        .find(|w| w.id == optimistic_id)
         .unwrap_or(optimistic);
     Ok(final_ws)
 }
@@ -137,6 +152,12 @@ pub async fn retry_workspace(
         .into_iter()
         .find(|w| w.id == workspace_id)
         .ok_or("Workspace not found")?;
+
+    if workspace.workspace_kind == WorkspaceKind::Linked {
+        return Err(
+            "Linked workspaces do not use a separate worktree; retry is not applicable.".into(),
+        );
+    }
 
     let projects = db.0.load_projects();
     let project = projects
@@ -199,14 +220,15 @@ pub async fn remove_workspace(
     // Stop runtime
     daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
 
-    // Remove worktree
-    if let Some(project) = project {
-        let ws = workspace.clone();
-        tokio::task::spawn_blocking(move || {
-            let _ = git::remove_worktree(&ws, &project);
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+    if workspace.workspace_kind == WorkspaceKind::Worktree {
+        if let Some(project) = project {
+            let ws = workspace.clone();
+            tokio::task::spawn_blocking(move || {
+                let _ = git::remove_worktree(&ws, &project);
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        }
     }
 
     db.0.remove_workspace(&workspace_id)?;
@@ -290,6 +312,26 @@ pub fn start_workspace_runtime(
     default_cwd: String,
 ) {
     daemon_bridge::start_workspace_runtime(app, workspace_id, workspace_path, default_cwd);
+}
+
+#[tauri::command]
+pub fn start_project_runtime(
+    app: AppHandle,
+    project_id: String,
+    git_root_path: String,
+    default_cwd: String,
+) {
+    daemon_bridge::start_project_runtime(app, project_id, git_root_path, default_cwd);
+}
+
+#[tauri::command]
+pub async fn stop_project_runtime(
+    daemon_state: tauri::State<'_, DaemonState>,
+    project_id: String,
+) -> Result<(), String> {
+    let key = format!("project:{}", project_id);
+    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &key).await;
+    Ok(())
 }
 
 // ─── Workspace file tree ───
@@ -398,6 +440,73 @@ pub fn write_workspace_text_file(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
+// ─── SCM / diff (git in workspace work tree) ───
+
+#[tauri::command]
+pub fn scm_git_diff(
+    worktree_path: String,
+    relative_path: String,
+    staged: bool,
+) -> Result<git::ScmDiffResult, String> {
+    git::git_file_diff(&worktree_path, &relative_path, staged)
+}
+
+/// `source`: `"head"` → `HEAD:path`, `"index"` → `:path` (staged blob, stage 0).
+#[tauri::command]
+pub fn scm_read_git_blob(
+    worktree_path: String,
+    relative_path: String,
+    source: String,
+) -> Result<String, String> {
+    git::sanitize_repo_relative_path(&relative_path)?;
+    let spec = match source.as_str() {
+        "head" => format!("HEAD:{relative_path}"),
+        "index" => format!(":{relative_path}"),
+        _ => return Err(r#"Invalid source: use "head" or "index""#.into()),
+    };
+    git::git_read_blob_text(&worktree_path, &spec)
+}
+
+#[tauri::command]
+pub fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, String> {
+    git::git_status(&worktree_path)
+}
+
+#[tauri::command]
+pub fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
+    git::git_add_paths(&worktree_path, &paths)
+}
+
+#[tauri::command]
+pub fn scm_stage_all(worktree_path: String) -> Result<(), String> {
+    git::git_add_all(&worktree_path)
+}
+
+#[tauri::command]
+pub fn scm_unstage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
+    git::git_restore_staged_paths(&worktree_path, &paths)
+}
+
+#[tauri::command]
+pub fn scm_unstage_all(worktree_path: String) -> Result<(), String> {
+    git::git_restore_staged_all(&worktree_path)
+}
+
+#[tauri::command]
+pub fn scm_discard_tracked(worktree_path: String, path: String) -> Result<(), String> {
+    git::git_restore_worktree_path(&worktree_path, &path)
+}
+
+#[tauri::command]
+pub fn scm_discard_untracked(worktree_path: String, path: String) -> Result<(), String> {
+    git::git_clean_untracked_path(&worktree_path, &path)
+}
+
+#[tauri::command]
+pub fn scm_commit(worktree_path: String, message: String) -> Result<(), String> {
+    git::git_commit_message(&worktree_path, &message)
 }
 
 // ─── Reload all data (convenience for frontend) ───

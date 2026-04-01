@@ -3,12 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ProjectRecord,
   WorkspaceRecord,
+  WorkspaceKind,
+  DiffSource,
   SlotState,
   SessionState,
   LayoutNode,
   LayoutAxis,
   AppState,
   WorkspaceRuntimeState,
+  TerminalPanelState,
 } from "../lib/types";
 import { migratePersistedLayout } from "../lib/layout-migrate";
 import {
@@ -23,6 +26,22 @@ import {
   removeTerminalSlotFromTree,
   splitPaneAroundTab,
 } from "../lib/layout-tree";
+import { isProjectRuntimeKey, projectRuntimeKey } from "../lib/runtime-keys";
+import { getTerminalDaemonClient } from "../lib/terminal-runtime";
+import {
+  addTerminalGroup,
+  addTerminalToGroup,
+  createEmptyTerminalPanel,
+  moveTerminalToGroup,
+  moveTerminalToNewGroup,
+  reorderTerminalGroupChildren,
+  reorderTerminalGroups,
+  removeTerminalFromPanel,
+  setActiveTerminalGroup,
+  setActiveTerminalSlot,
+  setTerminalPanelVisible,
+  terminalPanelContainsSlot,
+} from "../lib/bottom-terminal-panel";
 
 export type NavigationArea = "sidebar" | "workspace";
 
@@ -39,6 +58,10 @@ interface WorkspaceStoreState {
   // ─── UI state ───
   navigationArea: NavigationArea;
   searchText: string;
+  /** When set, layout shortcuts / tab DnD target this runtime (`project:…` or workspace id). */
+  layoutTargetRuntimeId: string | null;
+  setLayoutTargetRuntimeId: (id: string | null) => void;
+  effectiveLayoutRuntimeId: () => string | null;
 
   // ─── Computed helpers ───
   selectedProject: () => ProjectRecord | null;
@@ -60,7 +83,7 @@ interface WorkspaceStoreState {
   selectProject: (projectId: string) => void;
 
   // ─── Workspace actions ───
-  createWorkspace: (projectId: string) => Promise<void>;
+  createWorkspace: (projectId: string, workspaceKind?: WorkspaceKind) => Promise<void>;
   retryWorkspace: (workspaceId: string) => Promise<void>;
   removeWorkspace: (workspaceId: string) => Promise<void>;
   selectWorkspace: (workspace: WorkspaceRecord) => void;
@@ -77,6 +100,27 @@ interface WorkspaceStoreState {
   addRuntimeSession: (workspaceId: string, session: SessionState) => void;
   removeRuntimeSession: (workspaceId: string, sessionID: string) => void;
   ensureRuntimeLayout: (workspaceId: string) => void;
+  ensureProjectTerminalPanel: (workspaceId: string) => void;
+  addProjectTerminalGroup: (workspaceId: string, slotId: string, index?: number) => void;
+  splitProjectTerminalGroup: (workspaceId: string, groupId: string, slotId: string) => void;
+  closeProjectTerminal: (workspaceId: string, slotId: string) => void;
+  selectProjectTerminalGroup: (workspaceId: string, groupId: string, slotId?: string | null) => void;
+  focusProjectTerminal: (workspaceId: string, slotId: string | null) => void;
+  setProjectTerminalPanelVisible: (workspaceId: string, visible: boolean) => void;
+  reorderProjectTerminalGroups: (workspaceId: string, fromIndex: number, toIndex: number) => void;
+  reorderProjectTerminalGroupChildren: (
+    workspaceId: string,
+    groupId: string,
+    fromIndex: number,
+    toIndex: number
+  ) => void;
+  moveProjectTerminalToGroup: (
+    workspaceId: string,
+    slotId: string,
+    targetGroupId: string,
+    index?: number
+  ) => void;
+  moveProjectTerminalToNewGroup: (workspaceId: string, slotId: string, index: number) => void;
 
   // ─── Layout actions ───
   splitPane: (
@@ -94,6 +138,8 @@ interface WorkspaceStoreState {
   reorderTab: (paneID: string, fromIndex: number, toIndex: number) => void;
   /** Add or focus an editor tab in the focused pane (or first pane). */
   addEditorTabForPath: (relativePath: string) => void;
+  /** Add or focus a git diff tab (working tree vs index, or staged vs HEAD). */
+  addDiffTabForPath: (relativePath: string, source: DiffSource) => void;
   setFocusedPane: (paneID: string) => void;
   cycleTab: (direction: -1 | 1) => void;
   persistLayout: () => void;
@@ -105,7 +151,43 @@ interface WorkspaceStoreState {
   navigateSidebar: (offset: number) => void;
 }
 
-export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
+export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
+  /**
+   * Project-scoped (bottom) daemon: always-on for ready workspaces so the bottom panel can show
+   * Terminal + Ports consistently. Uses a distinct runtime id / socket from the workspace daemon
+   * even when the checkout path matches (linked worktrees).
+   */
+  const syncProjectScopedRuntime = (workspace: WorkspaceRecord) => {
+    const project = get().projects.find((p) => p.id === workspace.projectId);
+    if (!project || workspace.status !== "ready") return;
+
+    const pk = projectRuntimeKey(workspace.projectId);
+
+    if (!get().runtimes[pk]) {
+      void invoke("start_project_runtime", {
+        projectId: project.id,
+        gitRootPath: project.gitRootPath,
+        defaultCwd: project.gitRootPath,
+      });
+      const placeholder = createLeaf([]);
+      set((s) => ({
+        runtimes: {
+          ...s.runtimes,
+          [pk]: {
+            workspaceId: pk,
+            slots: [],
+            sessions: [],
+            connectionState: "connecting",
+            root: placeholder,
+            focusedPaneID: placeholder.id,
+            terminalPanel: createEmptyTerminalPanel(),
+          },
+        },
+      }));
+    }
+  };
+
+  return {
   projects: [],
   workspaces: [],
   selectedProjectID: null,
@@ -113,6 +195,13 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   runtimes: {},
   navigationArea: "sidebar",
   searchText: "",
+  layoutTargetRuntimeId: null,
+
+  setLayoutTargetRuntimeId: (id) => set({ layoutTargetRuntimeId: id }),
+  effectiveLayoutRuntimeId: () => {
+    const { layoutTargetRuntimeId, selectedWorkspaceID } = get();
+    return layoutTargetRuntimeId ?? selectedWorkspaceID;
+  },
 
   // ─── Computed ───
   selectedProject: () => {
@@ -162,6 +251,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         selectedProjectID: state.selectedProjectId,
         selectedWorkspaceID: state.selectedWorkspaceId,
       });
+      const ws = get().workspaces.find((w) => w.id === get().selectedWorkspaceID);
+      if (ws?.status === "ready") syncProjectScopedRuntime(ws);
     } catch (e) {
       console.error("Failed to load app state:", e);
     }
@@ -189,8 +280,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     await get().reloadFromBackend();
   },
   removeProject: async (projectId) => {
-    await invoke("remove_project", { projectId });
-    await get().reloadFromBackend();
+    const pk = projectRuntimeKey(projectId);
+    void invoke("stop_project_runtime", { projectId }).catch(() => {});
+    set((s) => {
+      const { [pk]: _, ...rest } = s.runtimes;
+      return {
+        runtimes: rest,
+        layoutTargetRuntimeId: s.layoutTargetRuntimeId === pk ? null : s.layoutTargetRuntimeId,
+      };
+    });
+    try {
+      await invoke("remove_project", { projectId });
+      await get().reloadFromBackend();
+    } catch (e) {
+      console.error("Failed to remove project:", e);
+    }
   },
   selectProject: (projectId) => {
     set({ selectedProjectID: projectId });
@@ -201,10 +305,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   // ─── Workspace actions ───
-  createWorkspace: async (projectId) => {
+  createWorkspace: async (projectId, workspaceKind) => {
     try {
-      await invoke("create_workspace", { projectId });
-      // Reload to pick up the optimistic record
+      await invoke("create_workspace", {
+        projectId,
+        ...(workspaceKind != null ? { workspaceKind } : {}),
+      });
       await get().reloadFromBackend();
     } catch (e) {
       console.error("Failed to create workspace:", e);
@@ -241,6 +347,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       selectedWorkspaceID: workspace.id,
       selectedProjectID: workspace.projectId,
       navigationArea: "sidebar",
+      layoutTargetRuntimeId: null,
     });
     void invoke("save_selection", {
       projectId: workspace.projectId,
@@ -249,6 +356,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
     // Start runtime if workspace is ready and not already running
     if (workspace.status === "ready") {
+      syncProjectScopedRuntime(workspace);
+
       const runtime = get().runtimes[workspace.id];
       if (!runtime) {
         const defaultCwd = workspace.workspaceContextSubpath
@@ -272,6 +381,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
               connectionState: "connecting",
               root: null,
               focusedPaneID: null,
+              terminalPanel: null,
             },
           },
         }));
@@ -297,6 +407,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         connectionState: "disconnected",
         root: null,
         focusedPaneID: null,
+        terminalPanel: isProjectRuntimeKey(workspaceId) ? createEmptyTerminalPanel() : null,
       };
       return {
         runtimes: {
@@ -310,14 +421,27 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
+      const terminalPanel = isProjectRuntimeKey(workspaceId)
+        ? slots.reduce<TerminalPanelState>(
+            (panel, slot) =>
+              terminalPanelContainsSlot(panel, slot.id)
+                ? panel
+                : addTerminalGroup(panel, slot.id, { activate: panel.groups.length === 0 }),
+            runtime.terminalPanel ?? createEmptyTerminalPanel()
+          )
+        : runtime.terminalPanel;
       return {
         runtimes: {
           ...s.runtimes,
-          [workspaceId]: { ...runtime, slots },
+          [workspaceId]: { ...runtime, slots, terminalPanel },
         },
       };
     });
-    get().ensureRuntimeLayout(workspaceId);
+    if (isProjectRuntimeKey(workspaceId)) {
+      get().ensureProjectTerminalPanel(workspaceId);
+    } else {
+      get().ensureRuntimeLayout(workspaceId);
+    }
   },
   setRuntimeSessions: (workspaceId, sessions) => {
     set((s) => {
@@ -350,20 +474,46 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
+      const terminalPanel = isProjectRuntimeKey(workspaceId)
+        ? terminalPanelContainsSlot(runtime.terminalPanel, slot.id)
+          ? runtime.terminalPanel
+          : addTerminalGroup(runtime.terminalPanel, slot.id, {
+              activate: (runtime.terminalPanel?.groups.length ?? 0) === 0,
+            })
+        : runtime.terminalPanel;
       return {
         runtimes: {
           ...s.runtimes,
-          [workspaceId]: { ...runtime, slots: [...runtime.slots, slot] },
+          [workspaceId]: { ...runtime, slots: [...runtime.slots, slot], terminalPanel },
         },
       };
     });
-    get().ensureRuntimeLayout(workspaceId);
+    if (isProjectRuntimeKey(workspaceId)) {
+      get().ensureProjectTerminalPanel(workspaceId);
+    } else {
+      get().ensureRuntimeLayout(workspaceId);
+    }
   },
   removeRuntimeSlot: (workspaceId, slotID) => {
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
-      const newRoot = runtime.root ? removeTerminalSlotFromTree(runtime.root, slotID) : null;
+      const newRoot =
+        !isProjectRuntimeKey(workspaceId) && runtime.root
+          ? (removeTerminalSlotFromTree(runtime.root, slotID) ?? createLeaf([]))
+          : runtime.root
+            ? removeTerminalSlotFromTree(runtime.root, slotID)
+            : null;
+      const terminalPanel = isProjectRuntimeKey(workspaceId)
+        ? removeTerminalFromPanel(runtime.terminalPanel, slotID)
+        : runtime.terminalPanel;
+      const leaves = newRoot ? getAllLeaves(newRoot) : [];
+      const focusedPaneID =
+        !isProjectRuntimeKey(workspaceId) && newRoot
+          ? runtime.focusedPaneID && findLeaf(newRoot, runtime.focusedPaneID)
+            ? runtime.focusedPaneID
+            : (leaves[0]?.id ?? null)
+          : runtime.focusedPaneID;
       return {
         runtimes: {
           ...s.runtimes,
@@ -371,6 +521,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
             ...runtime,
             slots: runtime.slots.filter((sl) => sl.id !== slotID),
             root: newRoot,
+            terminalPanel,
+            focusedPaneID,
           },
         },
       };
@@ -392,6 +544,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         },
       };
     });
+    if (isProjectRuntimeKey(workspaceId) && session.kind === "terminal" && session.status === "crashed") {
+      get().closeProjectTerminal(workspaceId, session.slotID);
+    }
   },
   addRuntimeSession: (workspaceId, session) => {
     set((s) => {
@@ -424,6 +579,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   ensureRuntimeLayout: (workspaceId) => {
     const runtime = get().runtimes[workspaceId];
     if (!runtime) return;
+    if (isProjectRuntimeKey(workspaceId)) return;
 
     const existingSlotIDs = runtime.root
       ? new Set(getAllTerminalSlotIds(runtime.root))
@@ -457,13 +613,215 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       },
     }));
   },
+  ensureProjectTerminalPanel: (workspaceId) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    const runtime = get().runtimes[workspaceId];
+    if (!runtime) return;
+    const slotIds = new Set(runtime.slots.map((slot) => slot.id));
+    let terminalPanel = runtime.terminalPanel ?? createEmptyTerminalPanel();
+
+    for (const slot of runtime.slots) {
+      if (!terminalPanelContainsSlot(terminalPanel, slot.id)) {
+        terminalPanel = addTerminalGroup(terminalPanel, slot.id, {
+          activate: terminalPanel.groups.length === 0,
+        });
+      }
+    }
+
+    for (const group of terminalPanel.groups) {
+      for (const child of group.children) {
+        if (!slotIds.has(child)) {
+          terminalPanel = removeTerminalFromPanel(terminalPanel, child);
+        }
+      }
+    }
+
+    set((s) => {
+      const nextRuntime = s.runtimes[workspaceId];
+      if (!nextRuntime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...nextRuntime,
+            terminalPanel,
+          },
+        },
+      };
+    });
+  },
+  addProjectTerminalGroup: (workspaceId, slotId, index) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: addTerminalGroup(runtime.terminalPanel, slotId, { index }),
+          },
+        },
+      };
+    });
+  },
+  splitProjectTerminalGroup: (workspaceId, groupId, slotId) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: addTerminalToGroup(runtime.terminalPanel, groupId, slotId),
+          },
+        },
+      };
+    });
+  },
+  closeProjectTerminal: (workspaceId, slotId) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    getTerminalDaemonClient()?.send(workspaceId, { type: "remove_slot", slotID: slotId });
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: removeTerminalFromPanel(runtime.terminalPanel, slotId),
+          },
+        },
+      };
+    });
+  },
+  selectProjectTerminalGroup: (workspaceId, groupId, slotId) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: setActiveTerminalGroup(runtime.terminalPanel, groupId, slotId),
+          },
+        },
+      };
+    });
+  },
+  focusProjectTerminal: (workspaceId, slotId) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: setActiveTerminalSlot(runtime.terminalPanel, slotId),
+          },
+        },
+      };
+    });
+  },
+  setProjectTerminalPanelVisible: (workspaceId, visible) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: setTerminalPanelVisible(runtime.terminalPanel, visible),
+          },
+        },
+      };
+    });
+  },
+  reorderProjectTerminalGroups: (workspaceId, fromIndex, toIndex) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: reorderTerminalGroups(runtime.terminalPanel, fromIndex, toIndex),
+          },
+        },
+      };
+    });
+  },
+  reorderProjectTerminalGroupChildren: (workspaceId, groupId, fromIndex, toIndex) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: reorderTerminalGroupChildren(runtime.terminalPanel, groupId, fromIndex, toIndex),
+          },
+        },
+      };
+    });
+  },
+  moveProjectTerminalToGroup: (workspaceId, slotId, targetGroupId, index) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: moveTerminalToGroup(runtime.terminalPanel, slotId, targetGroupId, {
+              index,
+            }),
+          },
+        },
+      };
+    });
+  },
+  moveProjectTerminalToNewGroup: (workspaceId, slotId, index) => {
+    if (!isProjectRuntimeKey(workspaceId)) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalPanel: moveTerminalToNewGroup(runtime.terminalPanel, slotId, index),
+          },
+        },
+      };
+    });
+  },
 
   // ─── Layout actions ───
   splitPane: (targetPaneID, sourcePaneID, sourceTabIndex, axis, position) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
+    // Bottom (project) terminal: side-by-side splits only — no stacked vertical panes.
+    if (isProjectRuntimeKey(rid) && axis === "vertical") return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
       const srcLeaf = findLeaf(runtime.root, sourcePaneID);
       const tab = srcLeaf?.tabs[sourceTabIndex];
@@ -475,7 +833,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         return {
           runtimes: {
             ...s.runtimes,
-            [wsId]: { ...runtime, root, focusedPaneID: root.type === "leaf" ? root.id : runtime.focusedPaneID },
+            [rid]: { ...runtime, root, focusedPaneID: root.type === "leaf" ? root.id : runtime.focusedPaneID },
           },
         };
       }
@@ -483,7 +841,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root },
+          [rid]: { ...runtime, root },
         },
       };
     });
@@ -491,10 +849,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   addTabToPane: (targetPaneID, sourcePaneID, sourceTabIndex) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
       const srcLeaf = findLeaf(runtime.root, sourcePaneID);
       const tab = srcLeaf?.tabs[sourceTabIndex];
@@ -506,7 +864,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         return {
           runtimes: {
             ...s.runtimes,
-            [wsId]: { ...runtime, root },
+            [rid]: { ...runtime, root },
           },
         };
       }
@@ -516,7 +874,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root },
+          [rid]: { ...runtime, root },
         },
       };
     });
@@ -524,10 +882,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   removePaneTabByIndex: (paneID, tabIndex) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
       let newRoot = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
       if (!newRoot) {
@@ -542,7 +900,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: newRoot, focusedPaneID },
+          [rid]: { ...runtime, root: newRoot, focusedPaneID },
         },
       };
     });
@@ -550,6 +908,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   addEditorTabForPath: (relativePath) => {
+    get().setLayoutTargetRuntimeId(null);
     const wsId = get().selectedWorkspaceID;
     if (!wsId) return;
     const runtime = get().runtimes[wsId];
@@ -586,11 +945,56 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     get().persistLayout();
   },
 
-  selectTabInPane: (paneID, index) => {
+  addDiffTabForPath: (relativePath, source) => {
+    get().setLayoutTargetRuntimeId(null);
     const wsId = get().selectedWorkspaceID;
     if (!wsId) return;
+    const runtime = get().runtimes[wsId];
+    if (!runtime?.root) return;
+
+    const leaves = getAllLeaves(runtime.root);
+    let paneID = runtime.focusedPaneID;
+    if (!paneID || !findLeaf(runtime.root, paneID)) {
+      paneID = leaves[0]?.id ?? null;
+    }
+    if (!paneID) return;
+
+    const leaf = findLeaf(runtime.root, paneID);
+    if (!leaf) return;
+    const dup = leaf.tabs.findIndex(
+      (t) => t.kind === "diff" && t.path === relativePath && t.source === source
+    );
+    if (dup >= 0) {
+      get().selectTabInPane(paneID, dup);
+      return;
+    }
+
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const rt = s.runtimes[wsId];
+      if (!rt?.root) return s;
+      const pl = findLeaf(rt.root, paneID!);
+      const at = pl?.tabs.length ?? 0;
+      const root = insertTabInPane(
+        rt.root,
+        paneID!,
+        { kind: "diff", path: relativePath, source },
+        at
+      );
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [wsId]: { ...rt, root, focusedPaneID: paneID },
+        },
+      };
+    });
+    get().persistLayout();
+  },
+
+  selectTabInPane: (paneID, index) => {
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
+    set((s) => {
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
 
       function selectTab(node: LayoutNode): LayoutNode {
@@ -610,7 +1014,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: selectTab(runtime.root) },
+          [rid]: { ...runtime, root: selectTab(runtime.root) },
         },
       };
     });
@@ -618,10 +1022,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   moveTab: (fromPaneID, toPaneID, fromIndex, toIndex) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
       const srcLeaf = findLeaf(runtime.root, fromPaneID);
       const tab = srcLeaf?.tabs[fromIndex];
@@ -638,7 +1042,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root },
+          [rid]: { ...runtime, root },
         },
       };
     });
@@ -646,10 +1050,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   reorderTab: (paneID, fromIndex, toIndex) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime?.root) return s;
 
       function reorder(node: LayoutNode): LayoutNode {
@@ -675,7 +1079,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, root: reorder(runtime.root) },
+          [rid]: { ...runtime, root: reorder(runtime.root) },
         },
       };
     });
@@ -683,15 +1087,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   setFocusedPane: (paneID) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
     set((s) => {
-      const runtime = s.runtimes[wsId];
+      const runtime = s.runtimes[rid];
       if (!runtime) return s;
       return {
         runtimes: {
           ...s.runtimes,
-          [wsId]: { ...runtime, focusedPaneID: paneID },
+          [rid]: { ...runtime, focusedPaneID: paneID },
         },
       };
     });
@@ -699,9 +1103,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   cycleTab: (direction) => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
-    const runtime = get().runtimes[wsId];
+    const rid = get().effectiveLayoutRuntimeId();
+    if (!rid) return;
+    const runtime = get().runtimes[rid];
     if (!runtime?.root || !runtime.focusedPaneID) return;
 
     const leaves = getAllLeaves(runtime.root);
@@ -748,15 +1152,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   persistLayout: () => {
-    const wsId = get().selectedWorkspaceID;
-    if (!wsId) return;
-    const runtime = get().runtimes[wsId];
+    const id = get().effectiveLayoutRuntimeId();
+    if (!id || isProjectRuntimeKey(id)) return;
+    const runtime = get().runtimes[id];
     if (!runtime?.root) return;
     const layout = {
       root: runtime.root,
       focusedPaneID: runtime.focusedPaneID,
     };
-    void invoke("save_workspace_layout", { workspaceId: wsId, layout });
+    void invoke("save_workspace_layout", { workspaceId: id, layout });
   },
 
   loadPersistedLayout: async (workspaceId) => {
@@ -797,4 +1201,5 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     const ws = workspaces[nextIdx];
     if (ws) get().selectWorkspace(ws);
   },
-}));
+};
+});

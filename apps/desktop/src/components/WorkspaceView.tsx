@@ -11,13 +11,13 @@ import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { PanelResizeHandle } from "react-resizable-panels";
 import TerminalSurface from "@/components/Terminal";
 import TabBar from "@/components/dnd/TabBar";
-import { TabDragProvider } from "@/components/dnd/TabDragLayer";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from "@/lib/types";
 import { terminalTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { RotateCcw, Trash2 } from "lucide-react";
 import PaneEditor from "@/components/PaneEditor";
+import DiffViewer from "@/components/DiffViewer";
 import { tabKey } from "@/lib/layout-tree";
 // ── Hoisted native terminals (stable React parent across split/merge layout moves) ──
 
@@ -39,21 +39,25 @@ function PaneTerminalAnchorSlot({
   isFocused,
   workspaceId,
   leafId,
+  layoutTargetOnFocus,
 }: {
   sessionForSlot: SessionState;
   isActiveTab: boolean;
   isFocused: boolean;
   workspaceId: string;
   leafId: string;
+  /** Which runtime receives layout shortcuts; `null` clears override (workspace). */
+  layoutTargetOnFocus: string | null;
 }) {
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const { setFocusedPane, setNavigationArea } = useWorkspaceStore();
+  const { setFocusedPane, setNavigationArea, setLayoutTargetRuntimeId } = useWorkspaceStore();
 
   const handleFocus = useCallback(() => {
+    setLayoutTargetRuntimeId(layoutTargetOnFocus);
     setFocusedPane(leafId);
     setNavigationArea("workspace");
-  }, [leafId, setFocusedPane, setNavigationArea]);
+  }, [leafId, layoutTargetOnFocus, setFocusedPane, setLayoutTargetRuntimeId, setNavigationArea]);
 
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
@@ -100,10 +104,21 @@ interface PaneViewProps {
   isFocused: boolean;
   workspaceId: string;
   workspaceRoot: string;
+  layoutTargetOnFocus: string | null;
+  /** Bottom panel: terminals use the right sidebar instead of a top tab bar */
+  hideTabBar?: boolean;
   isResizing?: boolean;
 }
 
-function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: PaneViewProps) {
+function PaneView({
+  leaf,
+  isFocused,
+  workspaceId,
+  workspaceRoot,
+  layoutTargetOnFocus,
+  hideTabBar = false,
+  isResizing,
+}: PaneViewProps) {
   const { slotsByID, sessionsByID } = useWorkspaceStore();
   const slotsMap = slotsByID(workspaceId);
   const sessionsMap = sessionsByID(workspaceId);
@@ -120,21 +135,25 @@ function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: P
     Object.values(sessionsMap).some((s) => s.slotID === slotId && s.status === "running")
   );
 
-  const onlyEditors = leaf.tabs.length > 0 && leaf.tabs.every((t) => t.kind === "editor");
+  const onlyEditors =
+    leaf.tabs.length > 0 &&
+    leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff");
 
   return (
     <div
       data-pane-id={leaf.id}
       className="flex flex-col h-full overflow-hidden rounded-sm relative"
     >
-      <TabBar
-        paneID={leaf.id}
-        tabs={leaf.tabs}
-        selectedIndex={leaf.selectedIndex}
-        workspaceId={workspaceId}
-        workspaceRoot={workspaceRoot}
-        isFocused={isFocused}
-      />
+      {!hideTabBar && (
+        <TabBar
+          paneID={leaf.id}
+          tabs={leaf.tabs}
+          selectedIndex={leaf.selectedIndex}
+          workspaceId={workspaceId}
+          workspaceRoot={workspaceRoot}
+          isFocused={isFocused}
+        />
+      )}
 
       <div
         className="flex-1 min-h-0 relative"
@@ -156,6 +175,26 @@ function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: P
               />
             );
           }
+          if (tab.kind === "diff") {
+            return (
+              <div
+                key={tabKey(tab)}
+                className="absolute inset-0 overflow-hidden"
+                style={{
+                  visibility: isActiveTab ? "visible" : "hidden",
+                  pointerEvents: isActiveTab ? "auto" : "none",
+                }}
+                aria-hidden={!isActiveTab}
+              >
+                <DiffViewer
+                  workspaceRoot={workspaceRoot}
+                  relativePath={tab.path}
+                  source={tab.source}
+                  isActive={isActiveTab}
+                />
+              </div>
+            );
+          }
           const sessionForSlot = Object.values(sessionsMap).find(
             (s) => s.slotID === tab.slotId && s.status === "running"
           );
@@ -168,6 +207,7 @@ function PaneView({ leaf, isFocused, workspaceId, workspaceRoot, isResizing }: P
               isFocused={isFocused}
               workspaceId={workspaceId}
               leafId={leaf.id}
+              layoutTargetOnFocus={layoutTargetOnFocus}
             />
           );
         })}
@@ -206,6 +246,8 @@ interface LayoutRendererProps {
   focusedPaneID: string | null;
   workspaceId: string;
   workspaceRoot: string;
+  layoutTargetOnFocus: string | null;
+  hideTabBar?: boolean;
   isResizing?: boolean;
 }
 
@@ -214,6 +256,8 @@ function LayoutRenderer({
   focusedPaneID,
   workspaceId,
   workspaceRoot,
+  layoutTargetOnFocus,
+  hideTabBar = false,
   isResizing,
 }: LayoutRendererProps) {
   const [localResizing, setLocalResizing] = useState(false);
@@ -226,6 +270,8 @@ function LayoutRenderer({
         isFocused={node.id === focusedPaneID}
         workspaceId={workspaceId}
         workspaceRoot={workspaceRoot}
+        layoutTargetOnFocus={layoutTargetOnFocus}
+        hideTabBar={hideTabBar}
         isResizing={anyResizing}
       />
     );
@@ -255,6 +301,7 @@ function LayoutRenderer({
               focusedPaneID={focusedPaneID}
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
+              layoutTargetOnFocus={layoutTargetOnFocus}
               isResizing={anyResizing}
             />
           </ResizablePanel>
@@ -298,14 +345,16 @@ function HoistedNativeTerminals({
   );
 }
 
-function WorkspaceRuntimeView({
+export function WorkspaceRuntimeView({
   workspaceId,
   workspaceRoot,
   runtime,
+  layoutTargetOnFocus = null,
 }: {
   workspaceId: string;
   workspaceRoot: string;
   runtime: WorkspaceRuntimeState;
+  layoutTargetOnFocus?: string | null;
 }) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
 
@@ -335,13 +384,17 @@ function WorkspaceRuntimeView({
   return (
     <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
       <div className="relative h-full w-full min-h-0">
-        <LayoutRenderer
-          node={runtime.root!}
-          focusedPaneID={runtime.focusedPaneID}
-          workspaceId={workspaceId}
-          workspaceRoot={workspaceRoot}
-        />
-        <HoistedNativeTerminals runtime={runtime} anchors={anchors} />
+        <div className="relative h-full min-h-0 min-w-0">
+          <LayoutRenderer
+            node={runtime.root!}
+            focusedPaneID={runtime.focusedPaneID}
+            workspaceId={workspaceId}
+            workspaceRoot={workspaceRoot}
+            layoutTargetOnFocus={layoutTargetOnFocus}
+            hideTabBar={false}
+          />
+          <HoistedNativeTerminals runtime={runtime} anchors={anchors} />
+        </div>
       </div>
     </NativeTerminalRegContext.Provider>
   );
@@ -457,12 +510,11 @@ export default function WorkspaceView() {
   }
 
   return (
-    <TabDragProvider>
-      <WorkspaceRuntimeView
-        workspaceId={selectedWorkspaceID!}
-        workspaceRoot={selectedWs.worktreePath}
-        runtime={runtime}
-      />
-    </TabDragProvider>
+    <WorkspaceRuntimeView
+      workspaceId={selectedWorkspaceID!}
+      workspaceRoot={selectedWs.worktreePath}
+      runtime={runtime}
+      layoutTargetOnFocus={null}
+    />
   );
 }

@@ -89,6 +89,10 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     return YES;
 }
 
+- (BOOL)canBecomeKeyView {
+    return YES;
+}
+
 - (BOOL)becomeFirstResponder {
     BOOL accepted = [super becomeFirstResponder];
     if (accepted && self.surface != NULL) {
@@ -124,6 +128,19 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         return;
     }
 
+    NSString *charsIgnoringModifiers = [event charactersIgnoringModifiers];
+    unichar firstChar = charsIgnoringModifiers.length > 0 ? [charsIgnoringModifiers characterAtIndex:0] : 0;
+    if (cmd && !ctrl && !alt) {
+        if (firstChar == 'c' || firstChar == 'C') {
+            [self copy:nil];
+            return;
+        }
+        if (firstChar == 'v' || firstChar == 'V') {
+            [self paste:nil];
+            return;
+        }
+    }
+
     ghostty_input_key_s key = {0};
     key.action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS;
     key.keycode = (uint32_t) event.keyCode;
@@ -138,6 +155,81 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     }
 
     ghostty_surface_key(self.surface, key);
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent *)event {
+    NSUInteger f = [event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
+    BOOL cmd = (f & NSEventModifierFlagCommand) != 0;
+    BOOL ctrl = (f & NSEventModifierFlagControl) != 0;
+    BOOL alt = (f & NSEventModifierFlagOption) != 0;
+    if (cmd && !ctrl && !alt) {
+        NSString *charsIgnoringModifiers = [event charactersIgnoringModifiers];
+        unichar firstChar = charsIgnoringModifiers.length > 0 ? [charsIgnoringModifiers characterAtIndex:0] : 0;
+        if (firstChar == 'c' || firstChar == 'C') {
+            [self copy:nil];
+            return YES;
+        }
+        if (firstChar == 'v' || firstChar == 'V') {
+            [self paste:nil];
+            return YES;
+        }
+    }
+    return [super performKeyEquivalent:event];
+}
+
+- (void)copy:(id)sender {
+    (void)sender;
+    if (self.surface == NULL || !ghostty_surface_has_selection(self.surface)) {
+        return;
+    }
+
+    ghostty_text_s text = {0};
+    if (!ghostty_surface_read_selection(self.surface, &text) || text.text == NULL || text.text_len == 0) {
+        if (text.text != NULL) {
+            ghostty_surface_free_text(self.surface, &text);
+        }
+        return;
+    }
+
+    NSString *string = [[NSString alloc] initWithBytes:text.text
+                                                length:text.text_len
+                                              encoding:NSUTF8StringEncoding];
+    if (string != nil) {
+        NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+        [pasteboard clearContents];
+        [pasteboard setString:string forType:NSPasteboardTypeString];
+    }
+    ghostty_surface_free_text(self.surface, &text);
+}
+
+- (void)paste:(id)sender {
+    (void)sender;
+    if (self.surface == NULL) {
+        return;
+    }
+
+    NSString *string = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+    if (string == nil || string.length == 0) {
+        return;
+    }
+
+    NSData *utf8 = [string dataUsingEncoding:NSUTF8StringEncoding];
+    if (utf8 == nil || utf8.length == 0) {
+        return;
+    }
+    ghostty_surface_text(self.surface, utf8.bytes, utf8.length);
+}
+
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+    SEL action = [item action];
+    if (action == @selector(copy:)) {
+        return self.surface != NULL && ghostty_surface_has_selection(self.surface);
+    }
+    if (action == @selector(paste:)) {
+        NSString *string = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+        return self.surface != NULL && string != nil && string.length > 0;
+    }
+    return YES;
 }
 
 - (void)keyUp:(NSEvent *)event {

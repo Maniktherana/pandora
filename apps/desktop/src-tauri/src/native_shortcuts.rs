@@ -20,6 +20,7 @@ mod key {
     pub const B: u32 = 11;
     pub const LEFT_BRACKET: u32 = 33;
     pub const RIGHT_BRACKET: u32 = 30;
+    pub const GRAVE: u32 = 50;
 }
 
 /// Called from `native_terminal_view.m` before delivering keys to Ghostty.
@@ -33,12 +34,20 @@ pub extern "C" fn pandora_try_emit_app_shortcut(
     ctrl: bool,
     alt: bool,
 ) -> u8 {
-    if ctrl || alt {
+    if alt {
         return 0;
     }
     let Some(app) = APP.get() else {
         return 0;
     };
+
+    if ctrl && !cmd {
+        if keycode == key::GRAVE {
+            let _ = app.emit("app-shortcut", "toggle-bottom-terminal");
+            return 1;
+        }
+        return 0;
+    }
 
     if cmd {
         use key::*;

@@ -1,7 +1,12 @@
-//! Workspace-scoped daemon bridge.
+//! Daemon bridge — one Bun `pandorad` process per **runtime** (Unix socket + child).
 //!
-//! Each workspace gets its own daemon process and Unix socket connection.
-//! The frontend sends/receives messages scoped by workspaceId.
+//! - **Workspace runtime** — key = workspace UUID; `workspace_path` is the worktree; used for
+//!   editor + workspace-scoped terminals.
+//! - **Project runtime** — key = `project:<project_id>`; `workspace_path` is the git root; one
+//!   shared shell per project (bottom panel). Same binary as the workspace daemon; a future
+//!   multiplexed single-process design can merge these without changing the frontend key scheme.
+//!
+//! Frontend `daemon_send` / events use the runtime id as `workspaceId` for routing.
 
 use crate::surface_registry::SurfaceRegistry;
 use base64::Engine;
@@ -38,12 +43,17 @@ impl DaemonState {
     }
 }
 
-fn socket_path_for_workspace(workspace_path: &str) -> String {
+/// Socket path must be unique per **runtime** (workspace UUID or `project:…`), not only `workspace_path`.
+/// Otherwise a linked workspace (worktree path == git root) spawns two daemons that fought over one
+/// socket and one `runtime.db`, causing `SQLITE_BUSY` and broken routing.
+fn socket_path_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
     let normalized = std::fs::canonicalize(workspace_path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| workspace_path.to_string());
     let mut hasher = Sha256::new();
     hasher.update(normalized.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(runtime_id.as_bytes());
     let hash = hex::encode(hasher.finalize());
     let prefix = &hash[..8];
     format!("/tmp/pandora-{}.sock", prefix)
@@ -96,10 +106,10 @@ pub async fn send_workspace_message(
     }
 }
 
-/// Launch a daemon process for a workspace and start reading from its socket.
-pub fn start_workspace_runtime(
+/// Launch a daemon for the given **runtime id** (workspace UUID or `project:<id>`).
+fn start_daemon_runtime(
     app: AppHandle,
-    workspace_id: String,
+    runtime_id: String,
     workspace_path: String,
     default_cwd: String,
 ) {
@@ -117,7 +127,7 @@ pub fn start_workspace_runtime(
 
         {
             let mut map = runtimes.lock().await;
-            map.insert(workspace_id.clone(), runtime.clone());
+            map.insert(runtime_id.clone(), runtime.clone());
         }
 
         // Resolve daemon directory
@@ -136,6 +146,7 @@ pub fn start_workspace_runtime(
                 .arg("src/index.ts")
                 .arg(&workspace_path)
                 .arg(&default_cwd)
+                .arg(&runtime_id)
                 .current_dir(&daemon_dir)
                 .env("PANDORA_PARENT_PID", pid.to_string())
                 .env("PANDORA_HOME", &pandora_home)
@@ -143,21 +154,21 @@ pub fn start_workspace_runtime(
             {
                 Ok(child) => {
                     eprintln!(
-                        "Daemon PID {:?} for workspace {}",
+                        "Daemon PID {:?} for runtime {}",
                         child.id(),
-                        workspace_id
+                        runtime_id
                     );
                     let mut rt = runtime.lock().await;
                     rt.daemon_process = Some(child);
                 }
                 Err(e) => {
-                    eprintln!("Failed to start daemon for {}: {}", workspace_id, e);
+                    eprintln!("Failed to start daemon for {}: {}", runtime_id, e);
                 }
             }
         }
 
         // Connect to socket
-        let socket_path = socket_path_for_workspace(&workspace_path);
+        let socket_path = socket_path_for_runtime(&workspace_path, &runtime_id);
 
         loop {
             // Wait for socket to appear
@@ -182,7 +193,7 @@ pub fn start_workspace_runtime(
             let _ = app.emit(
                 "daemon-connection",
                 serde_json::json!({
-                    "workspaceId": workspace_id,
+                    "workspaceId": runtime_id,
                     "state": "connected"
                 })
                 .to_string(),
@@ -199,7 +210,7 @@ pub fn start_workspace_runtime(
                             if let Some(obj) = parsed.as_object_mut() {
                                 obj.insert(
                                     "workspaceId".into(),
-                                    serde_json::Value::String(workspace_id.clone()),
+                                    serde_json::Value::String(runtime_id.clone()),
                                 );
                             }
                             serde_json::to_string(&parsed).unwrap_or(msg)
@@ -231,8 +242,8 @@ pub fn start_workspace_runtime(
                     }
                     Err(e) => {
                         eprintln!(
-                            "Daemon read error for workspace {}: {}",
-                            workspace_id, e
+                            "Daemon read error for runtime {}: {}",
+                            runtime_id, e
                         );
                         break;
                     }
@@ -248,16 +259,16 @@ pub fn start_workspace_runtime(
             let _ = app.emit(
                 "daemon-connection",
                 serde_json::json!({
-                    "workspaceId": workspace_id,
+                    "workspaceId": runtime_id,
                     "state": "disconnected"
                 })
                 .to_string(),
             );
 
-            // Check if runtime was removed (workspace deleted)
+            // Check if runtime was removed (workspace / project deleted)
             {
                 let map = runtimes.lock().await;
-                if !map.contains_key(&workspace_id) {
+                if !map.contains_key(&runtime_id) {
                     break;
                 }
             }
@@ -267,7 +278,28 @@ pub fn start_workspace_runtime(
     });
 }
 
-/// Stop a workspace runtime, killing its daemon process.
+/// Workspace-scoped daemon (worktree path + cwd).
+pub fn start_workspace_runtime(
+    app: AppHandle,
+    workspace_id: String,
+    workspace_path: String,
+    default_cwd: String,
+) {
+    start_daemon_runtime(app, workspace_id, workspace_path, default_cwd);
+}
+
+/// Project-scoped daemon: git root as daemon root, default cwd = repo root (shared bottom terminal).
+pub fn start_project_runtime(
+    app: AppHandle,
+    project_id: String,
+    git_root_path: String,
+    default_cwd: String,
+) {
+    let runtime_id = format!("project:{}", project_id);
+    start_daemon_runtime(app, runtime_id, git_root_path, default_cwd);
+}
+
+/// Stop a runtime (workspace id or `project:<id>`), killing its daemon process.
 pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
     let mut map = state.runtimes.lock().await;
     if let Some(runtime) = map.remove(workspace_id) {

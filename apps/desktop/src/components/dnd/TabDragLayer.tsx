@@ -28,6 +28,7 @@ import {
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { isProjectRuntimeKey } from "@/lib/runtime-keys";
 import { cn } from "@/lib/utils";
 import type { LayoutAxis } from "@/lib/types";
 import { findLeaf } from "@/lib/layout-migrate";
@@ -36,9 +37,15 @@ import { tabsEqual } from "@/lib/layout-tree";
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface DragState {
-  sourcePaneID: string;
-  sourceIndex: number;
+  kind: "pane-tab" | "bottom-terminal-group" | "bottom-terminal-slot";
   tabLabel: string;
+  sourcePaneID?: string;
+  sourceIndex?: number;
+  runtimeId?: string;
+  groupId?: string;
+  groupIndex?: number;
+  slotId?: string;
+  slotIndex?: number;
 }
 
 type DropZone = "center" | "left" | "right" | "top" | "bottom";
@@ -54,13 +61,58 @@ interface TabDropTarget {
   kind: "tab";
   paneID: string;
   insertIndex: number;
-  /** x position to draw the insertion line */
+  /** x position to draw the insertion line (horizontal tab bar) */
   lineX: number;
   /** rect of the tab bar for vertical positioning */
   barRect: DOMRect;
+  /** Bottom terminal sidebar: list is vertical; draw a horizontal insertion line */
+  tabBarVertical?: boolean;
+  /** y position for horizontal insertion line when tabBarVertical */
+  lineY?: number;
 }
 
-type DropTarget = PaneDropTarget | TabDropTarget;
+interface BottomTerminalGroupDropTarget {
+  kind: "bottom-terminal-group";
+  runtimeId: string;
+  groupId: string;
+  groupIndex: number;
+  rect: DOMRect;
+}
+
+interface BottomTerminalInsertDropTarget {
+  kind: "bottom-terminal-insert";
+  runtimeId: string;
+  insertIndex: number;
+  barRect: DOMRect;
+  lineY: number;
+}
+
+interface BottomTerminalSlotDropTarget {
+  kind: "bottom-terminal-slot";
+  runtimeId: string;
+  groupId: string;
+  groupIndex: number;
+  insertIndex: number;
+  barRect: DOMRect;
+  lineY: number;
+}
+
+interface BottomTerminalPaneDropTarget {
+  kind: "bottom-terminal-pane";
+  runtimeId: string;
+  groupId: string;
+  slotId: string;
+  zone: "center" | "left" | "right";
+  rect: DOMRect;
+}
+
+type DropTarget =
+  | PaneDropTarget
+  | TabDropTarget
+  | BottomTerminalGroupDropTarget
+  | BottomTerminalInsertDropTarget
+  | BottomTerminalSlotDropTarget
+  | BottomTerminalPaneDropTarget;
 
 interface TabDragContextValue {
   dragState: DragState | null;
@@ -97,34 +149,141 @@ function hitTestPanes(x: number, y: number): { paneID: string; rect: DOMRect; zo
   return null;
 }
 
+function unionRects(elements: HTMLElement[]): DOMRect {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const el of elements) {
+    const r = el.getBoundingClientRect();
+    left = Math.min(left, r.left);
+    top = Math.min(top, r.top);
+    right = Math.max(right, r.right);
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function hitTestBottomTerminalSidebar(
+  x: number,
+  y: number,
+  dragState: DragState
+): BottomTerminalGroupDropTarget | BottomTerminalInsertDropTarget | BottomTerminalSlotDropTarget | null {
+  const groupRows = [
+    ...document.querySelectorAll<HTMLElement>("[data-bottom-terminal-group-block='true']"),
+  ].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+
+  if (groupRows.length === 0) return null;
+
+  const sidebar = document.querySelector<HTMLElement>("[data-bottom-terminal-sidebar='true']");
+  const barRect = sidebar?.getBoundingClientRect() ?? unionRects(groupRows);
+  const pad = 8;
+  if (x < barRect.left - pad || x > barRect.right + pad || y < barRect.top - pad || y > barRect.bottom + pad) {
+    return null;
+  }
+
+  if (dragState.kind === "bottom-terminal-slot") {
+    const slotRows = [
+      ...document.querySelectorAll<HTMLElement>("[data-bottom-terminal-slot-index]"),
+    ];
+    for (const slotRow of slotRows) {
+      const rect = slotRow.getBoundingClientRect();
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+      const midY = rect.top + rect.height / 2;
+      return {
+        kind: "bottom-terminal-slot",
+        runtimeId: slotRow.dataset.bottomTerminalRuntimeId!,
+        groupId: slotRow.dataset.bottomTerminalGroupId!,
+        groupIndex: Number.parseInt(slotRow.dataset.bottomTerminalGroupIndex ?? "0", 10),
+        insertIndex: Number.parseInt(slotRow.dataset.bottomTerminalSlotIndex ?? "0", 10) + (y >= midY ? 1 : 0),
+        barRect,
+        lineY: y >= midY ? rect.bottom : rect.top,
+      };
+    }
+
+    for (const groupRow of groupRows) {
+      const rect = groupRow.getBoundingClientRect();
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+    }
+  }
+
+  for (const groupRow of groupRows) {
+    const rect = groupRow.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (y < midY) {
+      return {
+        kind: "bottom-terminal-insert",
+        runtimeId: groupRow.dataset.bottomTerminalRuntimeId!,
+        insertIndex: Number.parseInt(groupRow.dataset.bottomTerminalGroupIndex ?? "0", 10),
+        barRect,
+        lineY: rect.top,
+      };
+    }
+  }
+
+  const last = groupRows[groupRows.length - 1];
+  const lastRect = last.getBoundingClientRect();
+  return {
+    kind: "bottom-terminal-insert",
+    runtimeId: last.dataset.bottomTerminalRuntimeId!,
+    insertIndex: Number.parseInt(last.dataset.bottomTerminalGroupIndex ?? "0", 10) + 1,
+    barRect,
+    lineY: lastRect.bottom,
+  };
+}
+
+function hitTestBottomTerminalPanes(x: number, y: number): BottomTerminalPaneDropTarget | null {
+  const panes = document.querySelectorAll<HTMLElement>("[data-bottom-terminal-pane-id]");
+  for (const pane of panes) {
+    const rect = pane.getBoundingClientRect();
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+    const rx = (x - rect.left) / rect.width;
+    let zone: "center" | "left" | "right" = "center";
+    if (rx < 0.25) zone = "left";
+    else if (rx > 0.75) zone = "right";
+    return {
+      kind: "bottom-terminal-pane",
+      runtimeId: pane.dataset.bottomTerminalRuntimeId!,
+      groupId: pane.dataset.bottomTerminalGroupId!,
+      slotId: pane.dataset.bottomTerminalPaneId!,
+      zone,
+      rect,
+    };
+  }
+  return null;
+}
+
 function hitTestTabs(x: number, y: number): TabDropTarget | null {
   const tabs = document.querySelectorAll<HTMLElement>("[data-tab-pane][data-tab-index]");
   if (tabs.length === 0) return null;
 
-  // Group tabs by pane
+  // Group tabs by pane (exclude vertical sidebar — already handled)
   const byPane = new Map<string, HTMLElement[]>();
   for (const tab of tabs) {
+    if (tab.dataset.terminalSidebar === "true") continue;
     const paneID = tab.dataset.tabPane!;
     if (!byPane.has(paneID)) byPane.set(paneID, []);
     byPane.get(paneID)!.push(tab);
   }
 
   for (const [paneID, paneTabs] of byPane) {
-    // Check if cursor is in the tab bar vertical band (any tab's top/bottom)
-    const firstRect = paneTabs[0].getBoundingClientRect();
-    if (y < firstRect.top || y > firstRect.bottom) continue;
+    // Sort left-to-right for stable first/last rects
+    const sorted = [...paneTabs].sort(
+      (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left
+    );
+    const firstRect = sorted[0].getBoundingClientRect();
+    const lastRect = sorted[sorted.length - 1].getBoundingClientRect();
+    const barTop = Math.min(...sorted.map((t) => t.getBoundingClientRect().top));
+    const barBottom = Math.max(...sorted.map((t) => t.getBoundingClientRect().bottom));
+    if (y < barTop || y > barBottom) continue;
 
-    // Check if cursor is horizontally within or near the tab bar
-    const lastRect = paneTabs[paneTabs.length - 1].getBoundingClientRect();
-    // Allow dropping past the last tab
     const barLeft = firstRect.left;
-    const barRight = lastRect.right + 60; // extend a bit past last tab
+    const barRight = lastRect.right + 60;
 
     if (x < barLeft || x > barRight) continue;
 
-    // Find insertion point
-    for (let i = 0; i < paneTabs.length; i++) {
-      const rect = paneTabs[i].getBoundingClientRect();
+    for (let i = 0; i < sorted.length; i++) {
+      const rect = sorted[i].getBoundingClientRect();
       const midX = rect.left + rect.width / 2;
       if (x < midX) {
         return {
@@ -132,18 +291,17 @@ function hitTestTabs(x: number, y: number): TabDropTarget | null {
           paneID,
           insertIndex: i,
           lineX: rect.left,
-          barRect: firstRect,
+          barRect: new DOMRect(barLeft, barTop, barRight - barLeft, barBottom - barTop),
         };
       }
     }
 
-    // Past all tabs — insert at end
     return {
       kind: "tab",
       paneID,
-      insertIndex: paneTabs.length,
+      insertIndex: sorted.length,
       lineX: lastRect.right,
-      barRect: firstRect,
+      barRect: new DOMRect(barLeft, barTop, barRight - barLeft, barBottom - barTop),
     };
   }
 
@@ -162,11 +320,44 @@ function TabDragOverlay({
   const [cursor, setCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [target, setTarget] = useState<DropTarget | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
-  const { splitPane, addTabToPane, reorderTab, moveTab } = useWorkspaceStore();
+  const {
+    splitPane,
+    addTabToPane,
+    reorderTab,
+    moveTab,
+    moveProjectTerminalToGroup,
+    moveProjectTerminalToNewGroup,
+    selectProjectTerminalGroup,
+    focusProjectTerminal,
+    reorderProjectTerminalGroupChildren,
+    reorderProjectTerminalGroups,
+  } = useWorkspaceStore();
 
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
       setCursor({ x: e.clientX, y: e.clientY });
+
+      if (dragState.kind !== "pane-tab") {
+        const bottomPaneHit = hitTestBottomTerminalPanes(e.clientX, e.clientY);
+        if (bottomPaneHit) {
+          targetRef.current = bottomPaneHit;
+          setTarget(bottomPaneHit);
+          return;
+        }
+      }
+
+      const bottomSidebarHit = hitTestBottomTerminalSidebar(e.clientX, e.clientY, dragState);
+      if (bottomSidebarHit) {
+        targetRef.current = bottomSidebarHit;
+        setTarget(bottomSidebarHit);
+        return;
+      }
+
+      if (dragState.kind !== "pane-tab") {
+        targetRef.current = null;
+        setTarget(null);
+        return;
+      }
 
       // Tab bar hit test takes priority over pane hit test
       const tabHit = hitTestTabs(e.clientX, e.clientY);
@@ -201,29 +392,117 @@ function TabDragOverlay({
     }
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
-      const runtime = useWorkspaceStore.getState().activeRuntime();
-      if (!runtime?.root) return;
+      const st = useWorkspaceStore.getState();
+      const rid = st.effectiveLayoutRuntimeId();
+      const runtime = rid ? st.runtimes[rid] : null;
+      const terminalPanel = drag.runtimeId ? st.runtimes[drag.runtimeId]?.terminalPanel : null;
+
+      if (drag.kind === "bottom-terminal-group") {
+        if (tgt.kind === "bottom-terminal-pane" && drag.runtimeId === tgt.runtimeId) {
+          if (tgt.zone === "center") {
+            selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, null);
+          } else {
+            const toIndex = terminalPanel?.groups.findIndex((group) => group.id === tgt.groupId) ?? -1;
+            const fromIndex = drag.groupIndex ?? -1;
+            if (toIndex >= 0 && fromIndex >= 0) {
+              const insertIndex = tgt.zone === "left" ? toIndex : toIndex + 1;
+              reorderProjectTerminalGroups(
+                tgt.runtimeId,
+                fromIndex,
+                fromIndex < insertIndex ? insertIndex - 1 : insertIndex
+              );
+            }
+          }
+          return;
+        }
+        if (tgt.kind !== "bottom-terminal-insert" || drag.runtimeId !== tgt.runtimeId) return;
+        const fromIndex = drag.groupIndex ?? -1;
+        let toIndex = tgt.insertIndex;
+        if (fromIndex < toIndex) toIndex -= 1;
+        if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+          reorderProjectTerminalGroups(tgt.runtimeId, fromIndex, toIndex);
+        }
+        return;
+      }
+
+      if (drag.kind === "bottom-terminal-slot") {
+        if (!drag.runtimeId || !drag.slotId || !terminalPanel) return;
+        if (tgt.kind === "bottom-terminal-pane" && tgt.runtimeId === drag.runtimeId) {
+          if (tgt.zone === "center") {
+            selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, drag.slotId);
+            return;
+          }
+          const targetGroup = terminalPanel.groups.find((group) => group.id === tgt.groupId);
+          const targetSlotIndex = targetGroup?.children.indexOf(tgt.slotId) ?? -1;
+          if (targetSlotIndex < 0) return;
+          const insertIndex = tgt.zone === "left" ? targetSlotIndex : targetSlotIndex + 1;
+          if (drag.groupId === tgt.groupId) {
+            const fromIndex = drag.slotIndex ?? -1;
+            let toIndex = insertIndex;
+            if (fromIndex < toIndex) toIndex -= 1;
+            if (fromIndex !== toIndex && fromIndex >= 0) {
+              reorderProjectTerminalGroupChildren(tgt.runtimeId, tgt.groupId, fromIndex, toIndex);
+            }
+          } else {
+            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId, insertIndex);
+          }
+          selectProjectTerminalGroup(tgt.runtimeId, tgt.groupId, drag.slotId);
+          return;
+        }
+        if (tgt.kind === "bottom-terminal-slot" && tgt.runtimeId === drag.runtimeId) {
+          const fromIndex = drag.slotIndex ?? -1;
+          let toIndex = tgt.insertIndex;
+          if (drag.groupId === tgt.groupId && fromIndex < toIndex) {
+            toIndex -= 1;
+          }
+          if (drag.groupId === tgt.groupId && fromIndex >= 0 && fromIndex !== toIndex) {
+            reorderProjectTerminalGroupChildren(tgt.runtimeId, tgt.groupId, fromIndex, toIndex);
+          } else if (drag.groupId !== tgt.groupId) {
+            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId, tgt.insertIndex);
+          }
+          return;
+        }
+
+        if (tgt.kind === "bottom-terminal-group" && tgt.runtimeId === drag.runtimeId) {
+          if (drag.groupId !== tgt.groupId) {
+            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId);
+          }
+          return;
+        }
+
+        if (tgt.kind === "bottom-terminal-insert" && tgt.runtimeId === drag.runtimeId) {
+          let insertIndex = tgt.insertIndex;
+          const sourceGroup = terminalPanel.groups[drag.groupIndex ?? -1];
+          if (sourceGroup && sourceGroup.children.length === 1 && (drag.groupIndex ?? -1) < insertIndex) {
+            insertIndex -= 1;
+          }
+          moveProjectTerminalToNewGroup(tgt.runtimeId, drag.slotId, insertIndex);
+        }
+        return;
+      }
+
+      if (!runtime?.root || drag.kind !== "pane-tab") return;
 
       if (tgt.kind === "tab") {
         if (tgt.paneID === drag.sourcePaneID) {
-          const fromIndex = drag.sourceIndex;
+          const fromIndex = drag.sourceIndex ?? -1;
           let toIndex = tgt.insertIndex;
           if (fromIndex < toIndex) toIndex--;
           if (fromIndex !== toIndex) {
             reorderTab(tgt.paneID, fromIndex, toIndex);
           }
         } else {
-          moveTab(drag.sourcePaneID, tgt.paneID, drag.sourceIndex, tgt.insertIndex);
+          moveTab(drag.sourcePaneID!, tgt.paneID, drag.sourceIndex!, tgt.insertIndex);
         }
       } else {
         const { zone, paneID } = tgt;
         if (zone === "center") {
           const leaf = findLeaf(runtime.root, paneID);
-          const srcLeaf = findLeaf(runtime.root, drag.sourcePaneID);
-          const moving = srcLeaf?.tabs[drag.sourceIndex];
+          const srcLeaf = findLeaf(runtime.root, drag.sourcePaneID!);
+          const moving = srcLeaf?.tabs[drag.sourceIndex!];
           if (!moving) return;
           if (leaf?.tabs.some((t) => tabsEqual(t, moving))) return;
-          addTabToPane(paneID, drag.sourcePaneID, drag.sourceIndex);
+          addTabToPane(paneID, drag.sourcePaneID!, drag.sourceIndex!);
         } else {
           if (drag.sourcePaneID === paneID) {
             const leaf = findLeaf(runtime.root, paneID);
@@ -241,7 +520,13 @@ function TabDragOverlay({
             top: "before",
             bottom: "after",
           };
-          splitPane(paneID, drag.sourcePaneID, drag.sourceIndex, axisMap[zone], posMap[zone]);
+          let axis: LayoutAxis = axisMap[zone];
+          let position: "before" | "after" = posMap[zone];
+          if (rid && isProjectRuntimeKey(rid) && (zone === "top" || zone === "bottom")) {
+            axis = "horizontal";
+            position = zone === "top" ? "before" : "after";
+          }
+          splitPane(paneID, drag.sourcePaneID!, drag.sourceIndex!, axis, position);
         }
       }
     }
@@ -254,7 +539,20 @@ function TabDragOverlay({
     };
   // target is intentionally read from closure at pointerup time
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragState, onDone, splitPane, addTabToPane, reorderTab, moveTab]);
+  }, [
+    dragState,
+    onDone,
+    splitPane,
+    addTabToPane,
+    reorderTab,
+    moveTab,
+    moveProjectTerminalToGroup,
+    moveProjectTerminalToNewGroup,
+    selectProjectTerminalGroup,
+    focusProjectTerminal,
+    reorderProjectTerminalGroupChildren,
+    reorderProjectTerminalGroups,
+  ]);
 
   return createPortal(
     <div
@@ -297,7 +595,54 @@ function TabDragOverlay({
       )}
 
       {/* Tab insertion indicator line */}
-      {target?.kind === "tab" && (
+      {target?.kind === "bottom-terminal-pane" ? (
+        <div
+          className="fixed pointer-events-none z-[10000]"
+          style={{
+            left: target.rect.left,
+            top: target.rect.top,
+            width: target.rect.width,
+            height: target.rect.height,
+          }}
+        >
+          <div
+            className={cn(
+              "absolute rounded border-2 border-blue-500/70 bg-blue-500/10",
+              target.zone === "center" && "inset-1",
+              target.zone === "left" && "left-1 top-1 bottom-1 w-[calc(50%-4px)]",
+              target.zone === "right" && "right-1 top-1 bottom-1 w-[calc(50%-4px)]"
+            )}
+          />
+        </div>
+      ) : target?.kind === "bottom-terminal-group" ? (
+        <div
+          className="fixed pointer-events-none z-[10000] rounded border-2 border-blue-500/70 bg-blue-500/10"
+          style={{
+            left: target.rect.left + 2,
+            top: target.rect.top + 2,
+            width: Math.max(0, target.rect.width - 4),
+            height: Math.max(0, target.rect.height - 4),
+          }}
+        />
+      ) : target?.kind === "bottom-terminal-slot" || target?.kind === "bottom-terminal-insert" ? (
+        <div
+          className="fixed pointer-events-none z-[10000] h-[3px] rounded-full bg-blue-500"
+          style={{
+            left: target.barRect.left + 6,
+            top: target.lineY - 1,
+            width: Math.max(0, target.barRect.width - 12),
+          }}
+        />
+      ) : target?.kind === "tab" && target.tabBarVertical ? (
+        <div
+          className="fixed pointer-events-none z-[10000] h-[3px] bg-blue-500 rounded-full"
+          style={{
+            left: target.barRect.left + 4,
+            top: (target.lineY ?? target.barRect.top) - 1,
+            width: Math.max(0, target.barRect.width - 8),
+          }}
+        />
+      ) : target?.kind === "tab" ? (
         <div
           className="fixed pointer-events-none z-[10000] w-[3px] bg-blue-500 rounded-full"
           style={{
@@ -306,7 +651,7 @@ function TabDragOverlay({
             height: target.barRect.height - 8,
           }}
         />
-      )}
+      ) : null}
     </div>,
     document.body
   );

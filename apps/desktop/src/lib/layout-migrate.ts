@@ -21,6 +21,11 @@ function migratePaneTab(t: unknown): PaneTab | null {
     const path = String(o.path ?? "");
     return path ? { kind: "editor", path } : null;
   }
+  if (k === "diff") {
+    const path = String(o.path ?? "");
+    const src = o.source === "staged" ? "staged" : "working";
+    return path ? { kind: "diff", path, source: src } : null;
+  }
   return null;
 }
 

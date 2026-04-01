@@ -37,8 +37,14 @@ function decodeEnv(raw: string | null): Record<string, string> {
   }
 }
 
-function defaultRuntimeDatabasePath(workspacePath: string): string {
-  return join(workspacePath, ".pandora", "runtime.db");
+function sanitizeRuntimeIdForFilename(runtimeId: string): string {
+  return runtimeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 96);
+}
+
+/** One DB file per daemon runtime (workspace id or `project:…`), so linked workspaces never share a DB. */
+function defaultRuntimeDatabasePath(workspacePath: string, runtimeId: string): string {
+  const safe = sanitizeRuntimeIdForFilename(runtimeId);
+  return join(workspacePath, ".pandora", `runtime-${safe}.db`);
 }
 
 function removeDatabaseFiles(dbPath: string): void {
@@ -58,16 +64,27 @@ function databaseUserVersion(db: Database): number {
   return row?.user_version ?? 0;
 }
 
-export function openDatabase(options?: { dbPath?: string; workspacePath?: string; defaultCwd?: string }): Database {
-  const dbPath = options?.dbPath ?? defaultRuntimeDatabasePath(options?.workspacePath ?? pandoraDirectory());
+export function openDatabase(options?: {
+  dbPath?: string;
+  workspacePath?: string;
+  defaultCwd?: string;
+  /** Distinct per Bun daemon (workspace UUID or `project:id`); required when `dbPath` is omitted. */
+  runtimeId?: string;
+}): Database {
+  const runtimeId = options?.runtimeId ?? "legacy";
+  const dbPath =
+    options?.dbPath ??
+    defaultRuntimeDatabasePath(options?.workspacePath ?? pandoraDirectory(), runtimeId);
   ensureDirectory(dirname(dbPath));
   resetLegacyGlobalDatabase();
   let db = new Database(dbPath);
+  db.exec("PRAGMA busy_timeout = 10000;");
   if (databaseUserVersion(db) < 2) {
     db.close();
     removeDatabaseFiles(dbPath);
     ensureDirectory(dirname(dbPath));
     db = new Database(dbPath);
+    db.exec("PRAGMA busy_timeout = 10000;");
   }
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(`

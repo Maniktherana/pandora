@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo } from "react";
-import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import Editor, { type OnMount } from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { languageFromRelativePath } from "@/lib/editor-language";
-import { terminalTheme } from "@/lib/theme";
-
-const EDITOR_BG = terminalTheme.background ?? "#121212";
+import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/monaco-pandora";
 
 const editorOptions = {
   minimap: { enabled: false },
@@ -20,41 +18,8 @@ const editorOptions = {
   renderValidationDecorations: "off" as const,
 };
 
-const noDiag = {
-  noSemanticValidation: true,
-  noSyntaxValidation: true,
-  noSuggestionDiagnostics: true,
-} as const;
-
-const beforeMount: BeforeMount = (monaco) => {
-  monaco.typescript.javascriptDefaults.setDiagnosticsOptions(noDiag);
-  monaco.typescript.typescriptDefaults.setDiagnosticsOptions(noDiag);
-
-  const jd = monaco.json.jsonDefaults;
-  jd.setDiagnosticsOptions({ validate: false });
-  jd.setModeConfiguration({ ...jd.modeConfiguration, diagnostics: false });
-
-  for (const d of [monaco.css.cssDefaults, monaco.css.scssDefaults, monaco.css.lessDefaults]) {
-    d.setModeConfiguration({ ...d.modeConfiguration, diagnostics: false });
-  }
-  for (const d of [monaco.html.htmlDefaults, monaco.html.handlebarDefaults, monaco.html.razorDefaults]) {
-    d.setModeConfiguration({ ...d.modeConfiguration, diagnostics: false });
-  }
-
-  monaco.editor.defineTheme("pandora-dark", {
-    base: "vs-dark",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editor.background": EDITOR_BG,
-      "minimap.background": EDITOR_BG,
-    },
-  });
-  monaco.editor.setTheme("pandora-dark");
-};
-
 const editorLoading = (
-  <div className="h-full w-full" style={{ backgroundColor: EDITOR_BG }} aria-hidden />
+  <div className="h-full w-full" style={{ backgroundColor: PANDORA_EDITOR_BG }} aria-hidden />
 );
 
 export default function PaneEditor({
@@ -93,6 +58,7 @@ export default function PaneEditor({
   }, [isActive, workspaceId, workspaceRoot, relativePath, mergeSaved]);
   const saveFile = useEditorStore((s) => s.saveFile);
   const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
 
   const language = useMemo(
     () => languageFromRelativePath(relativePath),
@@ -110,10 +76,11 @@ export default function PaneEditor({
       });
 
       editor.onDidFocusEditorWidget(() => {
+        setLayoutTargetRuntimeId(null);
         setNavigationArea("workspace");
       });
     },
-    [workspaceId, workspaceRoot, relativePath, saveFile, setNavigationArea]
+    [workspaceId, workspaceRoot, relativePath, saveFile, setNavigationArea, setLayoutTargetRuntimeId]
   );
 
   const onChange = useCallback(
@@ -130,7 +97,7 @@ export default function PaneEditor({
         style={{
           visibility: "hidden",
           pointerEvents: "none",
-          backgroundColor: EDITOR_BG,
+          backgroundColor: PANDORA_EDITOR_BG,
         }}
         aria-hidden
       />
@@ -140,7 +107,7 @@ export default function PaneEditor({
   return (
     <div
       className="absolute inset-0 min-h-0"
-      style={{ backgroundColor: EDITOR_BG }}
+      style={{ backgroundColor: PANDORA_EDITOR_BG }}
     >
       <Editor
         height="100%"
@@ -149,7 +116,7 @@ export default function PaneEditor({
         value={buffer}
         theme="pandora-dark"
         loading={editorLoading}
-        beforeMount={beforeMount}
+        beforeMount={pandoraMonacoBeforeMount}
         onChange={onChange}
         onMount={handleMount}
         options={editorOptions}

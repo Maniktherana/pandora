@@ -21,6 +21,7 @@ impl AppDatabase {
             conn: Mutex::new(conn),
         };
         db.create_schema()?;
+        db.migrate_schema()?;
         Ok(db)
     }
 
@@ -49,6 +50,7 @@ impl AppDatabase {
               git_worktree_slug TEXT NOT NULL,
               worktree_path TEXT NOT NULL,
               workspace_context_subpath TEXT,
+              workspace_kind TEXT NOT NULL DEFAULT 'worktree',
               status TEXT NOT NULL,
               failure_message TEXT,
               created_at TEXT NOT NULL,
@@ -71,6 +73,27 @@ impl AppDatabase {
             ",
         )
         .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Adds columns introduced after first app release (existing DBs keep old CREATE TABLE shape).
+    fn migrate_schema(&self) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT name FROM pragma_table_info('workspaces')")
+            .map_err(|e| e.to_string())?;
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        if !cols.iter().any(|c| c == "workspace_kind") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN workspace_kind TEXT NOT NULL DEFAULT 'worktree'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 
@@ -150,10 +173,10 @@ impl AppDatabase {
     pub fn load_workspaces(&self, project_id: Option<&str>) -> Vec<WorkspaceRecord> {
         let conn = self.conn.lock().unwrap();
         let sql = if project_id.is_some() {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, status, failure_message, created_at, updated_at, last_opened_at
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at
              FROM workspaces WHERE project_id = ?1 ORDER BY created_at ASC"
         } else {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, status, failure_message, created_at, updated_at, last_opened_at
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at
              FROM workspaces ORDER BY created_at ASC"
         };
 
@@ -163,7 +186,10 @@ impl AppDatabase {
         };
 
         let mapper = |row: &rusqlite::Row| {
-            let status_str: String = row.get(8)?;
+            let kind_str: String = row.get(8)?;
+            let workspace_kind =
+                WorkspaceKind::from_str(&kind_str).unwrap_or(WorkspaceKind::Worktree);
+            let status_str: String = row.get(9)?;
             let status =
                 WorkspaceStatus::from_str(&status_str).unwrap_or(WorkspaceStatus::Failed);
             Ok(WorkspaceRecord {
@@ -175,11 +201,12 @@ impl AppDatabase {
                 git_worktree_slug: row.get(5)?,
                 worktree_path: row.get(6)?,
                 workspace_context_subpath: row.get(7)?,
+                workspace_kind,
                 status,
-                failure_message: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-                last_opened_at: row.get(12)?,
+                failure_message: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+                last_opened_at: row.get(13)?,
             })
         };
 
@@ -198,8 +225,8 @@ impl AppDatabase {
     pub fn upsert_workspace(&self, w: &WorkspaceRecord) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, status, failure_message, created_at, updated_at, last_opened_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                project_id = excluded.project_id,
                name = excluded.name,
@@ -208,6 +235,7 @@ impl AppDatabase {
                git_worktree_slug = excluded.git_worktree_slug,
                worktree_path = excluded.worktree_path,
                workspace_context_subpath = excluded.workspace_context_subpath,
+               workspace_kind = excluded.workspace_kind,
                status = excluded.status,
                failure_message = excluded.failure_message,
                updated_at = excluded.updated_at,
@@ -221,6 +249,7 @@ impl AppDatabase {
                 w.git_worktree_slug,
                 w.worktree_path,
                 w.workspace_context_subpath,
+                w.workspace_kind.as_str(),
                 w.status.as_str(),
                 w.failure_message,
                 w.created_at,

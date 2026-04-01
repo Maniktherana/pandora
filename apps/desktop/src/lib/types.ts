@@ -83,6 +83,9 @@ export type DaemonMessage =
 
 export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting";
 
+/** `worktree`: isolated checkout under ~/.pandora/workspaces. `linked`: project git root working copy. */
+export type WorkspaceKind = "linked" | "worktree";
+
 export interface ProjectRecord {
   id: string;
   displayPath: string;
@@ -104,6 +107,7 @@ export interface WorkspaceRecord {
   gitWorktreeSlug: string;
   worktreePath: string;
   workspaceContextSubpath: string | null;
+  workspaceKind: WorkspaceKind;
   status: WorkspaceStatus;
   failureMessage: string | null;
   createdAt: string;
@@ -115,10 +119,13 @@ export interface WorkspaceRecord {
 
 export type LayoutAxis = "horizontal" | "vertical";
 
-/** One tab in a pane: native terminal (daemon slot) or editor file (path relative to workspace root). */
+/** One tab in a pane: native terminal (daemon slot), editor file, or git diff (path relative to workspace root). */
+export type DiffSource = "working" | "staged";
+
 export type PaneTab =
   | { kind: "terminal"; slotId: string }
-  | { kind: "editor"; path: string };
+  | { kind: "editor"; path: string }
+  | { kind: "diff"; path: string; source: DiffSource };
 
 export interface LayoutLeaf {
   type: "leaf";
@@ -142,6 +149,20 @@ export interface PersistedWorkspaceLayout {
   focusedPaneID: string | null;
 }
 
+// ─── Bottom terminal panel types (project runtime only) ───
+
+export interface TerminalPanelGroup {
+  id: string;
+  children: string[];
+}
+
+export interface TerminalPanelState {
+  groups: TerminalPanelGroup[];
+  activeGroupIndex: number;
+  activeSlotId: string | null;
+  visible: boolean;
+}
+
 // ─── App state from backend ───
 
 export interface AppState {
@@ -160,4 +181,5 @@ export interface WorkspaceRuntimeState {
   connectionState: "disconnected" | "connecting" | "connected";
   root: LayoutNode | null;
   focusedPaneID: string | null;
+  terminalPanel: TerminalPanelState | null;
 }
