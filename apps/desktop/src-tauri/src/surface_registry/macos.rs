@@ -17,8 +17,11 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::CString;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use std::time::Instant;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::time::Duration;
 
 unsafe extern "C" {
     fn pandora_terminal_view_new(x: f64, y: f64, width: f64, height: f64) -> *mut c_void;
@@ -59,14 +62,21 @@ struct RegistryInner {
     pending_output: HashMap<String, Vec<Vec<u8>>>,
 }
 
+/// Per-surface output mailbox. Kept in a separate map from `RegistryInner` so that
+/// the hot `feed_output` path (called from the daemon read loop) never contends with
+/// surface lifecycle operations (create / update / focus / destroy).
+struct OutputMailbox {
+    queue: Mutex<Vec<Vec<u8>>>,
+    flush_scheduled: AtomicBool,
+}
+
 struct NativeSurface {
     session_id: String,
     ghostty_surface: ghostty_surface_t,
     ns_view: Retained<NSView>,
     _callback_ctx: Arc<SurfaceCallbackContext>,
     callback_ctx_raw: *const SurfaceCallbackContext,
-    output_queue: Vec<Vec<u8>>,
-    flush_scheduled: bool,
+    mailbox: Arc<OutputMailbox>,
     rect: SurfaceRect,
     visible: bool,
     focused: bool,
@@ -151,6 +161,12 @@ fn surface_state_unchanged(
 
 pub struct SurfaceRegistry {
     inner: Mutex<RegistryInner>,
+    /// Per-surface output mailboxes keyed by surface_id. Separate from `inner` so
+    /// `feed_output` (daemon read loop) never contends with surface lifecycle ops.
+    mailboxes: Mutex<HashMap<String, Arc<OutputMailbox>>>,
+    /// session_id → surface_id fast lookup for the output path.
+    /// Guarded separately so output routing doesn't touch `inner` at all.
+    output_routes: Mutex<HashMap<String, String>>,
     /// NSWindow pointer (the main Tauri window)
     window_ptr: Mutex<Option<*mut c_void>>,
     /// Refcount: while > 0, terminal NSViews stay hidden so web UI (tab drag, pane resize) receives input.
@@ -162,8 +178,11 @@ pub struct SurfaceRegistry {
 unsafe impl Send for SurfaceRegistry {}
 unsafe impl Sync for SurfaceRegistry {}
 
-const FLUSH_BATCH_CHUNK_LIMIT: usize = 64;
-const FLUSH_BATCH_BYTE_LIMIT: usize = 256 * 1024;
+const FLUSH_BATCH_CHUNK_LIMIT: usize = 128;
+const FLUSH_BATCH_BYTE_LIMIT: usize = 512 * 1024;
+/// Delay before rescheduling the next flush when data remains. Prevents the main
+/// thread from being monopolised by back-to-back flush callbacks during heavy output.
+const FLUSH_RESCHEDULE_DELAY_MS: u64 = 4;
 
 impl SurfaceRegistry {
     /// Create an empty registry.
@@ -174,6 +193,8 @@ impl SurfaceRegistry {
                 session_map: HashMap::new(),
                 pending_output: HashMap::new(),
             }),
+            mailboxes: Mutex::new(HashMap::new()),
+            output_routes: Mutex::new(HashMap::new()),
             window_ptr: Mutex::new(None),
             web_overlay_depth: Mutex::new(0),
         }
@@ -204,38 +225,69 @@ impl SurfaceRegistry {
         inner.pending_output.remove(session_id).unwrap_or_default()
     }
 
+    /// Schedule an immediate flush on a background thread.
+    ///
+    /// `ghostty_surface_write_buffer` does NOT need the main thread — in standalone
+    /// ghostty the IO thread calls into the terminal parser. Dispatching via
+    /// `run_on_main_thread` was causing the main thread to block on an internal
+    /// ghostty futex, freezing the entire UI (beachball).
     fn schedule_surface_flush(
         self: &Arc<Self>,
         app_handle: &AppHandle,
         surface_id: &str,
     ) -> Result<(), String> {
         let registry = Arc::clone(self);
-        let dispatch_handle = app_handle.clone();
         let flush_handle = app_handle.clone();
         let surface_id = surface_id.to_string();
-        dispatch_handle
-            .run_on_main_thread(move || {
+        tauri::async_runtime::spawn_blocking(move || {
+            registry.flush_surface_output(&flush_handle, &surface_id);
+        });
+        Ok(())
+    }
+
+    /// Schedule a flush after a short delay. Used when data remains after a flush so
+    /// other work can proceed between batches.
+    fn schedule_surface_flush_delayed(self: &Arc<Self>, app_handle: &AppHandle, surface_id: &str) {
+        let registry = Arc::clone(self);
+        let flush_handle = app_handle.clone();
+        let surface_id = surface_id.to_string();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(FLUSH_RESCHEDULE_DELAY_MS)).await;
+            tokio::task::spawn_blocking(move || {
                 registry.flush_surface_output(&flush_handle, &surface_id);
-            })
-            .map_err(|err| err.to_string())
+            });
+        });
     }
 
     fn flush_surface_output(self: &Arc<Self>, app_handle: &AppHandle, surface_id: &str) {
-        let (ghostty_surface, queued_chunks, has_more) = {
-            let mut inner = self.inner.lock().unwrap();
-            let surface = match inner.surfaces.get_mut(surface_id) {
-                Some(surface) => surface,
-                None => return,
-            };
+        let t0 = Instant::now();
 
-            if surface.output_queue.is_empty() {
-                surface.flush_scheduled = false;
+        // Get the mailbox and ghostty surface without holding inner for long.
+        let (ghostty_surface, mailbox) = {
+            let inner = self.inner.lock().unwrap();
+            let surface = match inner.surfaces.get(surface_id) {
+                Some(s) => s,
+                None => {
+                    tlog!("FLUSH", "surface={} NOT FOUND, bail", surface_id);
+                    return;
+                }
+            };
+            (surface.ghostty_surface, Arc::clone(&surface.mailbox))
+        };
+        let t_lock = t0.elapsed().as_micros();
+
+        // Drain a batch from the mailbox (separate lock from inner).
+        let (merged, has_more, chunk_count, remaining) = {
+            let mut queue = mailbox.queue.lock().unwrap();
+            if queue.is_empty() {
+                mailbox.flush_scheduled.store(false, Ordering::Release);
+                tlog!("FLUSH", "surface={} empty queue, clearing flag", surface_id);
                 return;
             }
 
             let mut chunk_count = 0usize;
             let mut byte_count = 0usize;
-            for chunk in &surface.output_queue {
+            for chunk in queue.iter() {
                 if chunk_count >= FLUSH_BATCH_CHUNK_LIMIT {
                     break;
                 }
@@ -250,34 +302,34 @@ impl SurfaceRegistry {
             }
 
             let chunk_count = chunk_count.max(1);
-            let queued_chunks = surface
-                .output_queue
-                .drain(..chunk_count)
-                .collect::<Vec<_>>();
-            let has_more = !surface.output_queue.is_empty();
+
+            let mut merged = Vec::with_capacity(byte_count);
+            for chunk in queue.drain(..chunk_count) {
+                merged.extend_from_slice(&chunk);
+            }
+            let remaining = queue.len();
+            let has_more = remaining > 0;
             if !has_more {
-                surface.flush_scheduled = false;
+                mailbox.flush_scheduled.store(false, Ordering::Release);
             }
 
-            (surface.ghostty_surface, queued_chunks, has_more)
+            (merged, has_more, chunk_count, remaining)
         };
+        let t_drain = t0.elapsed().as_micros();
 
-        for chunk in queued_chunks {
+        if !merged.is_empty() {
             unsafe {
-                ghostty_surface_write_buffer(ghostty_surface, chunk.as_ptr(), chunk.len());
+                ghostty_surface_write_buffer(ghostty_surface, merged.as_ptr(), merged.len());
             }
         }
+        let t_write = t0.elapsed().as_micros();
+
+        tlog!("FLUSH", "surface={} chunks={} bytes={} remaining={} has_more={} lock={}µs drain={}µs write={}µs total={}µs",
+            surface_id, chunk_count, merged.len(), remaining, has_more,
+            t_lock, t_drain - t_lock, t_write - t_drain, t_write);
 
         if has_more {
-            if let Err(err) = self.schedule_surface_flush(app_handle, surface_id) {
-                eprintln!(
-                    "[surface_registry] failed to reschedule surface flush for {}: {}",
-                    surface_id, err
-                );
-                if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(surface_id) {
-                    surface.flush_scheduled = false;
-                }
-            }
+            self.schedule_surface_flush_delayed(app_handle, surface_id);
         }
     }
 
@@ -311,6 +363,10 @@ impl SurfaceRegistry {
         rect: SurfaceRect,
         app_handle: AppHandle,
     ) -> Result<(), String> {
+        let t0 = Instant::now();
+        tlog!("CREATE", "START surface={} session={} workspace={} rect=({:.0},{:.0} {:.0}x{:.0})",
+            surface_id, session_id, workspace_id, rect.x, rect.y, rect.width, rect.height);
+
         let app = ghostty_app::get_ghostty_app()
             .ok_or_else(|| "Ghostty app not initialized".to_string())?;
 
@@ -329,7 +385,7 @@ impl SurfaceRegistry {
 
             if let Some(old_id) = inner.session_map.get(&session_id).cloned() {
                 if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &old_id) {
-                    old_surfaces.push(native_surface);
+                    old_surfaces.push((old_id.clone(), native_surface));
                 } else {
                     inner.session_map.remove(&session_id);
                     inner.pending_output.remove(&session_id);
@@ -337,10 +393,19 @@ impl SurfaceRegistry {
             }
 
             if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &surface_id) {
-                old_surfaces.push(native_surface);
+                old_surfaces.push((surface_id.clone(), native_surface));
             }
         }
-        for native_surface in old_surfaces {
+        // Clean up mailboxes/routes for old surfaces.
+        if !old_surfaces.is_empty() {
+            let mut mboxes = self.mailboxes.lock().unwrap();
+            let mut routes = self.output_routes.lock().unwrap();
+            for (old_sid, ref ns) in &old_surfaces {
+                mboxes.remove(old_sid);
+                routes.remove(&ns.session_id);
+            }
+        }
+        for (_, native_surface) in old_surfaces {
             unsafe { Self::teardown_native_surface(native_surface) };
         }
 
@@ -428,14 +493,18 @@ impl SurfaceRegistry {
         unsafe { ghostty_surface_set_size(surface, width_px, height_px) };
 
         // --- Store in maps ---
+        let mailbox = Arc::new(OutputMailbox {
+            queue: Mutex::new(Vec::new()),
+            flush_scheduled: AtomicBool::new(false),
+        });
+
         let native_surface = NativeSurface {
             session_id: session_id.clone(),
             ghostty_surface: surface,
             ns_view,
             _callback_ctx: callback_ctx,
             callback_ctx_raw,
-            output_queue: Vec::new(),
-            flush_scheduled: false,
+            mailbox: Arc::clone(&mailbox),
             rect,
             visible: true,
             focused: false,
@@ -448,22 +517,39 @@ impl SurfaceRegistry {
             inner
                 .session_map
                 .insert(session_id.clone(), surface_id.clone());
+
+            // Drain any output that arrived before the surface existed.
             let pending_output = Self::flush_pending_locked(&mut inner, &session_id);
+            if !pending_output.is_empty() {
+                let mut queue = mailbox.queue.lock().unwrap();
+                queue.extend(pending_output);
+                mailbox.flush_scheduled.store(true, Ordering::Release);
+                should_flush_output = true;
+            }
+
             if let Some(s) = inner.surfaces.get_mut(&surface_id) {
-                if !pending_output.is_empty() {
-                    s.output_queue.extend(pending_output);
-                    s.flush_scheduled = true;
-                    should_flush_output = true;
-                }
                 s.ns_view.setHidden(suppress);
             }
         }
 
+        // Register output routing (separate from inner).
+        {
+            let mut routes = self.output_routes.lock().unwrap();
+            routes.insert(session_id.clone(), surface_id.clone());
+        }
+        {
+            let mut mboxes = self.mailboxes.lock().unwrap();
+            mboxes.insert(surface_id.clone(), mailbox);
+        }
+
         if should_flush_output {
+            tlog!("CREATE", "surface={} flushing pending output", surface_id);
             let registry = app_handle.state::<Arc<SurfaceRegistry>>().inner().clone();
             registry.flush_surface_output(&app_handle, &surface_id);
         }
 
+        tlog!("CREATE", "DONE surface={} session={} took={}µs",
+            surface_id, session_id, t0.elapsed().as_micros());
         Ok(())
     }
 
@@ -475,6 +561,8 @@ impl SurfaceRegistry {
         visible: bool,
         focused: bool,
     ) -> Result<(), String> {
+        let t0 = Instant::now();
+
         let window_ptr = {
             let guard = self.window_ptr.lock().unwrap();
             guard.ok_or_else(|| "NSWindow not set".to_string())?
@@ -486,7 +574,10 @@ impl SurfaceRegistry {
             let inner = self.inner.lock().unwrap();
             let surface = match inner.surfaces.get(surface_id) {
                 Some(surface) => surface,
-                None => return Ok(()),
+                None => {
+                    tlog!("UPDATE", "surface={} NOT FOUND", surface_id);
+                    return Ok(());
+                }
             };
             (
                 surface.ghostty_surface,
@@ -497,8 +588,6 @@ impl SurfaceRegistry {
             )
         };
 
-        // Re-apply content scale on every IPC tick so Ghostty catches up even when AppKit briefly
-        // reports an unchanged scale factor (stale `surface.rect` vs fresh `rect`).
         unsafe {
             ghostty_surface_set_content_scale(
                 ghostty_surface,
@@ -517,6 +606,11 @@ impl SurfaceRegistry {
         ) {
             if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(surface_id) {
                 surface.rect.scale_factor = rect.scale_factor;
+            }
+            // Only log if slow.
+            let elapsed = t0.elapsed().as_micros();
+            if elapsed > 1000 {
+                tlog!("UPDATE", "surface={} NO-OP (unchanged) took={}µs", surface_id, elapsed);
             }
             return Ok(());
         }
@@ -572,6 +666,11 @@ impl SurfaceRegistry {
             surface.focused = focused;
         }
 
+        tlog!("UPDATE", "surface={} vis={} foc={} suppress={} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
+            surface_id, visible, focused, suppress,
+            prev_rect.x, prev_rect.y, prev_rect.width, prev_rect.height, prev_rect.scale_factor,
+            t0.elapsed().as_micros());
+
         Ok(())
     }
 
@@ -579,6 +678,7 @@ impl SurfaceRegistry {
     pub fn begin_web_overlay(&self) {
         let mut d = self.web_overlay_depth.lock().unwrap();
         *d += 1;
+        tlog!("OVERLAY", "begin depth={}", *d);
         if *d != 1 {
             return;
         }
@@ -601,6 +701,7 @@ impl SurfaceRegistry {
     pub fn end_web_overlay(&self) {
         let mut d = self.web_overlay_depth.lock().unwrap();
         *d = d.saturating_sub(1);
+        tlog!("OVERLAY", "end depth={}", *d);
         if *d > 0 {
             return;
         }
@@ -626,72 +727,111 @@ impl SurfaceRegistry {
 
     /// Destroy a surface, freeing the ghostty surface and removing the NSView.
     pub fn destroy_surface(&self, surface_id: &str) -> Result<(), String> {
+        let t0 = Instant::now();
+        tlog!("DESTROY", "START surface={}", surface_id);
+
         let native_surface = {
             let mut inner = self.inner.lock().unwrap();
             Self::extract_surface_locked(&mut inner, surface_id)
                 .ok_or_else(|| format!("Surface not found: {surface_id}"))?
         };
 
+        let session_id = native_surface.session_id.clone();
+        // Clean up output routing.
+        {
+            let mut routes = self.output_routes.lock().unwrap();
+            routes.remove(&session_id);
+        }
+        self.mailboxes.lock().unwrap().remove(surface_id);
+
         unsafe { Self::teardown_native_surface(native_surface) };
 
+        tlog!("DESTROY", "DONE surface={} session={} took={}µs",
+            surface_id, session_id, t0.elapsed().as_micros());
         Ok(())
     }
 
     /// Feed terminal output data to a surface, identified by session ID.
     ///
-    /// Returns `true` if the surface was found and data was written.
+    /// This is the hot path — called from the daemon read loop for every output
+    /// chunk. It only touches `output_routes` and the per-surface `OutputMailbox`,
+    /// never the main `inner` mutex, so it cannot contend with surface lifecycle
+    /// operations running on the main thread.
+    ///
+    /// Returns `true` if the surface was found and data was queued.
     pub fn feed_output(
         self: &Arc<Self>,
         app_handle: &AppHandle,
         session_id: &str,
         data: &[u8],
     ) -> bool {
-        let (surface_id, should_schedule) = {
-            let mut inner = self.inner.lock().unwrap();
-            let surface_id = match inner.session_map.get(session_id).cloned() {
-                Some(id) => id,
+        let t0 = Instant::now();
+
+        // Fast path: look up surface_id and mailbox without touching inner.
+        let surface_id = {
+            let routes = self.output_routes.lock().unwrap();
+            match routes.get(session_id) {
+                Some(id) => id.clone(),
                 None => {
+                    drop(routes);
+                    let mut inner = self.inner.lock().unwrap();
                     inner
                         .pending_output
                         .entry(session_id.to_string())
                         .or_default()
                         .push(data.to_vec());
+                    tlog!("FEED", "session={} bytes={} → pending (no route) took={}µs",
+                        session_id, data.len(), t0.elapsed().as_micros());
                     return false;
                 }
-            };
-
-            match inner.surfaces.get_mut(&surface_id) {
-                Some(surface) => {
-                    surface.output_queue.push(data.to_vec());
-                    let should_schedule = if surface.flush_scheduled {
-                        false
-                    } else {
-                        surface.flush_scheduled = true;
-                        true
-                    };
-                    (surface_id, should_schedule)
-                }
+            }
+        };
+        let mailbox = {
+            let mboxes = self.mailboxes.lock().unwrap();
+            match mboxes.get(&surface_id) {
+                Some(mb) => Arc::clone(mb),
                 None => {
+                    drop(mboxes);
+                    let mut inner = self.inner.lock().unwrap();
                     inner
                         .pending_output
                         .entry(session_id.to_string())
                         .or_default()
                         .push(data.to_vec());
+                    tlog!("FEED", "session={} surface={} bytes={} → pending (no mailbox) took={}µs",
+                        session_id, surface_id, data.len(), t0.elapsed().as_micros());
                     return false;
                 }
             }
         };
 
-        if should_schedule {
+        let queue_len = {
+            let mut q = mailbox.queue.lock().unwrap();
+            q.push(data.to_vec());
+            q.len()
+        };
+
+        // Schedule a flush if one isn't already pending.
+        let scheduled = if !mailbox.flush_scheduled.swap(true, Ordering::AcqRel) {
             if let Err(err) = self.schedule_surface_flush(app_handle, &surface_id) {
                 eprintln!(
                     "[surface_registry] failed to schedule surface flush for {}: {}",
                     surface_id, err
                 );
-                if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(&surface_id) {
-                    surface.flush_scheduled = false;
-                }
+                mailbox.flush_scheduled.store(false, Ordering::Release);
+                false
+            } else {
+                true
             }
+        } else {
+            false
+        };
+
+        let elapsed = t0.elapsed().as_micros();
+        // Only log if slow (>500µs) or we scheduled a flush, to avoid flooding the log.
+        if scheduled || elapsed > 500 {
+            tlog!("FEED", "session={} surface={} bytes={} queue={} scheduled={} took={}µs",
+                session_id, surface_id, data.len(), queue_len, scheduled, elapsed);
         }
 
         true
@@ -699,9 +839,11 @@ impl SurfaceRegistry {
 
     /// Set focus on the given surface and unfocus all others.
     pub fn focus_surface(&self, surface_id: &str) -> Result<(), String> {
+        let t0 = Instant::now();
         let surfaces = {
             let inner = self.inner.lock().unwrap();
             if !inner.surfaces.contains_key(surface_id) {
+                tlog!("FOCUS", "surface={} NOT FOUND", surface_id);
                 return Ok(());
             }
             inner
@@ -718,9 +860,12 @@ impl SurfaceRegistry {
                 .collect::<Vec<_>>()
         };
 
+        let total = surfaces.len();
+        let mut changed = 0u32;
         for (id, ghostty_surface, ns_view_ptr, was_focused) in &surfaces {
             let should_focus = id == surface_id;
             if *was_focused != should_focus {
+                changed += 1;
                 unsafe {
                     ghostty_surface_set_focus(*ghostty_surface, should_focus);
                 }
@@ -737,6 +882,8 @@ impl SurfaceRegistry {
             }
         }
 
+        tlog!("FOCUS", "surface={} total_surfaces={} changed={} took={}µs",
+            surface_id, total, changed, t0.elapsed().as_micros());
         Ok(())
     }
 }
@@ -759,12 +906,31 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
     let session_id = ctx.session_id.clone();
     let workspace_id = ctx.workspace_id.clone();
     let app_handle = ctx.app_handle.clone();
+
+    // Log PTY input (user keystrokes / ghostty-generated input going to daemon).
+    if len <= 64 {
+        tlog!("PTY_IN", "session={} workspace={} bytes={} data={:?}",
+            session_id, workspace_id, len,
+            String::from_utf8_lossy(data));
+    } else {
+        tlog!("PTY_IN", "session={} workspace={} bytes={}",
+            session_id, workspace_id, len);
+    }
     let payload = serde_json::json!({
         "type": "input",
         "sessionID": session_id,
         "data": BASE64_STANDARD.encode(data),
     })
     .to_string();
+    let _ = app_handle.emit(
+        "native-terminal-input",
+        serde_json::json!({
+            "workspaceId": workspace_id,
+            "sessionId": ctx.session_id,
+            "data": BASE64_STANDARD.encode(data),
+        })
+        .to_string(),
+    );
     tauri::async_runtime::spawn(async move {
         let daemon_state = app_handle.state::<DaemonState>();
         if let Err(err) =
@@ -795,6 +961,9 @@ unsafe extern "C" fn receive_resize_callback(
     let session_id = ctx.session_id.clone();
     let workspace_id = ctx.workspace_id.clone();
     let app_handle = ctx.app_handle.clone();
+
+    tlog!("PTY_RESIZE", "session={} workspace={} cols={} rows={} px={}x{}",
+        session_id, workspace_id, cols, rows, _width_px, _height_px);
     let payload = serde_json::json!({
         "type": "resize",
         "sessionID": session_id,
