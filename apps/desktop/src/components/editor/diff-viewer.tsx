@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
-import type { DiffSource } from "@/lib/types";
-import { languageFromRelativePath } from "@/lib/editor-language";
-import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/monaco-pandora";
-import { readWorkspaceTextFile, scmReadGitBlob } from "@/lib/scm";
-import { cn } from "@/lib/utils";
+import { languageFromRelativePath } from "@/lib/editor/editor-language";
+import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
+import type { DiffSource } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
+import { readWorkspaceTextFile, scmReadGitBlob } from "@/lib/workspace/scm";
 import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 

@@ -32,7 +32,8 @@ pub fn terminal_surface_create(
     window
         .run_on_main_thread(move || {
             registry.set_window(ns_window as *mut _);
-            let _ = tx.send(registry.create_surface(surface_id, workspace_id, session_id, rect, app));
+            let _ =
+                tx.send(registry.create_surface(surface_id, workspace_id, session_id, rect, app));
         })
         .map_err(|e| e.to_string())?;
     rx.recv().map_err(|e| e.to_string())?
@@ -49,10 +50,11 @@ pub fn terminal_surface_update(
 ) -> Result<(), String> {
     let registry = registry.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    window.run_on_main_thread(move || {
-        let _ = tx.send(registry.update_surface(&surface_id, rect, visible, focused));
-    })
-    .map_err(|e| e.to_string())?;
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(registry.update_surface(&surface_id, rect, visible, focused));
+        })
+        .map_err(|e| e.to_string())?;
     rx.recv().map_err(|e| e.to_string())?
 }
 
@@ -64,10 +66,11 @@ pub fn terminal_surface_destroy(
 ) -> Result<(), String> {
     let registry = registry.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    window.run_on_main_thread(move || {
-        let _ = tx.send(registry.destroy_surface(&surface_id));
-    })
-    .map_err(|e| e.to_string())?;
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(registry.destroy_surface(&surface_id));
+        })
+        .map_err(|e| e.to_string())?;
     rx.recv().map_err(|e| e.to_string())?
 }
 
@@ -79,10 +82,11 @@ pub fn terminal_surface_focus(
 ) -> Result<(), String> {
     let registry = registry.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    window.run_on_main_thread(move || {
-        let _ = tx.send(registry.focus_surface(&surface_id));
-    })
-    .map_err(|e| e.to_string())?;
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(registry.focus_surface(&surface_id));
+        })
+        .map_err(|e| e.to_string())?;
     rx.recv().map_err(|e| e.to_string())?
 }
 

@@ -190,8 +190,7 @@ impl AppDatabase {
             let workspace_kind =
                 WorkspaceKind::from_str(&kind_str).unwrap_or(WorkspaceKind::Worktree);
             let status_str: String = row.get(9)?;
-            let status =
-                WorkspaceStatus::from_str(&status_str).unwrap_or(WorkspaceStatus::Failed);
+            let status = WorkspaceStatus::from_str(&status_str).unwrap_or(WorkspaceStatus::Failed);
             Ok(WorkspaceRecord {
                 id: row.get(0)?,
                 project_id: row.get(1)?,

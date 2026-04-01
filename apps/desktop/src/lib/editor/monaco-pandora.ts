@@ -1,5 +1,5 @@
 import type { BeforeMount, DiffBeforeMount } from "@monaco-editor/react";
-import { terminalTheme } from "@/lib/theme";
+import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 export const PANDORA_EDITOR_BG = terminalTheme.background ?? "#121212";
 

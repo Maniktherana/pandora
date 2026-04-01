@@ -12,8 +12,8 @@ import type {
   AppState,
   WorkspaceRuntimeState,
   TerminalPanelState,
-} from "../lib/types";
-import { migratePersistedLayout } from "../lib/layout-migrate";
+} from "@/lib/shared/types";
+import { migratePersistedLayout } from "@/lib/layout/layout-migrate";
 import {
   addTerminalTabToNode,
   createLeaf,
@@ -25,9 +25,9 @@ import {
   removeTabAtIndexInTree,
   removeTerminalSlotFromTree,
   splitPaneAroundTab,
-} from "../lib/layout-tree";
-import { isProjectRuntimeKey, projectRuntimeKey } from "../lib/runtime-keys";
-import { getTerminalDaemonClient } from "../lib/terminal-runtime";
+} from "@/lib/layout/layout-tree";
+import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import {
   addTerminalGroup,
   addTerminalToGroup,
@@ -41,7 +41,7 @@ import {
   setActiveTerminalSlot,
   setTerminalPanelVisible,
   terminalPanelContainsSlot,
-} from "../lib/bottom-terminal-panel";
+} from "@/lib/terminal/bottom-terminal-panel";
 
 export type NavigationArea = "sidebar" | "workspace";
 

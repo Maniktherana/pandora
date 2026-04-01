@@ -7,19 +7,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { PanelResizeHandle } from "react-resizable-panels";
-import TerminalSurface from "@/components/Terminal";
-import TabBar from "@/components/dnd/TabBar";
+import PaneTabBar from "@/components/dnd/pane-tab-bar";
+import DiffViewer from "@/components/editor/diff-viewer";
+import PaneEditor from "@/components/editor/pane-editor";
+import TerminalSurface from "@/components/terminal/terminal-surface";
+import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from "@/lib/types";
-import { terminalTheme } from "@/lib/theme";
-import { cn } from "@/lib/utils";
+import { tabKey } from "@/lib/layout/layout-tree";
+import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
+import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
-import PaneEditor from "@/components/PaneEditor";
-import DiffViewer from "@/components/DiffViewer";
-import { tabKey } from "@/lib/layout-tree";
-// ── Hoisted native terminals (stable React parent across split/merge layout moves) ──
 
 type TerminalAnchorInfo = {
   el: HTMLElement;
@@ -46,7 +45,6 @@ function PaneTerminalAnchorSlot({
   isFocused: boolean;
   workspaceId: string;
   leafId: string;
-  /** Which runtime receives layout shortcuts; `null` clears override (workspace). */
   layoutTargetOnFocus: string | null;
 }) {
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
@@ -97,15 +95,12 @@ function PaneTerminalAnchorSlot({
   );
 }
 
-// ── PaneView ───────────────────────────────────────────────────────────
-
 interface PaneViewProps {
   leaf: LayoutLeaf;
   isFocused: boolean;
   workspaceId: string;
   workspaceRoot: string;
   layoutTargetOnFocus: string | null;
-  /** Bottom panel: terminals use the right sidebar instead of a top tab bar */
   hideTabBar?: boolean;
   isResizing?: boolean;
 }
@@ -145,7 +140,7 @@ function PaneView({
       className="flex flex-col h-full overflow-hidden rounded-sm relative"
     >
       {!hideTabBar && (
-        <TabBar
+        <PaneTabBar
           paneID={leaf.id}
           tabs={leaf.tabs}
           selectedIndex={leaf.selectedIndex}
@@ -233,8 +228,6 @@ function PaneView({
     </div>
   );
 }
-
-// ── LayoutRenderer ─────────────────────────────────────────────────────
 
 interface LayoutRendererProps {
   node: LayoutNode;
@@ -395,8 +388,6 @@ export function WorkspaceRuntimeView({
   );
 }
 
-// ── EmptyWorkspaceState ────────────────────────────────────────────────
-
 function EmptyWorkspaceState() {
   const { selectedWorkspace, selectedProject } = useWorkspaceStore();
   const workspace = selectedWorkspace();
@@ -483,8 +474,6 @@ function WorkspaceRuntimeLoading({ message }: { message: string }) {
   );
 }
 
-// ── WorkspaceView ──────────────────────────────────────────────────────
-
 export default function WorkspaceView() {
   const selectedWorkspaceID = useWorkspaceStore((s) => s.selectedWorkspaceID);
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
@@ -498,8 +487,6 @@ export default function WorkspaceView() {
     return <EmptyWorkspaceState />;
   }
 
-  // Ready workspace but runtime not yet created (e.g. one frame after loadAppState before
-  // selectWorkspace), or layout root not ready until the daemon reports slots.
   if (!runtime?.root) {
     return (
       <WorkspaceRuntimeLoading message={runtime ? "Starting workspace…" : "Loading workspace…"} />

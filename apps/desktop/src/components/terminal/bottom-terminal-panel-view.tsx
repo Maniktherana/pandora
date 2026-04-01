@@ -9,12 +9,12 @@ import {
 } from "react";
 import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import TerminalSurface from "@/components/Terminal";
-import BottomTerminalSidebar from "@/components/BottomTerminalSidebar";
+import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar";
+import TerminalSurface from "@/components/terminal/terminal-surface";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { terminalTheme } from "@/lib/theme";
-import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
+import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 type TerminalAnchorInfo = {
   el: HTMLElement;

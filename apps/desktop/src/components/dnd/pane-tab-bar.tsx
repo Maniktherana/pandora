@@ -1,14 +1,14 @@
-import { cn } from "@/lib/utils";
+import { useCallback, useRef } from "react";
+import { GitCompare, X } from "lucide-react";
+import { FileTypeIcon } from "@/components/files/file-type-icon";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useEditorStore } from "@/stores/editor-store";
-import { getTerminalDaemonClient } from "@/lib/terminal-runtime";
-import { useRef, useCallback } from "react";
-import { useTabDrag } from "./TabDragLayer";
-import { GitCompare, X } from "lucide-react";
-import type { PaneTab } from "@/lib/types";
-import { tabKey } from "@/lib/layout-tree";
-import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
-import { FileTypeIcon } from "@/components/FileTypeIcon";
+import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
+import { tabKey } from "@/lib/layout/layout-tree";
+import type { PaneTab } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
+import { useTabDrag } from "./tab-drag-layer";
 
 interface TabBarProps {
   paneID: string;
@@ -85,7 +85,7 @@ function EditorTabCloseControl({
   );
 }
 
-export default function TabBar({
+export default function PaneTabBar({
   paneID,
   tabs,
   selectedIndex,

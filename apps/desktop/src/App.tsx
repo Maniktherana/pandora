@@ -4,33 +4,34 @@ import {
   ImperativePanelHandle,
   PanelResizeHandle,
 } from "react-resizable-panels";
-import Sidebar from "@/components/Sidebar";
-import WorkspaceView from "@/components/WorkspaceView";
-import WorkspaceFileTreePanel from "@/components/WorkspaceFileTreePanel";
-import BottomPanel from "@/components/BottomPanel";
-import { TabDragProvider } from "@/components/dnd/TabDragLayer";
+import Sidebar from "@/components/navigation/sidebar";
+import BottomPanel from "@/components/panels/bottom-panel";
+import WorkspaceFileTreePanel from "@/components/files/workspace-file-tree-panel";
+import { TabDragProvider } from "@/components/dnd/tab-drag-layer";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
+import WorkspaceView from "@/components/workspace/workspace-view";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { DaemonClient } from "@/lib/daemon-client";
-import { setTerminalDaemonClient } from "@/lib/terminal-runtime";
-import { cn } from "@/lib/utils";
-import { findLeaf } from "@/lib/layout-migrate";
-import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
-import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime-keys";
+import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
+import { findLeaf } from "@/lib/layout/layout-migrate";
+import { DaemonClient } from "@/lib/runtime/daemon-client";
+import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { cn } from "@/lib/shared/utils";
 import {
   seedProjectTerminal,
   seedWorkspaceTerminal,
-} from "@/lib/terminal-seed";
+} from "@/lib/terminal/terminal-seed";
+import { setTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import { FolderTree, PanelBottom, PanelLeft, Plus } from "lucide-react";
 import {
   loadPersistedSidebarVisible,
   persistSidebarVisible,
   loadFileTreeOpenForWorkspace,
   persistFileTreeOpenForWorkspace,
-} from "@/lib/ui-persistence";
+} from "@/lib/workspace/ui-persistence";
 
 export default function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarPersistHydrated, setSidebarPersistHydrated] = useState(false);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
@@ -60,10 +61,8 @@ export default function App() {
     void persistSidebarVisible(sidebarVisible);
   }, [sidebarVisible, sidebarPersistHydrated]);
 
-  // Load persisted app state on mount
   useEffect(() => {
     void store.getState().loadAppState().then(() => {
-      // After loading, auto-select and start runtime for the selected workspace
       const { selectedWorkspaceID, workspaces } = store.getState();
       if (selectedWorkspaceID) {
         const ws = workspaces.find((w) => w.id === selectedWorkspaceID);
@@ -74,7 +73,6 @@ export default function App() {
     });
   }, []);
 
-  // Initialize workspace-scoped daemon client
   useEffect(() => {
     const scheduleStoppedTerminalRemoval = (
       workspaceId: string,
@@ -120,7 +118,6 @@ export default function App() {
           }
           return;
         }
-        // Auto-open session instances for terminal slots that need them
         for (const slot of slots) {
           if (slot.kind === "terminal_slot" && slot.sessionIDs.length === 0 && slot.sessionDefIDs.length > 0) {
             client.openSessionInstance(workspaceId, slot.sessionDefIDs[0]);
@@ -197,6 +194,26 @@ export default function App() {
   handleNewTerminalShortcutRef.current = handleNewTerminalShortcut;
   const setSidebarVisibleRef = useRef(setSidebarVisible);
   setSidebarVisibleRef.current = setSidebarVisible;
+  const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.min(360, Math.max(180, startWidth + moveEvent.clientX - startX));
+      setSidebarWidth(nextWidth);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [sidebarWidth]);
 
   const toggleBottomPanel = useCallback(() => {
     const state = store.getState();
@@ -263,8 +280,6 @@ export default function App() {
     }
   }, []);
 
-  // Global keyboard shortcuts — use capture phase so app shortcuts fire
-  // before the terminal's InputHandler can consume/stopPropagation on them.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const {
@@ -291,7 +306,6 @@ export default function App() {
             }
             break;
           case "ArrowLeft":
-            // Only intercept for sidebar navigation, not when in workspace (terminal needs Cmd+Arrow)
             if (navigationArea === "sidebar") {
               e.preventDefault();
             }
@@ -321,12 +335,10 @@ export default function App() {
             setSidebarVisible((v) => !v);
             break;
           case "t":
-            // Cmd+T — new terminal (Cmd+Shift+T also works)
             e.preventDefault();
             handleNewTerminalShortcut();
             break;
           case "w":
-            // Cmd+W — close focused tab
             e.preventDefault();
             handleCloseFocusedTab();
             break;
@@ -382,8 +394,6 @@ export default function App() {
   );
   const connectionState = runtime?.connectionState ?? "disconnected";
 
-  // Restore per-workspace file-tree open state (right panel). Avoid resetting on first hydrate
-  // so launch does not flash closed-then-open.
   useEffect(() => {
     const id =
       selectedWs?.status === "ready" ? selectedWs.id : null;
@@ -412,8 +422,6 @@ export default function App() {
     };
   }, [selectedWs?.id, selectedWs?.status]);
 
-  // Keep WorkspaceView mounted: collapsing the file-tree panel instead of swapping trees avoids
-  // destroying native Ghostty surfaces (which caused a full flash on every toggle).
   useLayoutEffect(() => {
     const p = fileTreePanelRef.current;
     if (!p) return;
@@ -436,186 +444,190 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      {/* Sidebar — column stays transparent so native window translucency / vibrancy shows through */}
       {sidebarVisible && (
-        <div className="w-56 shrink-0 h-full bg-transparent">
-          <Sidebar onCollapse={() => setSidebarVisible(false)} />
-        </div>
+        <>
+          <div className="h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
+            <Sidebar onCollapse={() => setSidebarVisible(false)} />
+          </div>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            onPointerDown={handleSidebarResizeStart}
+            className="z-20 h-full w-[2px] min-w-[2px] max-w-[2px] shrink-0 cursor-col-resize bg-neutral-600 transition-colors hover:bg-blue-500"
+          />
+        </>
       )}
 
-      {/* Main content — opaque panel so workspace stays readable */}
-      <div className="flex-1 flex flex-col min-w-0 h-full bg-neutral-950/90">
-        {/* Top bar */}
-        <div className="h-10 flex items-center shrink-0 border-b border-neutral-800">
-          {!sidebarVisible && (
-            <button
-              onClick={() => setSidebarVisible(true)}
-              className="ml-20 p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
-            >
-              <PanelLeft className="w-4 h-4" />
-            </button>
-          )}
-          {selectedWs && (
-            <div className="flex items-center gap-2 ml-3" data-tauri-drag-region>
-              <span className="text-sm text-neutral-400" data-tauri-drag-region>
-                {selectedWs.name}
-              </span>
-              {selectedWs.status === "ready" && (
-                <button
-                  onClick={handleNewWorkspaceTerminal}
-                  className="p-1 rounded hover:bg-neutral-800 text-neutral-500 hover:text-neutral-300 transition-colors"
-                  title="New Terminal (Cmd+Shift+T)"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
-          {selectedWs?.status === "ready" && (
-            <div className="mr-3 flex shrink-0 items-center gap-1">
+      <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-950/90">
+          <div className="h-10 flex items-center shrink-0 border-b border-neutral-800">
+            {!sidebarVisible && (
               <button
-                type="button"
-                onClick={toggleBottomPanel}
-                className={cn(
-                  "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
-                  bottomPanelOpen && "bg-neutral-800 text-neutral-200"
-                )}
-                title="Toggle terminal panel (Ctrl+`)"
+                onClick={() => setSidebarVisible(true)}
+                className="ml-20 p-1.5 rounded-md hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
               >
-                <PanelBottom className="w-4 h-4" />
+                <PanelLeft className="w-4 h-4" />
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  fileTreeLoadTicketRef.current += 1;
-                  setFileTreeOpen((v) => {
-                    const next = !v;
-                    const ws = useWorkspaceStore.getState().selectedWorkspace();
-                    if (ws?.status === "ready") {
-                      void persistFileTreeOpenForWorkspace(ws.id, next);
-                    }
-                    return next;
-                  });
-                }}
-                className={cn(
-                  "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
-                  fileTreeOpen && "bg-neutral-800 text-neutral-200"
-                )}
-                title="Toggle file tree"
-              >
-                <FolderTree className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Workspace + optional bottom panel (TabDragProvider spans main + bottom terminals) */}
-        <div className="flex-1 min-h-0 flex flex-col">
-          <TabDragProvider>
-            <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
-              <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
-                <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-                  <ResizablePanel defaultSize={72} minSize={45}>
-                    <div
-                      className="h-full min-h-0 min-w-0"
-                      onPointerDownCapture={() =>
-                        useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
-                      }
-                    >
-                      <WorkspaceView />
-                    </div>
-                  </ResizablePanel>
-                  <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 0, fine: 0 }}
-                    className={cn(
-                      "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
-                      fileTreeOpen && selectedWs?.status === "ready"
-                        ? "cursor-col-resize"
-                        : "hidden"
-                    )}
-                  />
-                  <ResizablePanel
-                    ref={fileTreePanelRef}
-                    collapsible
-                    collapsedSize={0}
-                    defaultSize={28}
-                    minSize={12}
-                    maxSize={50}
-                    className="min-h-0 min-w-0"
-                  >
-                    <div
-                      className="h-full min-h-0 min-w-0"
-                      onPointerDownCapture={() =>
-                        useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
-                      }
-                    >
-                      {fileTreeOpen && selectedWs?.status === "ready" ? (
-                        <WorkspaceFileTreePanel
-                          key={selectedWs.id}
-                          workspaceRoot={selectedWs.worktreePath}
-                          workspaceId={selectedWs.id}
-                        />
-                      ) : null}
-                    </div>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              </ResizablePanel>
-              {selectedWs?.status === "ready" && (
-                <>
-                  <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 0, fine: 0 }}
-                    className={cn(
-                      "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
-                      bottomPanelOpen ? "cursor-row-resize" : "hidden"
-                    )}
-                  />
-                  <ResizablePanel
-                    ref={bottomPanelRef}
-                    collapsible
-                    collapsedSize={0}
-                    defaultSize={28}
-                    minSize={12}
-                    maxSize={55}
-                    className="min-h-0"
-                  >
-                    {bottomPanelOpen ? <BottomPanel /> : null}
-                  </ResizablePanel>
-                </>
-              )}
-            </ResizablePanelGroup>
-          </TabDragProvider>
-        </div>
-
-        {/* Status bar */}
-        <div className="h-6 flex items-center gap-3 px-3 border-t border-neutral-800 bg-neutral-900/50 text-[11px] text-neutral-500 shrink-0">
-          <div className="flex items-center min-w-0">
-            {selectedWs?.status === "ready" && (
-              <>
-                <div
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full mr-2 shrink-0",
-                    connectionState === "connected"
-                      ? "bg-green-500"
-                      : connectionState === "connecting"
-                      ? "bg-yellow-500"
-                      : "bg-red-500"
-                  )}
-                />
-                <span>
-                  {connectionState === "connected"
-                    ? "Connected"
-                    : connectionState === "connecting"
-                    ? "Connecting..."
-                    : "Disconnected"}
-                </span>
-              </>
             )}
-            {selectedWs && selectedWs.status !== "ready" && (
-              <span className="capitalize">{selectedWs.status}</span>
+            {selectedWs && (
+              <div className="flex items-center gap-2 ml-3" data-tauri-drag-region>
+                <span className="text-sm text-neutral-400" data-tauri-drag-region>
+                  {selectedWs.name}
+                </span>
+                {selectedWs.status === "ready" && (
+                  <button
+                    onClick={handleNewWorkspaceTerminal}
+                    className="p-1 rounded hover:bg-neutral-800 text-neutral-500 hover:text-neutral-300 transition-colors"
+                    title="New Terminal (Cmd+Shift+T)"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
+            {selectedWs?.status === "ready" && (
+              <div className="mr-3 flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={toggleBottomPanel}
+                  className={cn(
+                    "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
+                    bottomPanelOpen && "bg-neutral-800 text-neutral-200"
+                  )}
+                  title="Toggle terminal panel (Ctrl+`)"
+                >
+                  <PanelBottom className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    fileTreeLoadTicketRef.current += 1;
+                    setFileTreeOpen((v) => {
+                      const next = !v;
+                      const ws = useWorkspaceStore.getState().selectedWorkspace();
+                      if (ws?.status === "ready") {
+                        void persistFileTreeOpenForWorkspace(ws.id, next);
+                      }
+                      return next;
+                    });
+                  }}
+                  className={cn(
+                    "p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 transition-colors",
+                    fileTreeOpen && "bg-neutral-800 text-neutral-200"
+                  )}
+                  title="Toggle file tree"
+                >
+                  <FolderTree className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
-        </div>
+
+          <div className="flex-1 min-h-0 flex flex-col">
+            <TabDragProvider>
+              <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
+                <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
+                  <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                    <ResizablePanel defaultSize={72} minSize={45}>
+                      <div
+                        className="h-full min-h-0 min-w-0"
+                        onPointerDownCapture={() =>
+                          useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
+                        }
+                      >
+                        <WorkspaceView />
+                      </div>
+                    </ResizablePanel>
+                    <PanelResizeHandle
+                      hitAreaMargins={{ coarse: 0, fine: 0 }}
+                      className={cn(
+                        "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                        fileTreeOpen && selectedWs?.status === "ready"
+                          ? "cursor-col-resize"
+                          : "hidden"
+                      )}
+                    />
+                    <ResizablePanel
+                      ref={fileTreePanelRef}
+                      collapsible
+                      collapsedSize={0}
+                      defaultSize={28}
+                      minSize={12}
+                      maxSize={50}
+                      className="min-h-0 min-w-0"
+                    >
+                      <div
+                        className="h-full min-h-0 min-w-0"
+                        onPointerDownCapture={() =>
+                          useWorkspaceStore.getState().setLayoutTargetRuntimeId(null)
+                        }
+                      >
+                        {fileTreeOpen && selectedWs?.status === "ready" ? (
+                          <WorkspaceFileTreePanel
+                            key={selectedWs.id}
+                            workspaceRoot={selectedWs.worktreePath}
+                            workspaceId={selectedWs.id}
+                          />
+                        ) : null}
+                      </div>
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                </ResizablePanel>
+                {selectedWs?.status === "ready" && (
+                  <>
+                    <PanelResizeHandle
+                      hitAreaMargins={{ coarse: 0, fine: 0 }}
+                      className={cn(
+                        "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-neutral-600 transition-colors hover:bg-blue-500",
+                        bottomPanelOpen ? "cursor-row-resize" : "hidden"
+                      )}
+                    />
+                    <ResizablePanel
+                      ref={bottomPanelRef}
+                      collapsible
+                      collapsedSize={0}
+                      defaultSize={28}
+                      minSize={12}
+                      maxSize={55}
+                      className="min-h-0"
+                    >
+                      {bottomPanelOpen ? <BottomPanel /> : null}
+                    </ResizablePanel>
+                  </>
+                )}
+              </ResizablePanelGroup>
+            </TabDragProvider>
+          </div>
+
+          <div className="h-6 flex items-center gap-3 px-3 border-t border-neutral-800 bg-neutral-900/50 text-[11px] text-neutral-500 shrink-0">
+            <div className="flex items-center min-w-0">
+              {selectedWs?.status === "ready" && (
+                <>
+                  <div
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full mr-2 shrink-0",
+                      connectionState === "connected"
+                        ? "bg-green-500"
+                        : connectionState === "connecting"
+                          ? "bg-yellow-500"
+                          : "bg-red-500"
+                    )}
+                  />
+                  <span>
+                    {connectionState === "connected"
+                      ? "Connected"
+                      : connectionState === "connecting"
+                        ? "Connecting..."
+                        : "Disconnected"}
+                  </span>
+                </>
+              )}
+              {selectedWs && selectedWs.status !== "ready" && (
+                <span className="capitalize">{selectedWs.status}</span>
+              )}
+            </div>
+          </div>
       </div>
     </div>
   );

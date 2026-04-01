@@ -3,7 +3,7 @@ import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { terminalTheme } from "@/lib/theme";
+import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 interface TerminalSurfaceRect {
   x: number;
@@ -20,7 +20,6 @@ export interface TerminalSurfaceProps {
   visible: boolean;
   focused: boolean;
   onFocus?: () => void;
-  /** When set, geometry comes from this element and the instance can stay mounted across layout tree moves (split/merge). */
   anchorElement?: HTMLElement | null;
 }
 
@@ -79,12 +78,8 @@ export default function TerminalSurface({
     const el = ctxRef.current.anchorElement ?? containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    // Guard: detached or hidden anchors can report a 0x0 rect; skip sync so we do not
-    // position the native terminal at (0,0). The next valid anchor measurement will catch up.
     if (r.width <= 0 || r.height <= 0) return;
 
-    // Layout only from the webview (CSS pixels / points). Scale is applied on the native side
-    // (Rust + NSView backing) — same idea as a normal AppKit terminal, not devicePixelRatio here.
     const rect: TerminalSurfaceRect = {
       x: r.left,
       y: r.top,
@@ -106,8 +101,6 @@ export default function TerminalSurface({
       }).catch((e) => console.error("Failed to create native surface:", e));
     }
 
-    // Rust overwrites scale from the NSWindow; the terminal NSView also syncs Ghostty on
-    // viewDidChangeBackingProperties when the window moves between displays.
     void invoke("terminal_surface_update", {
       surfaceId: sfid,
       rect,
@@ -128,7 +121,6 @@ export default function TerminalSurface({
     });
   }, []);
 
-  // Create once per (session, surface); destroy only when this effect cleans up — not on focus/visibility/sync churn.
   useEffect(() => {
     if (nativeOk !== true || !sessionID) return;
 
@@ -154,8 +146,6 @@ export default function TerminalSurface({
     };
   }, [nativeOk, sessionID, surfaceId]);
 
-  // Window-level scale/geometry sync: must not depend on a mounted anchor — hoisted surfaces can mount
-  // before anchorElement exists; Wry may also deliver tauri://move / tauri://scale-change more reliably than onMoved.
   useEffect(() => {
     if (nativeOk !== true) return;
 
@@ -205,7 +195,6 @@ export default function TerminalSurface({
     };
   }, [nativeOk, scheduleSync]);
 
-  // Layout changes inside the webview (pane resize, file tree) — coalesce to one native update per frame.
   useEffect(() => {
     if (nativeOk !== true) return;
     const el = anchorElement ?? containerRef.current;
@@ -222,7 +211,6 @@ export default function TerminalSurface({
     };
   }, [nativeOk, surfaceId, anchorElement, scheduleSync]);
 
-  // Visibility / focus — update native surface without destroy/recreate.
   useEffect(() => {
     if (nativeOk !== true) return;
     performSyncRef.current(false);
@@ -237,8 +225,6 @@ export default function TerminalSurface({
     };
   }, [nativeOk, visible, focused]);
 
-  // Native terminal surfaces are hosted outside the React tree, so layout changes can leave them
-  // with stale geometry for a frame if we only rely on resize events. Sync again after every render.
   useLayoutEffect(() => {
     if (nativeOk !== true) return;
     performSyncRef.current(false);

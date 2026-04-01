@@ -19,9 +19,9 @@ mod terminal_commands;
 use commands::DbState;
 use database::AppDatabase;
 use std::sync::Arc;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Emitter;
 use tauri::Manager;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 const MENU_CLOSE_TAB_ID: &str = "pandora.close-tab";
 const MENU_PREVIOUS_TAB_ID: &str = "pandora.previous-tab";
@@ -31,10 +31,14 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
     let pkg_info = app.package_info();
 
     let close_tab = MenuItem::with_id(app, MENU_CLOSE_TAB_ID, "Close Tab", true, Some("Cmd+W"))?;
-    let previous_tab =
-        MenuItem::with_id(app, MENU_PREVIOUS_TAB_ID, "Previous Tab", true, Some("Cmd+Shift+["))?;
-    let next_tab =
-        MenuItem::with_id(app, MENU_NEXT_TAB_ID, "Next Tab", true, Some("Cmd+Shift+]"))?;
+    let previous_tab = MenuItem::with_id(
+        app,
+        MENU_PREVIOUS_TAB_ID,
+        "Previous Tab",
+        true,
+        Some("Cmd+Shift+["),
+    )?;
+    let next_tab = MenuItem::with_id(app, MENU_NEXT_TAB_ID, "Next Tab", true, Some("Cmd+Shift+]"))?;
 
     Menu::with_items(
         app,
@@ -54,12 +58,7 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
                     &PredefinedMenuItem::quit(app, None)?,
                 ],
             )?,
-            &Submenu::with_items(
-                app,
-                "File",
-                true,
-                &[&close_tab],
-            )?,
+            &Submenu::with_items(app, "File", true, &[&close_tab])?,
             &Submenu::with_items(
                 app,
                 "Edit",

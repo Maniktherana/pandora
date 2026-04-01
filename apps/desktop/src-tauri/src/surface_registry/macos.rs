@@ -4,14 +4,14 @@
 //! layout, focus, and I/O routing. Each surface is an NSView overlaid on the
 //! Tauri webview, with a ghostty terminal rendering into it.
 
-use crate::ghostty_app;
 use crate::daemon_bridge::{self, DaemonState};
+use crate::ghostty_app;
 use crate::ghostty_ffi::*;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2::rc::Retained;
 use objc2_app_kit::NSView;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::collections::HashMap;
@@ -176,7 +176,10 @@ impl SurfaceRegistry {
         *self.web_overlay_depth.lock().unwrap() > 0
     }
 
-    fn extract_surface_locked(inner: &mut RegistryInner, surface_id: &str) -> Option<NativeSurface> {
+    fn extract_surface_locked(
+        inner: &mut RegistryInner,
+        surface_id: &str,
+    ) -> Option<NativeSurface> {
         let native_surface = inner.surfaces.remove(surface_id)?;
         if inner
             .session_map
@@ -190,7 +193,11 @@ impl SurfaceRegistry {
         Some(native_surface)
     }
 
-    fn flush_pending_locked(inner: &mut RegistryInner, session_id: &str, surface: ghostty_surface_t) {
+    fn flush_pending_locked(
+        inner: &mut RegistryInner,
+        session_id: &str,
+        surface: ghostty_surface_t,
+    ) {
         let buffered = inner.pending_output.remove(session_id).unwrap_or_default();
         for chunk in buffered {
             unsafe {
@@ -283,9 +290,8 @@ impl SurfaceRegistry {
         let suppress = self.web_ui_suppresses_native_terminals();
 
         // Create the native terminal NSView subclass that can receive key/mouse events.
-        let ns_view_raw = unsafe {
-            pandora_terminal_view_new(rect.x, flipped_y, rect.width, rect.height)
-        };
+        let ns_view_raw =
+            unsafe { pandora_terminal_view_new(rect.x, flipped_y, rect.width, rect.height) };
         if ns_view_raw.is_null() {
             return Err("pandora_terminal_view_new returned null".to_string());
         }
@@ -358,7 +364,9 @@ impl SurfaceRegistry {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.surfaces.insert(surface_id.clone(), native_surface);
-            inner.session_map.insert(session_id.clone(), surface_id.clone());
+            inner
+                .session_map
+                .insert(session_id.clone(), surface_id.clone());
             Self::flush_pending_locked(&mut inner, &session_id, surface);
             if let Some(s) = inner.surfaces.get(&surface_id) {
                 s.ns_view.setHidden(suppress);
@@ -415,8 +423,7 @@ impl SurfaceRegistry {
         let flipped_y = unsafe {
             let content_view: *mut c_void =
                 objc2::msg_send![window_ptr as *const AnyObject, contentView];
-            let frame: NSRect =
-                objc2::msg_send![content_view as *const AnyObject, frame];
+            let frame: NSRect = objc2::msg_send![content_view as *const AnyObject, frame];
             frame.size.height - rect.y - rect.height
         };
 
@@ -442,7 +449,9 @@ impl SurfaceRegistry {
             ghostty_surface_set_focus(surface.ghostty_surface, focused);
         }
         if focused {
-            let _ = unsafe { pandora_terminal_view_focus(Retained::as_ptr(&surface.ns_view) as *mut c_void) };
+            let _ = unsafe {
+                pandora_terminal_view_focus(Retained::as_ptr(&surface.ns_view) as *mut c_void)
+            };
         }
 
         unsafe {
@@ -557,7 +566,7 @@ impl SurfaceRegistry {
                 if should_focus {
                     let _ = unsafe {
                         pandora_terminal_view_focus(
-                            Retained::as_ptr(&surface.ns_view) as *mut c_void,
+                            Retained::as_ptr(&surface.ns_view) as *mut c_void
                         )
                     };
                 }
@@ -588,33 +597,32 @@ impl SurfaceRegistry {
 
 /// Called by ghostty when the terminal generates output in HOST_MANAGED mode.
 /// Routes data back toward the daemon for the associated session.
-unsafe extern "C" fn receive_buffer_callback(
-    userdata: *mut c_void,
-    buf: *const u8,
-    len: usize,
-) {
+unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const u8, len: usize) {
     if userdata.is_null() || buf.is_null() || len == 0 {
         return;
     }
 
-        let arc = Arc::from_raw(userdata as *const SurfaceCallbackContext);
-        let ctx = Arc::clone(&arc);
-        let _ = Arc::into_raw(arc);
-        let data = std::slice::from_raw_parts(buf, len);
-        let session_id = ctx.session_id.clone();
-        let workspace_id = ctx.workspace_id.clone();
-        let app_handle = ctx.app_handle.clone();
-        let payload = serde_json::json!({
-            "type": "input",
-            "sessionID": session_id,
-            "data": BASE64_STANDARD.encode(data),
-        })
-        .to_string();
-        tauri::async_runtime::spawn(async move {
-            let daemon_state = app_handle.state::<DaemonState>();
-            if let Err(err) = daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload).await {
-                eprintln!("[surface_registry] failed to route terminal input: {err}");
-            }
+    let arc = Arc::from_raw(userdata as *const SurfaceCallbackContext);
+    let ctx = Arc::clone(&arc);
+    let _ = Arc::into_raw(arc);
+    let data = std::slice::from_raw_parts(buf, len);
+    let session_id = ctx.session_id.clone();
+    let workspace_id = ctx.workspace_id.clone();
+    let app_handle = ctx.app_handle.clone();
+    let payload = serde_json::json!({
+        "type": "input",
+        "sessionID": session_id,
+        "data": BASE64_STANDARD.encode(data),
+    })
+    .to_string();
+    tauri::async_runtime::spawn(async move {
+        let daemon_state = app_handle.state::<DaemonState>();
+        if let Err(err) =
+            daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload)
+                .await
+        {
+            eprintln!("[surface_registry] failed to route terminal input: {err}");
+        }
     });
 }
 
@@ -646,7 +654,10 @@ unsafe extern "C" fn receive_resize_callback(
     .to_string();
     tauri::async_runtime::spawn(async move {
         let daemon_state = app_handle.state::<DaemonState>();
-        if let Err(err) = daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload).await {
+        if let Err(err) =
+            daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload)
+                .await
+        {
             eprintln!("[surface_registry] failed to route terminal resize: {err}");
         }
     });

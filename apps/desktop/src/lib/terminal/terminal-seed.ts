@@ -1,4 +1,4 @@
-import type { DaemonClient } from "./daemon-client";
+import type { DaemonClient } from "../runtime/daemon-client";
 
 let workspaceTerminalCounter = 0;
 
@@ -52,17 +52,9 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
   return { slotID, sessionDefID, shellName };
 }
 
-export function seedFirstWorkspaceTerminal(client: DaemonClient, runtimeId: string) {
-  seedTerminalWithName(client, runtimeId, "Local Terminal");
-}
-
 export function seedWorkspaceTerminal(client: DaemonClient, runtimeId: string) {
   workspaceTerminalCounter++;
   return seedTerminalWithName(client, runtimeId, `Terminal ${workspaceTerminalCounter}`);
-}
-
-export function seedFirstProjectTerminal(client: DaemonClient, runtimeId: string) {
-  seedTerminalWithName(client, runtimeId);
 }
 
 export function seedProjectTerminal(client: DaemonClient, runtimeId: string) {

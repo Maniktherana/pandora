@@ -1,4 +1,4 @@
-import type { LayoutAxis, LayoutLeaf, LayoutNode, LayoutSplit, PaneTab } from "@/lib/types";
+import type { LayoutAxis, LayoutLeaf, LayoutNode, LayoutSplit, PaneTab } from "@/lib/shared/types";
 
 export function findLeaf(node: LayoutNode, paneID: string): LayoutLeaf | null {
   if (node.type === "leaf") return node.id === paneID ? node : null;

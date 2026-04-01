@@ -3,8 +3,8 @@
 //! and emit `app-shortcut` for the frontend.
 
 use crate::surface_registry::SurfaceRegistry;
-use std::sync::OnceLock;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();

@@ -11,7 +11,7 @@
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
     "lint": "oxlint -c oxlint.json src/",
-    "fmt": "bunx @oxc/oxcfmt src/"
+    "fmt": "oxlint -c oxlint.json --fix src/"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

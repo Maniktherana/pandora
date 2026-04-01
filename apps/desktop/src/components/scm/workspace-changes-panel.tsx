@@ -10,8 +10,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FileTypeIcon } from "@/components/FileTypeIcon";
-import { cn } from "@/lib/utils";
+import { FileTypeIcon } from "@/components/files/file-type-icon";
+import type { DiffSource } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
 import {
   scmCommit,
   scmDiscardTracked,
@@ -22,10 +23,9 @@ import {
   scmUnstage,
   scmUnstageAll,
   type ScmStatusEntry,
-} from "@/lib/scm";
+} from "@/lib/workspace/scm";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import type { DiffSource } from "@/lib/types";
 
 function hasStaged(e: ScmStatusEntry): boolean {
   return e.stagedKind != null && e.stagedKind !== "";

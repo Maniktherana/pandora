@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Plus, SplitSquareHorizontal } from "lucide-react";
+import BottomTerminalPanelView from "@/components/terminal/bottom-terminal-panel-view";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import BottomTerminalPanelView from "@/components/BottomTerminalPanelView";
-import { getTerminalDaemonClient } from "@/lib/terminal-runtime";
-import { projectRuntimeKey } from "@/lib/runtime-keys";
-import { seedProjectTerminal } from "@/lib/terminal-seed";
-import { cn } from "@/lib/utils";
-import type { SessionState } from "@/lib/types";
+import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { cn } from "@/lib/shared/utils";
+import type { SessionState } from "@/lib/shared/types";
+import { seedProjectTerminal } from "@/lib/terminal/terminal-seed";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 
 type BottomTab = "terminal" | "ports";
 
@@ -205,9 +205,6 @@ function PortsTabContent({
   );
 }
 
-/**
- * Bottom strip: project terminal (git root) with right sidebar tabs; Ports like VS Code.
- */
 export default function BottomPanel() {
   const [tab, setTab] = useState<BottomTab>("terminal");
   const project = useWorkspaceStore((s) => s.selectedProject());

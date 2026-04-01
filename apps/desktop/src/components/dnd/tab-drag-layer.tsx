@@ -28,11 +28,11 @@ import {
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { isProjectRuntimeKey } from "@/lib/runtime-keys";
-import { cn } from "@/lib/utils";
-import type { LayoutAxis } from "@/lib/types";
-import { findLeaf } from "@/lib/layout-migrate";
-import { tabsEqual } from "@/lib/layout-tree";
+import { findLeaf } from "@/lib/layout/layout-migrate";
+import { tabsEqual } from "@/lib/layout/layout-tree";
+import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import type { LayoutAxis } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -495,6 +495,7 @@ function TabDragOverlay({
           moveTab(drag.sourcePaneID!, tgt.paneID, drag.sourceIndex!, tgt.insertIndex);
         }
       } else {
+        if (tgt.kind !== "pane") return;
         const { zone, paneID } = tgt;
         if (zone === "center") {
           const leaf = findLeaf(runtime.root, paneID);

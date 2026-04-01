@@ -1,6 +1,6 @@
 import spriteUrl from "@/assets/file-icons-sprite.svg?url";
-import { chooseIconName } from "@/lib/file-icon";
-import { cn } from "@/lib/utils";
+import { chooseIconName } from "@/lib/workspace/file-icons";
+import { cn } from "@/lib/shared/utils";
 
 export function FileTypeIcon({
   path,

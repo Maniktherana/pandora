@@ -153,11 +153,7 @@ fn start_daemon_runtime(
                 .spawn()
             {
                 Ok(child) => {
-                    eprintln!(
-                        "Daemon PID {:?} for runtime {}",
-                        child.id(),
-                        runtime_id
-                    );
+                    eprintln!("Daemon PID {:?} for runtime {}", child.id(), runtime_id);
                     let mut rt = runtime.lock().await;
                     rt.daemon_process = Some(child);
                 }
@@ -241,10 +237,7 @@ fn start_daemon_runtime(
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Daemon read error for runtime {}: {}",
-                            runtime_id, e
-                        );
+                        eprintln!("Daemon read error for runtime {}: {}", runtime_id, e);
                         break;
                     }
                 }

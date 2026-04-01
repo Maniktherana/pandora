@@ -9,8 +9,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { cn } from "@/lib/utils";
-import type { ProjectRecord, WorkspaceRecord, WorkspaceStatus, WorkspaceKind } from "@/lib/types";
+import type {
+  ProjectRecord,
+  WorkspaceKind,
+  WorkspaceRecord,
+  WorkspaceStatus,
+} from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import {

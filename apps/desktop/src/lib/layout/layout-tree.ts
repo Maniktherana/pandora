@@ -1,19 +1,30 @@
-import type { LayoutAxis, LayoutLeaf, LayoutNode, LayoutSplit, PaneTab } from "@/lib/types";
-import { findLeaf } from "@/lib/layout-migrate";
+import type { LayoutAxis, LayoutLeaf, LayoutNode, LayoutSplit, PaneTab } from "@/lib/shared/types";
+import { findLeaf } from "./layout-migrate";
 
 export { findLeaf };
 
 export function tabKey(tab: PaneTab): string {
-  if (tab.kind === "terminal") return `t:${tab.slotId}`;
-  if (tab.kind === "diff") return `d:${tab.source}:${tab.path}`;
-  return `e:${tab.path}`;
+  switch (tab.kind) {
+    case "terminal":
+      return `t:${tab.slotId}`;
+    case "diff":
+      return `d:${tab.source}:${tab.path}`;
+    case "editor":
+      return `e:${tab.path}`;
+  }
 }
 
 export function tabsEqual(a: PaneTab, b: PaneTab): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === "terminal") return a.slotId === b.slotId;
-  if (a.kind === "diff") return a.path === b.path && a.source === b.source;
-  return a.path === b.path;
+  if (a.kind === "terminal" && b.kind === "terminal") {
+    return a.slotId === b.slotId;
+  }
+  if (a.kind === "diff" && b.kind === "diff") {
+    return a.path === b.path && a.source === b.source;
+  }
+  if (a.kind === "editor" && b.kind === "editor") {
+    return a.path === b.path;
+  }
+  return false;
 }
 
 export function getAllLeaves(node: LayoutNode): LayoutLeaf[] {

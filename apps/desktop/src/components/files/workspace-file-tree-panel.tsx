@@ -10,14 +10,14 @@ import {
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight } from "lucide-react";
-import { FileTypeIcon } from "@/components/FileTypeIcon";
+import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/shared/utils";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/ui-persistence";
-import WorkspaceChangesPanel from "@/components/WorkspaceChangesPanel";
+import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
+import { FileTypeIcon } from "@/components/files/file-type-icon";
 
 type DirEntry = { name: string; isDirectory: boolean };
 

@@ -1,7 +1,7 @@
+use crate::daemon_bridge::{self, DaemonState};
 use crate::database::{now_iso8601, AppDatabase};
 use crate::git;
 use crate::models::*;
-use crate::daemon_bridge::{self, DaemonState};
 use std::path::Path;
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -116,8 +116,8 @@ pub async fn create_workspace(
     let db_arc = db.0.clone();
     let optimistic_id = optimistic.id.clone();
 
-    tokio::task::spawn_blocking(move || {
-        match git::create_worktree(&workspace, &project_clone) {
+    tokio::task::spawn_blocking(
+        move || match git::create_worktree(&workspace, &project_clone) {
             Ok(ready) => {
                 let _ = db_arc.upsert_workspace(&ready);
             }
@@ -128,17 +128,16 @@ pub async fn create_workspace(
                 failed.updated_at = now_iso8601();
                 let _ = db_arc.upsert_workspace(&failed);
             }
-        }
-    })
+        },
+    )
     .await
     .map_err(|e| e.to_string())?;
 
-    let final_ws = db
-        .0
-        .load_workspaces(None)
-        .into_iter()
-        .find(|w| w.id == optimistic_id)
-        .unwrap_or(optimistic);
+    let final_ws =
+        db.0.load_workspaces(None)
+            .into_iter()
+            .find(|w| w.id == optimistic_id)
+            .unwrap_or(optimistic);
     Ok(final_ws)
 }
 
@@ -174,29 +173,26 @@ pub async fn retry_workspace(
     let db_arc = db.0.clone();
     let ws_id = workspace.id.clone();
 
-    tokio::task::spawn_blocking(move || {
-        match git::retry_worktree(&workspace, &project) {
-            Ok(ready) => {
-                let _ = db_arc.upsert_workspace(&ready);
-            }
-            Err(e) => {
-                let mut failed = workspace;
-                failed.status = WorkspaceStatus::Failed;
-                failed.failure_message = Some(e);
-                failed.updated_at = now_iso8601();
-                let _ = db_arc.upsert_workspace(&failed);
-            }
+    tokio::task::spawn_blocking(move || match git::retry_worktree(&workspace, &project) {
+        Ok(ready) => {
+            let _ = db_arc.upsert_workspace(&ready);
+        }
+        Err(e) => {
+            let mut failed = workspace;
+            failed.status = WorkspaceStatus::Failed;
+            failed.failure_message = Some(e);
+            failed.updated_at = now_iso8601();
+            let _ = db_arc.upsert_workspace(&failed);
         }
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    let final_ws = db
-        .0
-        .load_workspaces(None)
-        .into_iter()
-        .find(|w| w.id == ws_id)
-        .unwrap_or(updating);
+    let final_ws =
+        db.0.load_workspaces(None)
+            .into_iter()
+            .find(|w| w.id == ws_id)
+            .unwrap_or(updating);
     Ok(final_ws)
 }
 
@@ -213,9 +209,7 @@ pub async fn remove_workspace(
         .ok_or("Workspace not found")?;
 
     let projects = db.0.load_projects();
-    let project = projects
-        .into_iter()
-        .find(|p| p.id == workspace.project_id);
+    let project = projects.into_iter().find(|p| p.id == workspace.project_id);
 
     // Stop runtime
     daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
@@ -265,10 +259,7 @@ pub fn save_selection(
     project_id: Option<String>,
     workspace_id: Option<String>,
 ) {
-    db.0.save_selection(
-        project_id.as_deref(),
-        workspace_id.as_deref(),
-    );
+    db.0.save_selection(project_id.as_deref(), workspace_id.as_deref());
 }
 
 #[tauri::command]
@@ -524,10 +515,9 @@ pub struct AppState {
 pub fn load_app_state(db: tauri::State<'_, DbState>) -> AppState {
     let projects = db.0.load_projects();
     let workspaces = db.0.load_workspaces(None);
-    let selected_project_id = db
-        .0
-        .load_selected_project_id()
-        .or_else(|| projects.first().map(|p| p.id.clone()));
+    let selected_project_id =
+        db.0.load_selected_project_id()
+            .or_else(|| projects.first().map(|p| p.id.clone()));
     let selected_workspace_id = db.0.load_selected_workspace_id();
 
     AppState {

@@ -3,8 +3,8 @@ import Editor, { type OnMount } from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { languageFromRelativePath } from "@/lib/editor-language";
-import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/monaco-pandora";
+import { languageFromRelativePath } from "@/lib/editor/editor-language";
+import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
 
 const editorOptions = {
   minimap: { enabled: false },

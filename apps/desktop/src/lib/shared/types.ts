@@ -1,5 +1,3 @@
-// ─── Daemon protocol types (mirrored from daemon/src/types.ts) ───
-
 export type SlotKind = "process_slot" | "agent_slot" | "terminal_slot";
 export type SessionKind = "process" | "agent" | "terminal";
 export type PresentationMode = "single" | "tabs" | "split";
@@ -79,11 +77,8 @@ export type DaemonMessage =
   | { type: "output_chunk"; sessionID: string; data: string; workspaceId?: string }
   | { type: "error"; message: string; workspaceId?: string };
 
-// ─── Project/workspace model types (matching Swift app) ───
-
 export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting";
 
-/** `worktree`: isolated checkout under ~/.pandora/workspaces. `linked`: project git root working copy. */
 export type WorkspaceKind = "linked" | "worktree";
 
 export interface ProjectRecord {
@@ -115,11 +110,8 @@ export interface WorkspaceRecord {
   lastOpenedAt: string | null;
 }
 
-// ─── Workspace layout types ───
-
 export type LayoutAxis = "horizontal" | "vertical";
 
-/** One tab in a pane: native terminal (daemon slot), editor file, or git diff (path relative to workspace root). */
 export type DiffSource = "working" | "staged";
 
 export type PaneTab =
@@ -149,8 +141,6 @@ export interface PersistedWorkspaceLayout {
   focusedPaneID: string | null;
 }
 
-// ─── Bottom terminal panel types (project runtime only) ───
-
 export interface TerminalPanelGroup {
   id: string;
   children: string[];
@@ -163,16 +153,12 @@ export interface TerminalPanelState {
   visible: boolean;
 }
 
-// ─── App state from backend ───
-
 export interface AppState {
   projects: ProjectRecord[];
   workspaces: WorkspaceRecord[];
   selectedProjectId: string | null;
   selectedWorkspaceId: string | null;
 }
-
-// ─── Workspace runtime state (per-workspace) ───
 
 export interface WorkspaceRuntimeState {
   workspaceId: string;

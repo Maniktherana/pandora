@@ -127,13 +127,7 @@ fn slugify(raw: &str) -> String {
     let lower = raw.to_lowercase();
     let slugged: String = lower
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     // Collapse multiple dashes
     let mut result = String::new();
@@ -156,7 +150,9 @@ fn generate_slug() -> String {
     use rand::Rng;
     let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
     let mut rng = rand::thread_rng();
-    (0..8).map(|_| chars[rng.gen_range(0..chars.len())]).collect()
+    (0..8)
+        .map(|_| chars[rng.gen_range(0..chars.len())])
+        .collect()
 }
 
 pub fn pandora_home() -> String {
@@ -301,10 +297,7 @@ pub fn retry_worktree(
     Ok(refreshed)
 }
 
-pub fn remove_worktree(
-    workspace: &WorkspaceRecord,
-    project: &ProjectRecord,
-) -> Result<(), String> {
+pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> Result<(), String> {
     if workspace.workspace_kind == WorkspaceKind::Linked {
         return Ok(());
     }
@@ -327,9 +320,7 @@ fn run_git(args: &[&str]) -> Result<String, String> {
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
             "Git command failed".into()
         } else {
@@ -374,9 +365,7 @@ fn run_git_stdout_bytes(args: &[&str]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
             "Git command failed".into()
         } else {
@@ -395,10 +384,7 @@ fn truncate_utf8_bytes(bytes: &[u8], max: usize) -> (String, bool) {
     while end > 0 && (bytes[end - 1] & 0b1100_0000) == 0b1000_0000 {
         end -= 1;
     }
-    (
-        String::from_utf8_lossy(&bytes[..end]).to_string(),
-        true,
-    )
+    (String::from_utf8_lossy(&bytes[..end]).to_string(), true)
 }
 
 fn run_git_diff_limited(args: &[&str], max_bytes: usize) -> Result<ScmDiffResult, String> {
@@ -422,14 +408,7 @@ pub fn git_file_diff(
 
     if staged {
         return run_git_diff_limited(
-            &[
-                "-C",
-                worktree_path,
-                "diff",
-                "--cached",
-                "--",
-                relative_path,
-            ],
+            &["-C", worktree_path, "diff", "--cached", "--", relative_path],
             SCM_DIFF_MAX_BYTES,
         );
     }
@@ -444,7 +423,14 @@ pub fn git_file_diff(
 
     // Tracked file with no unstaged changes → empty diff is correct.
     let tracked = Command::new("git")
-        .args(["-C", worktree_path, "ls-files", "--error-unmatch", "--", relative_path])
+        .args([
+            "-C",
+            worktree_path,
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            relative_path,
+        ])
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
     if tracked.status.success() {
@@ -601,9 +587,7 @@ pub fn git_read_blob_text(worktree_path: &str, object_spec: &str) -> Result<Stri
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
             "git show failed".into()
         } else {
@@ -617,9 +601,8 @@ pub fn git_read_blob_text(worktree_path: &str, object_spec: &str) -> Result<Stri
             SCM_DIFF_VIEW_MAX_BYTES / (1024 * 1024)
         ));
     }
-    String::from_utf8(bytes).map_err(|_| {
-        "File is binary or not valid UTF-8 — use the terminal for a raw diff".into()
-    })
+    String::from_utf8(bytes)
+        .map_err(|_| "File is binary or not valid UTF-8 — use the terminal for a raw diff".into())
 }
 
 pub fn git_status(worktree_path: &str) -> Result<Vec<ScmStatusEntry>, String> {
@@ -650,9 +633,7 @@ fn git_cmd_result(mut cmd: Command) -> Result<(), String> {
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
             "Git command failed".into()
         } else {
@@ -735,9 +716,7 @@ pub fn git_commit_message(worktree_path: &str, message: &str) -> Result<(), Stri
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
             "git commit failed".into()
         } else {

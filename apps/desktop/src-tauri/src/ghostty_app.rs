@@ -105,9 +105,7 @@ unsafe extern "C" fn runtime_wakeup_cb(userdata: *mut c_void) {
                 ghostty_app_tick(app as ghostty_app_t);
             });
         } else {
-            eprintln!(
-                "[ghostty] wakeup_cb skipped: no TAURI_APP_HANDLE (init ordering bug?)"
-            );
+            eprintln!("[ghostty] wakeup_cb skipped: no TAURI_APP_HANDLE (init ordering bug?)");
         }
     }
 }

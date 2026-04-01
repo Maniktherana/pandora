@@ -1121,18 +1121,12 @@ pub struct ghostty_runtime_config_s {
     pub userdata: *mut c_void,
     pub supports_selection_clipboard: bool,
     pub wakeup_cb: Option<unsafe extern "C" fn(*mut c_void)>,
-    pub action_cb: Option<
-        unsafe extern "C" fn(ghostty_app_t, ghostty_target_s, ghostty_action_s) -> bool,
-    >,
+    pub action_cb:
+        Option<unsafe extern "C" fn(ghostty_app_t, ghostty_target_s, ghostty_action_s) -> bool>,
     pub read_clipboard_cb:
         Option<unsafe extern "C" fn(*mut c_void, ghostty_clipboard_e, *mut c_void) -> bool>,
     pub confirm_read_clipboard_cb: Option<
-        unsafe extern "C" fn(
-            *mut c_void,
-            *const c_char,
-            *mut c_void,
-            ghostty_clipboard_request_e,
-        ),
+        unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_void, ghostty_clipboard_request_e),
     >,
     pub write_clipboard_cb: Option<
         unsafe extern "C" fn(
@@ -1275,16 +1269,8 @@ extern "C" {
     pub fn ghostty_surface_update_config(surface: ghostty_surface_t, config: ghostty_config_t);
     pub fn ghostty_surface_needs_confirm_quit(surface: ghostty_surface_t) -> bool;
     pub fn ghostty_surface_process_exited(surface: ghostty_surface_t) -> bool;
-    pub fn ghostty_surface_write_buffer(
-        surface: ghostty_surface_t,
-        data: *const u8,
-        len: usize,
-    );
-    pub fn ghostty_surface_process_exit(
-        surface: ghostty_surface_t,
-        exit_code: u32,
-        duration: u64,
-    );
+    pub fn ghostty_surface_write_buffer(surface: ghostty_surface_t, data: *const u8, len: usize);
+    pub fn ghostty_surface_process_exit(surface: ghostty_surface_t, exit_code: u32, duration: u64);
     pub fn ghostty_surface_refresh(surface: ghostty_surface_t);
     pub fn ghostty_surface_draw(surface: ghostty_surface_t);
     pub fn ghostty_surface_set_content_scale(
@@ -1304,25 +1290,14 @@ extern "C" {
         surface: ghostty_surface_t,
         mods: ghostty_input_mods_e,
     ) -> ghostty_input_mods_e;
-    pub fn ghostty_surface_key(
-        surface: ghostty_surface_t,
-        key: ghostty_input_key_s,
-    ) -> bool;
+    pub fn ghostty_surface_key(surface: ghostty_surface_t, key: ghostty_input_key_s) -> bool;
     pub fn ghostty_surface_key_is_binding(
         surface: ghostty_surface_t,
         key: ghostty_input_key_s,
         flags: *mut ghostty_binding_flags_e,
     ) -> bool;
-    pub fn ghostty_surface_text(
-        surface: ghostty_surface_t,
-        text: *const c_char,
-        len: usize,
-    );
-    pub fn ghostty_surface_preedit(
-        surface: ghostty_surface_t,
-        text: *const c_char,
-        len: usize,
-    );
+    pub fn ghostty_surface_text(surface: ghostty_surface_t, text: *const c_char, len: usize);
+    pub fn ghostty_surface_preedit(surface: ghostty_surface_t, text: *const c_char, len: usize);
     pub fn ghostty_surface_mouse_captured(surface: ghostty_surface_t) -> bool;
     pub fn ghostty_surface_mouse_button(
         surface: ghostty_surface_t,

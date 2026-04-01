@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Pencil, X } from "lucide-react";
+import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useTabDrag } from "@/components/dnd/TabDragLayer";
-import { terminalShellAppearance } from "@/lib/terminal-shell";
-import { getTerminalDaemonClient } from "@/lib/terminal-runtime";
-import type { SlotState, WorkspaceRuntimeState } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import { cn } from "@/lib/shared/utils";
+import { terminalShellAppearance } from "@/lib/terminal/terminal-shell";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 
 const DRAG_THRESHOLD = 5;
 

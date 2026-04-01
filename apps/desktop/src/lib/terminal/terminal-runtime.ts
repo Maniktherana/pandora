@@ -1,4 +1,4 @@
-import type { DaemonClient } from "./daemon-client";
+import type { DaemonClient } from "../runtime/daemon-client";
 
 const G = ((globalThis as any).__pandoraTerminalRuntime ??= {
   client: null as DaemonClient | null,

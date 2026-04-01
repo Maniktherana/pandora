@@ -1,4 +1,4 @@
-import type { TerminalPanelGroup, TerminalPanelState } from "./types";
+import type { TerminalPanelGroup, TerminalPanelState } from "../shared/types";
 
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0;

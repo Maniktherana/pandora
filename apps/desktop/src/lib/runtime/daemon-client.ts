@@ -1,25 +1,23 @@
-/**
- * DaemonClient — workspace-scoped daemon communication via Tauri IPC.
- *
- * Messages are routed through the Rust backend which manages per-workspace
- * daemon processes and socket connections.
- */
-
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ClientMessage, DaemonMessage } from "./types";
+import type {
+  ClientMessage,
+  DaemonMessage,
+  SessionState,
+  SlotState,
+} from "../shared/types";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
 
 export interface DaemonClientCallbacks {
   onConnectionStateChange: (workspaceId: string, state: ConnectionState) => void;
-  onSlotSnapshot: (workspaceId: string, slots: import("./types").SlotState[]) => void;
-  onSessionSnapshot: (workspaceId: string, sessions: import("./types").SessionState[]) => void;
-  onSlotStateChanged: (workspaceId: string, slot: import("./types").SlotState) => void;
-  onSessionStateChanged: (workspaceId: string, session: import("./types").SessionState) => void;
-  onSlotAdded: (workspaceId: string, slot: import("./types").SlotState) => void;
+  onSlotSnapshot: (workspaceId: string, slots: SlotState[]) => void;
+  onSessionSnapshot: (workspaceId: string, sessions: SessionState[]) => void;
+  onSlotStateChanged: (workspaceId: string, slot: SlotState) => void;
+  onSessionStateChanged: (workspaceId: string, session: SessionState) => void;
+  onSlotAdded: (workspaceId: string, slot: SlotState) => void;
   onSlotRemoved: (workspaceId: string, slotID: string) => void;
-  onSessionOpened: (workspaceId: string, session: import("./types").SessionState) => void;
+  onSessionOpened: (workspaceId: string, session: SessionState) => void;
   onSessionClosed: (workspaceId: string, sessionID: string) => void;
   onOutputChunk?: (workspaceId: string, sessionID: string, data: string) => void;
   onError: (workspaceId: string, message: string) => void;
@@ -34,19 +32,15 @@ export class DaemonClient {
   }
 
   async connect() {
-    // Listen for workspace-scoped connection state changes
     const unlisten1 = await listen<string>("daemon-connection", (event) => {
       try {
         const data = JSON.parse(event.payload);
         const workspaceId = data.workspaceId as string;
         const state = data.state as ConnectionState;
         this.callbacks.onConnectionStateChange(workspaceId, state);
-      } catch {
-        // ignore parse errors
-      }
+      } catch {}
     });
 
-    // Listen for daemon messages (JSON with workspaceId injected by Rust)
     const unlisten2 = await listen<string>("daemon-message", (event) => {
       try {
         const message = JSON.parse(event.payload) as DaemonMessage;
@@ -74,7 +68,6 @@ export class DaemonClient {
         message: JSON.stringify(message),
       });
     } catch {
-      // Not connected yet — silently drop
     }
   }
 
