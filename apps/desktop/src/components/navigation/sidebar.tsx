@@ -264,7 +264,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-transparent border-r border-white/[0.08]">
+    <div className="flex h-full flex-col bg-transparent">
       {/* Header — pt-11 clears macOS traffic lights in overlay titlebar */}
       <div className="flex items-center gap-2 px-3 pt-11 pb-2" data-tauri-drag-region>
         <div className="relative flex-1">

@@ -445,18 +445,18 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {sidebarVisible && (
-        <>
-          <div className="h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
+        <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
             <Sidebar onCollapse={() => setSidebarVisible(false)} />
-          </div>
           <div
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize sidebar"
             onPointerDown={handleSidebarResizeStart}
-            className="z-20 h-full w-[2px] min-w-[2px] max-w-[2px] shrink-0 cursor-col-resize bg-neutral-600 transition-colors hover:bg-blue-500"
-          />
-        </>
+            className="group absolute inset-y-0 right-0 z-20 w-px cursor-col-resize bg-transparent"
+          >
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-neutral-600/80 to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+          </div>
+        </div>
       )}
 
       <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-950/90">
