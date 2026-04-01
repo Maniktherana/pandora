@@ -567,6 +567,19 @@ impl SurfaceRegistry {
 
         Ok(())
     }
+
+    pub fn session_id_for_ghostty_surface(&self, surface: ghostty_surface_t) -> Option<String> {
+        if surface.is_null() {
+            return None;
+        }
+
+        let inner = self.inner.lock().unwrap();
+        inner
+            .surfaces
+            .values()
+            .find(|native_surface| native_surface.ghostty_surface == surface)
+            .map(|native_surface| native_surface.session_id.clone())
+    }
 }
 
 // ---------------------------------------------------------------------------

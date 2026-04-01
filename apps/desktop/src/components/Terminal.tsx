@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { TauriEvent } from "@tauri-apps/api/event";
+import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -39,6 +39,8 @@ export default function TerminalSurface({
 
   const nativeOkRef = useRef<boolean | null>(null);
   nativeOkRef.current = nativeOk;
+  const onFocusRef = useRef(onFocus);
+  onFocusRef.current = onFocus;
 
   const ctxRef = useRef({ sessionID, workspaceId, surfaceId, visible, focused, anchorElement });
   ctxRef.current = { sessionID, workspaceId, surfaceId, visible, focused, anchorElement };
@@ -48,6 +50,29 @@ export default function TerminalSurface({
       .then(setNativeOk)
       .catch(() => setNativeOk(false));
   }, []);
+
+  useEffect(() => {
+    if (!sessionID) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void listen<string>("native-terminal-focus", (event) => {
+      if (!cancelled && event.payload === sessionID) {
+        onFocusRef.current?.();
+      }
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [sessionID]);
 
   const performSync = useCallback((forceCreate: boolean) => {
     if (nativeOkRef.current !== true) return;

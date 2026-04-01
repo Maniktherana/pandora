@@ -20,4 +20,11 @@ impl SurfaceRegistry {
     pub fn feed_output(&self, _session_id: &str, _data: &[u8]) -> bool {
         false
     }
+
+    pub fn session_id_for_ghostty_surface(
+        &self,
+        _surface: *mut std::ffi::c_void,
+    ) -> Option<String> {
+        None
+    }
 }

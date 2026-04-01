@@ -1110,7 +1110,36 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     const rid = get().effectiveLayoutRuntimeId();
     if (!rid) return;
     const runtime = get().runtimes[rid];
-    if (!runtime?.root || !runtime.focusedPaneID) return;
+    if (!runtime) return;
+
+    if (isProjectRuntimeKey(rid)) {
+      const panel = runtime.terminalPanel;
+      if (!panel || panel.groups.length === 0) return;
+
+      const activeSlotId =
+        panel.activeSlotId ?? panel.groups[panel.activeGroupIndex]?.children[0] ?? null;
+      if (!activeSlotId) return;
+
+      const terminals = panel.groups.flatMap((group) =>
+        group.children.map((slotId) => ({ groupId: group.id, slotId }))
+      );
+      if (terminals.length === 0) return;
+
+      const currentIndex = terminals.findIndex((terminal) => terminal.slotId === activeSlotId);
+      const resolvedIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (resolvedIndex + direction + terminals.length) % terminals.length;
+      const nextTerminal = terminals[nextIndex] ?? terminals[0];
+      if (!nextTerminal) return;
+
+      get().selectProjectTerminalGroup(
+        rid,
+        nextTerminal.groupId,
+        nextTerminal.slotId
+      );
+      return;
+    }
+
+    if (!runtime.root || !runtime.focusedPaneID) return;
 
     const leaves = getAllLeaves(runtime.root);
     if (leaves.length === 0) return;

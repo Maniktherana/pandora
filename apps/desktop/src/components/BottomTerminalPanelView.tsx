@@ -43,10 +43,20 @@ function ProjectTerminalAnchorSlot({
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
   const focusProjectTerminal = useWorkspaceStore((s) => s.focusProjectTerminal);
+  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
 
   const handleFocus = useCallback(() => {
+    setLayoutTargetRuntimeId(workspaceId);
+    setNavigationArea("workspace");
     focusProjectTerminal(workspaceId, slotId);
-  }, [focusProjectTerminal, slotId, workspaceId]);
+  }, [
+    focusProjectTerminal,
+    setLayoutTargetRuntimeId,
+    setNavigationArea,
+    slotId,
+    workspaceId,
+  ]);
 
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
@@ -117,11 +127,12 @@ function TerminalPane({
           isVisible={visible}
           isFocused={visible && active}
         />
-      ) : (
+      ) : slot?.aggregateStatus !== "stopped" ? (
         <div className="flex h-full items-center justify-center px-4 text-center text-sm text-neutral-500">
-          {slot?.aggregateStatus === "stopped" ? "Terminal stopped" : "Connecting..."}
+          Connecting...
         </div>
-      )}
+      ) : null
+      }
     </div>
   );
 }

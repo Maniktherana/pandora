@@ -181,15 +181,31 @@ export default function App() {
     };
   }, []);
 
-  const handleNewTerminal = useCallback(() => {
+  const handleNewWorkspaceTerminal = useCallback(() => {
     const client = clientRef.current;
     const { selectedWorkspaceID } = store.getState();
     if (!client || !selectedWorkspaceID) return;
     seedWorkspaceTerminal(client, selectedWorkspaceID);
   }, []);
 
-  const handleNewTerminalRef = useRef(handleNewTerminal);
-  handleNewTerminalRef.current = handleNewTerminal;
+  const handleNewTerminalShortcut = useCallback(() => {
+    const client = clientRef.current;
+    const state = store.getState();
+    const runtimeId = state.effectiveLayoutRuntimeId() ?? state.selectedWorkspaceID;
+    if (!client || !runtimeId) return;
+
+    if (isProjectRuntimeKey(runtimeId)) {
+      const seeded = seedProjectTerminal(client, runtimeId);
+      state.addProjectTerminalGroup(runtimeId, seeded.slotID);
+      state.setProjectTerminalPanelVisible(runtimeId, true);
+      return;
+    }
+
+    seedWorkspaceTerminal(client, runtimeId);
+  }, []);
+
+  const handleNewTerminalShortcutRef = useRef(handleNewTerminalShortcut);
+  handleNewTerminalShortcutRef.current = handleNewTerminalShortcut;
   const setSidebarVisibleRef = useRef(setSidebarVisible);
   setSidebarVisibleRef.current = setSidebarVisible;
 
@@ -318,7 +334,7 @@ export default function App() {
           case "t":
             // Cmd+T — new terminal (Cmd+Shift+T also works)
             e.preventDefault();
-            handleNewTerminal();
+            handleNewTerminalShortcut();
             break;
           case "w":
             // Cmd+W — close focused tab
@@ -336,7 +352,7 @@ export default function App() {
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [handleNewTerminal, handleCloseFocusedTab, toggleBottomPanel]);
+  }, [handleNewTerminalShortcut, handleCloseFocusedTab, toggleBottomPanel]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -353,7 +369,7 @@ export default function App() {
           store.getState().cycleTab(1);
           break;
         case "new-terminal":
-          handleNewTerminalRef.current();
+          handleNewTerminalShortcutRef.current();
           break;
         case "toggle-sidebar":
           setSidebarVisibleRef.current((v) => !v);
@@ -457,7 +473,7 @@ export default function App() {
               </span>
               {selectedWs.status === "ready" && (
                 <button
-                  onClick={handleNewTerminal}
+                  onClick={handleNewWorkspaceTerminal}
                   className="p-1 rounded hover:bg-neutral-800 text-neutral-500 hover:text-neutral-300 transition-colors"
                   title="New Terminal (Cmd+Shift+T)"
                 >

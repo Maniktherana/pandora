@@ -221,17 +221,12 @@ function PaneView({
           </div>
         )}
 
-        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && (
+        {!onlyEditors &&
+          !anyTerminalRunning &&
+          terminalSlots.length > 0 &&
+          slot?.aggregateStatus !== "stopped" && (
           <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
-            {slot ? (
-              <span>
-                {slot.aggregateStatus === "stopped"
-                  ? "Terminal stopped"
-                  : "Connecting..."}
-              </span>
-            ) : (
-              <span>No terminal</span>
-            )}
+            {slot ? <span>Connecting...</span> : <span>No terminal</span>}
           </div>
         )}
       </div>
@@ -496,6 +491,8 @@ export default function WorkspaceView() {
   const runtime = useWorkspaceStore(
     (s) => (selectedWorkspaceID ? s.runtimes[selectedWorkspaceID] : null)
   );
+  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
 
   if (!selectedWs || selectedWs.status !== "ready") {
     return <EmptyWorkspaceState />;
@@ -510,11 +507,19 @@ export default function WorkspaceView() {
   }
 
   return (
-    <WorkspaceRuntimeView
-      workspaceId={selectedWorkspaceID!}
-      workspaceRoot={selectedWs.worktreePath}
-      runtime={runtime}
-      layoutTargetOnFocus={null}
-    />
+    <div
+      className="h-full min-h-0"
+      onPointerDownCapture={() => {
+        setLayoutTargetRuntimeId(null);
+        setNavigationArea("workspace");
+      }}
+    >
+      <WorkspaceRuntimeView
+        workspaceId={selectedWorkspaceID!}
+        workspaceRoot={selectedWs.worktreePath}
+        runtime={runtime}
+        layoutTargetOnFocus={null}
+      />
+    </div>
   );
 }
