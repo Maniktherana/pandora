@@ -18,8 +18,6 @@ import { findLeaf } from "@/lib/layout-migrate";
 import { tryCloseEditorTab } from "@/lib/close-dirty-editor";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime-keys";
 import {
-  seedFirstProjectTerminal,
-  seedFirstWorkspaceTerminal,
   seedProjectTerminal,
   seedWorkspaceTerminal,
 } from "@/lib/terminal-seed";
@@ -43,8 +41,6 @@ export default function App() {
   const clientRef = useRef<DaemonClient | null>(null);
   const pendingStoppedTerminalRemovalsRef = useRef(new Set<string>());
   const store = useWorkspaceStore;
-  // Survives HMR so we don't re-seed terminals on hot reload.
-  const hasSeeded = ((globalThis as any).__pandoraHasSeeded ??= new Set<string>()) as Set<string>;
 
   useEffect(() => {
     let cancelled = false;
@@ -110,27 +106,20 @@ export default function App() {
         store.getState().setRuntimeConnectionState(workspaceId, state);
       },
       onSlotSnapshot: (workspaceId, slots) => {
-        // On first connect the daemon may return stale slots from a previous session.
-        // Ignore them and start fresh with a single terminal.
-        if (!hasSeeded.has(workspaceId)) {
-          hasSeeded.add(workspaceId);
-          // Clear any stale persisted slots
-          for (const slot of slots) {
-            client.send(workspaceId, { type: "remove_slot", slotID: slot.id });
-          }
-          store.getState().setRuntimeSlots(workspaceId, []);
-          if (workspaceId.startsWith("project:")) {
-            seedFirstProjectTerminal(client, workspaceId);
-          } else {
-            seedFirstWorkspaceTerminal(client, workspaceId);
-          }
-          return;
-        }
         clearPendingStoppedTerminalRemovals(
           workspaceId,
           slots.map((slot) => slot.id)
         );
         store.getState().setRuntimeSlots(workspaceId, slots);
+        if (slots.length === 0) {
+          if (workspaceId.startsWith("project:")) {
+            const seeded = seedProjectTerminal(client, workspaceId);
+            store.getState().addProjectTerminalGroup(workspaceId, seeded.slotID);
+          } else {
+            seedWorkspaceTerminal(client, workspaceId);
+          }
+          return;
+        }
         // Auto-open session instances for terminal slots that need them
         for (const slot of slots) {
           if (slot.kind === "terminal_slot" && slot.sessionIDs.length === 0 && slot.sessionDefIDs.length > 0) {
