@@ -3,7 +3,7 @@
 
 // Rust: native_shortcuts.rs — 0 = Ghostty, 1 = emitted app-shortcut, 2 = super (Cmd+Q quit chain)
 uint8_t pandora_try_emit_app_shortcut(unsigned int keycode, BOOL cmd, BOOL shift, BOOL ctrl, BOOL alt);
-void pandora_emit_terminal_focus(ghostty_surface_t surface);
+void pandora_emit_terminal_focus(const char *session_id);
 
 static ghostty_input_mods_e PandoraModsFromEvent(NSEvent *event) {
     NSUInteger flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
@@ -50,6 +50,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 
 @interface PandoraTerminalNativeView : NSView
 @property(nonatomic, assign) ghostty_surface_t surface;
+@property(nonatomic, copy, nullable) NSString *sessionID;
 @end
 
 @implementation PandoraTerminalNativeView
@@ -98,7 +99,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     BOOL accepted = [super becomeFirstResponder];
     if (accepted && self.surface != NULL) {
         ghostty_surface_set_focus(self.surface, true);
-        pandora_emit_terminal_focus(self.surface);
+        if (self.sessionID != nil) {
+            pandora_emit_terminal_focus(self.sessionID.UTF8String);
+        }
     }
     return accepted;
 }
@@ -302,7 +305,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         return;
     }
     [[self window] makeFirstResponder:self];
-    pandora_emit_terminal_focus(self.surface);
+    if (self.sessionID != nil) {
+        pandora_emit_terminal_focus(self.sessionID.UTF8String);
+    }
     NSPoint point = [self pandoraConvertedPoint:event];
     ghostty_surface_mouse_pos(self.surface, point.x, point.y, PandoraModsFromEvent(event));
     ghostty_surface_mouse_button(self.surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, PandoraModsFromEvent(event));
@@ -322,7 +327,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         return;
     }
     [[self window] makeFirstResponder:self];
-    pandora_emit_terminal_focus(self.surface);
+    if (self.sessionID != nil) {
+        pandora_emit_terminal_focus(self.sessionID.UTF8String);
+    }
     NSPoint point = [self pandoraConvertedPoint:event];
     ghostty_surface_mouse_pos(self.surface, point.x, point.y, PandoraModsFromEvent(event));
     ghostty_surface_mouse_button(self.surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, PandoraModsFromEvent(event));
@@ -370,6 +377,15 @@ void pandora_terminal_view_set_surface(void *view_ptr, ghostty_surface_t surface
     PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
     view.surface = surface;
     [view pandoraSyncBackingToSurface];
+}
+
+void pandora_terminal_view_set_session_id(void *view_ptr, const char *session_id) {
+    PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
+    if (session_id == NULL) {
+        view.sessionID = nil;
+        return;
+    }
+    view.sessionID = [NSString stringWithUTF8String:session_id];
 }
 
 bool pandora_terminal_view_focus(void *view_ptr) {

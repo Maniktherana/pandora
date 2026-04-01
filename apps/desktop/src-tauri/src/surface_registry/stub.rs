@@ -1,5 +1,8 @@
 //! Stub registry when libghostty is not linked (non–Apple Silicon or non-macOS).
 
+use std::sync::Arc;
+use tauri::AppHandle;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SurfaceRect {
@@ -17,14 +20,12 @@ impl SurfaceRegistry {
         Self
     }
 
-    pub fn feed_output(&self, _session_id: &str, _data: &[u8]) -> bool {
+    pub fn feed_output(
+        self: &Arc<Self>,
+        _app_handle: &AppHandle,
+        _session_id: &str,
+        _data: &[u8],
+    ) -> bool {
         false
-    }
-
-    pub fn session_id_for_ghostty_surface(
-        &self,
-        _surface: *mut std::ffi::c_void,
-    ) -> Option<String> {
-        None
     }
 }

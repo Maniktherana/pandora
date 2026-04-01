@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, TauriEvent } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -11,6 +11,11 @@ interface TerminalSurfaceRect {
   width: number;
   height: number;
   scaleFactor: number;
+}
+
+interface NativeSyncPayload {
+  rect: TerminalSurfaceRect;
+  signature: string;
 }
 
 export interface TerminalSurfaceProps {
@@ -35,6 +40,11 @@ export default function TerminalSurface({
   const containerRef = useRef<HTMLDivElement>(null);
   const createdRef = useRef(false);
   const [nativeOk, setNativeOk] = useState<boolean | null>(null);
+  const lastSignatureRef = useRef<string | null>(null);
+  const rafSyncRef = useRef<number | null>(null);
+  const pendingCreateRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const resyncRequestedRef = useRef(false);
 
   const nativeOkRef = useRef<boolean | null>(null);
   nativeOkRef.current = nativeOk;
@@ -73,91 +83,127 @@ export default function TerminalSurface({
     };
   }, [sessionID]);
 
-  const performSync = useCallback((forceCreate: boolean) => {
-    if (nativeOkRef.current !== true) return;
+  const buildPayload = useCallback((): NativeSyncPayload | null => {
     const el = ctxRef.current.anchorElement ?? containerRef.current;
-    if (!el) return;
+    if (!el) return null;
     const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return;
+    if (r.width <= 0 || r.height <= 0) return null;
+
+    const snap = (value: number) => Math.round(value * 4) / 4;
 
     const rect: TerminalSurfaceRect = {
-      x: r.left,
-      y: r.top,
-      width: r.width,
-      height: r.height,
+      x: snap(r.left),
+      y: snap(r.top),
+      width: snap(r.width),
+      height: snap(r.height),
       scaleFactor: 1,
     };
+
+    return {
+      rect,
+      signature: JSON.stringify({
+        rect,
+        visible: ctxRef.current.visible,
+        focused: ctxRef.current.focused,
+      }),
+    };
+  }, []);
+
+  const syncNative = useCallback(async (forceCreate: boolean) => {
+    if (nativeOkRef.current !== true) return;
+    const payload = buildPayload();
+    if (!payload) return;
 
     const { sessionID: sid, workspaceId: wid, surfaceId: sfid, visible: vis, focused: foc } =
       ctxRef.current;
 
     if (!createdRef.current || forceCreate) {
+      lastSignatureRef.current = null;
+      pendingCreateRef.current = false;
       createdRef.current = true;
-      void invoke("terminal_surface_create", {
+      await invoke("terminal_surface_create", {
         surfaceId: sfid,
         workspaceId: wid,
         sessionId: sid,
-        rect,
-      }).catch((e) => console.error("Failed to create native surface:", e));
+        rect: payload.rect,
+      }).catch((e) => {
+        createdRef.current = false;
+        throw e;
+      });
     }
 
-    void invoke("terminal_surface_update", {
+    if (lastSignatureRef.current === payload.signature) return;
+    lastSignatureRef.current = payload.signature;
+
+    await invoke("terminal_surface_update", {
       surfaceId: sfid,
-      rect,
+      rect: payload.rect,
       visible: vis,
       focused: foc,
-    }).catch(() => {});
-  }, []);
+    }).catch((error) => {
+      lastSignatureRef.current = null;
+      throw error;
+    });
+  }, [buildPayload]);
 
-  const performSyncRef = useRef(performSync);
-  performSyncRef.current = performSync;
+  const runSync = useCallback(async () => {
+    if (syncInFlightRef.current) {
+      resyncRequestedRef.current = true;
+      return;
+    }
 
-  const rafSyncRef = useRef<number | null>(null);
-  const scheduleSync = useCallback(() => {
+    syncInFlightRef.current = true;
+    try {
+      do {
+        const forceCreate = pendingCreateRef.current;
+        pendingCreateRef.current = false;
+        resyncRequestedRef.current = false;
+        await syncNative(forceCreate);
+      } while (resyncRequestedRef.current);
+    } catch (error) {
+      console.error("Failed to sync native terminal surface:", error);
+    } finally {
+      syncInFlightRef.current = false;
+    }
+  }, [syncNative]);
+
+  const scheduleSync = useCallback((forceCreate = false) => {
+    if (nativeOkRef.current !== true) return;
+    if (forceCreate) pendingCreateRef.current = true;
     if (rafSyncRef.current != null) return;
     rafSyncRef.current = requestAnimationFrame(() => {
       rafSyncRef.current = null;
-      performSyncRef.current(false);
+      void runSync();
     });
-  }, []);
+  }, [runSync]);
 
   useEffect(() => {
     if (nativeOk !== true || !sessionID) return;
 
-    let cancelled = false;
-    let innerRaf = 0;
-    let outerRaf = 0;
-
-    queueMicrotask(() => {
-      if (!cancelled) performSyncRef.current(true);
-    });
-    outerRaf = requestAnimationFrame(() => {
-      innerRaf = requestAnimationFrame(() => {
-        if (!cancelled) performSyncRef.current(true);
-      });
-    });
+    createdRef.current = false;
+    lastSignatureRef.current = null;
+    scheduleSync(true);
 
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(outerRaf);
-      cancelAnimationFrame(innerRaf);
+      if (rafSyncRef.current != null) {
+        cancelAnimationFrame(rafSyncRef.current);
+        rafSyncRef.current = null;
+      }
+      pendingCreateRef.current = false;
+      resyncRequestedRef.current = false;
       createdRef.current = false;
+      lastSignatureRef.current = null;
       void invoke("terminal_surface_destroy", { surfaceId }).catch(() => {});
     };
-  }, [nativeOk, sessionID, surfaceId]);
+  }, [nativeOk, sessionID, surfaceId, scheduleSync]);
 
   useEffect(() => {
     if (nativeOk !== true) return;
-
-    const syncNow = () => {
-      performSyncRef.current(false);
-    };
-
     const onWinResize = () => scheduleSync();
     window.addEventListener("resize", onWinResize);
 
     const onVis = () => {
-      if (document.visibilityState === "visible") syncNow();
+      if (document.visibilityState === "visible") scheduleSync();
     };
     document.addEventListener("visibilitychange", onVis);
 
@@ -171,16 +217,9 @@ export default function TerminalSurface({
         })
         .catch(() => {});
     };
-    push(win.onScaleChanged(() => syncNow()));
+    push(win.onScaleChanged(() => scheduleSync()));
     push(win.onResized(() => scheduleSync()));
-    push(win.onMoved(() => syncNow()));
-    push(win.listen(TauriEvent.WINDOW_MOVED, () => syncNow()));
-    push(win.listen(TauriEvent.WINDOW_RESIZED, () => scheduleSync()));
-    push(win.listen(TauriEvent.WINDOW_SCALE_FACTOR_CHANGED, () => syncNow()));
-
-    const scalePoll = window.setInterval(() => {
-      scheduleSync();
-    }, 2000);
+    push(win.onMoved(() => scheduleSync()));
 
     return () => {
       cancelled = true;
@@ -190,7 +229,6 @@ export default function TerminalSurface({
       }
       window.removeEventListener("resize", onWinResize);
       document.removeEventListener("visibilitychange", onVis);
-      window.clearInterval(scalePoll);
       for (const u of unlisteners) u();
     };
   }, [nativeOk, scheduleSync]);
@@ -211,36 +249,10 @@ export default function TerminalSurface({
     };
   }, [nativeOk, surfaceId, anchorElement, scheduleSync]);
 
-  useEffect(() => {
-    if (nativeOk !== true) return;
-    performSyncRef.current(false);
-    if (!visible) return;
-    let inner = 0;
-    const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => performSyncRef.current(false));
-    });
-    return () => {
-      cancelAnimationFrame(outer);
-      cancelAnimationFrame(inner);
-    };
-  }, [nativeOk, visible, focused]);
-
   useLayoutEffect(() => {
-    if (nativeOk !== true) return;
-    performSyncRef.current(false);
-    let rafA = 0;
-    let rafB = 0;
-    rafA = requestAnimationFrame(() => {
-      performSyncRef.current(false);
-      rafB = requestAnimationFrame(() => {
-        performSyncRef.current(false);
-      });
-    });
-    return () => {
-      cancelAnimationFrame(rafA);
-      cancelAnimationFrame(rafB);
-    };
-  });
+    if (nativeOk !== true || !sessionID) return;
+    scheduleSync();
+  }, [nativeOk, sessionID, surfaceId, anchorElement, visible, focused, scheduleSync]);
 
   const errorUi = (
     <div

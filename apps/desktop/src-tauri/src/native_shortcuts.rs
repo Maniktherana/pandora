@@ -2,10 +2,8 @@
 //! webview, so Tauri/React shortcut handlers do not run. Route the same app shortcuts here
 //! and emit `app-shortcut` for the frontend.
 
-use crate::surface_registry::SurfaceRegistry;
-use std::sync::Arc;
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -88,20 +86,18 @@ pub extern "C" fn pandora_try_emit_app_shortcut(
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[no_mangle]
-pub extern "C" fn pandora_emit_terminal_focus(surface: *mut std::ffi::c_void) {
+pub extern "C" fn pandora_emit_terminal_focus(session_id: *const std::ffi::c_char) {
     let Some(app) = APP.get() else {
         return;
     };
-    let app = app.clone();
-    let registry = app.state::<Arc<SurfaceRegistry>>().inner().clone();
-    let surface = surface as usize;
-    tauri::async_runtime::spawn(async move {
-        if let Some(session_id) =
-            registry.session_id_for_ghostty_surface(surface as *mut std::ffi::c_void)
-        {
-            let _ = app.emit("native-terminal-focus", session_id);
-        }
-    });
+    if session_id.is_null() {
+        return;
+    }
+
+    let session_id = unsafe { std::ffi::CStr::from_ptr(session_id) };
+    if let Ok(session_id) = session_id.to_str() {
+        let _ = app.emit("native-terminal-focus", session_id.to_string());
+    }
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -118,4 +114,4 @@ pub extern "C" fn pandora_try_emit_app_shortcut(
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[no_mangle]
-pub extern "C" fn pandora_emit_terminal_focus(_surface: *mut std::ffi::c_void) {}
+pub extern "C" fn pandora_emit_terminal_focus(_session_id: *const std::ffi::c_char) {}

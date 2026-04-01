@@ -16,12 +16,14 @@ use objc2_app_kit::NSView;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 unsafe extern "C" {
     fn pandora_terminal_view_new(x: f64, y: f64, width: f64, height: f64) -> *mut c_void;
     fn pandora_terminal_view_set_surface(view: *mut c_void, surface: ghostty_surface_t);
+    fn pandora_terminal_view_set_session_id(view: *mut c_void, session_id: *const std::ffi::c_char);
     fn pandora_terminal_view_focus(view: *mut c_void) -> bool;
 }
 
@@ -63,6 +65,8 @@ struct NativeSurface {
     ns_view: Retained<NSView>,
     _callback_ctx: Arc<SurfaceCallbackContext>,
     callback_ctx_raw: *const SurfaceCallbackContext,
+    output_queue: Vec<Vec<u8>>,
+    flush_scheduled: bool,
     rect: SurfaceRect,
     visible: bool,
     focused: bool,
@@ -158,6 +162,9 @@ pub struct SurfaceRegistry {
 unsafe impl Send for SurfaceRegistry {}
 unsafe impl Sync for SurfaceRegistry {}
 
+const FLUSH_BATCH_CHUNK_LIMIT: usize = 64;
+const FLUSH_BATCH_BYTE_LIMIT: usize = 256 * 1024;
+
 impl SurfaceRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
@@ -193,15 +200,83 @@ impl SurfaceRegistry {
         Some(native_surface)
     }
 
-    fn flush_pending_locked(
-        inner: &mut RegistryInner,
-        session_id: &str,
-        surface: ghostty_surface_t,
-    ) {
-        let buffered = inner.pending_output.remove(session_id).unwrap_or_default();
-        for chunk in buffered {
+    fn flush_pending_locked(inner: &mut RegistryInner, session_id: &str) -> Vec<Vec<u8>> {
+        inner.pending_output.remove(session_id).unwrap_or_default()
+    }
+
+    fn schedule_surface_flush(
+        self: &Arc<Self>,
+        app_handle: &AppHandle,
+        surface_id: &str,
+    ) -> Result<(), String> {
+        let registry = Arc::clone(self);
+        let dispatch_handle = app_handle.clone();
+        let flush_handle = app_handle.clone();
+        let surface_id = surface_id.to_string();
+        dispatch_handle
+            .run_on_main_thread(move || {
+                registry.flush_surface_output(&flush_handle, &surface_id);
+            })
+            .map_err(|err| err.to_string())
+    }
+
+    fn flush_surface_output(self: &Arc<Self>, app_handle: &AppHandle, surface_id: &str) {
+        let (ghostty_surface, queued_chunks, has_more) = {
+            let mut inner = self.inner.lock().unwrap();
+            let surface = match inner.surfaces.get_mut(surface_id) {
+                Some(surface) => surface,
+                None => return,
+            };
+
+            if surface.output_queue.is_empty() {
+                surface.flush_scheduled = false;
+                return;
+            }
+
+            let mut chunk_count = 0usize;
+            let mut byte_count = 0usize;
+            for chunk in &surface.output_queue {
+                if chunk_count >= FLUSH_BATCH_CHUNK_LIMIT {
+                    break;
+                }
+                if chunk_count > 0 && byte_count + chunk.len() > FLUSH_BATCH_BYTE_LIMIT {
+                    break;
+                }
+                chunk_count += 1;
+                byte_count += chunk.len();
+                if byte_count >= FLUSH_BATCH_BYTE_LIMIT {
+                    break;
+                }
+            }
+
+            let chunk_count = chunk_count.max(1);
+            let queued_chunks = surface
+                .output_queue
+                .drain(..chunk_count)
+                .collect::<Vec<_>>();
+            let has_more = !surface.output_queue.is_empty();
+            if !has_more {
+                surface.flush_scheduled = false;
+            }
+
+            (surface.ghostty_surface, queued_chunks, has_more)
+        };
+
+        for chunk in queued_chunks {
             unsafe {
-                ghostty_surface_write_buffer(surface, chunk.as_ptr(), chunk.len());
+                ghostty_surface_write_buffer(ghostty_surface, chunk.as_ptr(), chunk.len());
+            }
+        }
+
+        if has_more {
+            if let Err(err) = self.schedule_surface_flush(app_handle, surface_id) {
+                eprintln!(
+                    "[surface_registry] failed to reschedule surface flush for {}: {}",
+                    surface_id, err
+                );
+                if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(surface_id) {
+                    surface.flush_scheduled = false;
+                }
             }
         }
     }
@@ -307,12 +382,14 @@ impl SurfaceRegistry {
         }
 
         let ns_view_raw = Retained::as_ptr(&ns_view) as *mut c_void;
+        let session_id_cstr = CString::new(session_id.clone())
+            .map_err(|_| "session id contained NUL byte".to_string())?;
 
         // --- Callback context ---
         let callback_ctx = Arc::new(SurfaceCallbackContext {
             workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
-            app_handle,
+            app_handle: app_handle.clone(),
         });
         let callback_ctx_raw = Arc::into_raw(callback_ctx.clone());
 
@@ -341,6 +418,7 @@ impl SurfaceRegistry {
         }
 
         unsafe {
+            pandora_terminal_view_set_session_id(ns_view_raw, session_id_cstr.as_ptr());
             pandora_terminal_view_set_surface(ns_view_raw, surface);
         }
 
@@ -356,21 +434,34 @@ impl SurfaceRegistry {
             ns_view,
             _callback_ctx: callback_ctx,
             callback_ctx_raw,
+            output_queue: Vec::new(),
+            flush_scheduled: false,
             rect,
             visible: true,
             focused: false,
         };
 
+        let mut should_flush_output = false;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.surfaces.insert(surface_id.clone(), native_surface);
             inner
                 .session_map
                 .insert(session_id.clone(), surface_id.clone());
-            Self::flush_pending_locked(&mut inner, &session_id, surface);
-            if let Some(s) = inner.surfaces.get(&surface_id) {
+            let pending_output = Self::flush_pending_locked(&mut inner, &session_id);
+            if let Some(s) = inner.surfaces.get_mut(&surface_id) {
+                if !pending_output.is_empty() {
+                    s.output_queue.extend(pending_output);
+                    s.flush_scheduled = true;
+                    should_flush_output = true;
+                }
                 s.ns_view.setHidden(suppress);
             }
+        }
+
+        if should_flush_output {
+            let registry = app_handle.state::<Arc<SurfaceRegistry>>().inner().clone();
+            registry.flush_surface_output(&app_handle, &surface_id);
         }
 
         Ok(())
@@ -391,31 +482,42 @@ impl SurfaceRegistry {
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         let suppress = self.web_ui_suppresses_native_terminals();
-        let mut inner = self.inner.lock().unwrap();
-        let surface = match inner.surfaces.get_mut(surface_id) {
-            Some(surface) => surface,
-            None => return Ok(()),
+        let (ghostty_surface, ns_view_ptr, prev_rect, prev_visible, prev_focused) = {
+            let inner = self.inner.lock().unwrap();
+            let surface = match inner.surfaces.get(surface_id) {
+                Some(surface) => surface,
+                None => return Ok(()),
+            };
+            (
+                surface.ghostty_surface,
+                Retained::as_ptr(&surface.ns_view) as *mut c_void,
+                surface.rect.clone(),
+                surface.visible,
+                surface.focused,
+            )
         };
 
         // Re-apply content scale on every IPC tick so Ghostty catches up even when AppKit briefly
         // reports an unchanged scale factor (stale `surface.rect` vs fresh `rect`).
         unsafe {
             ghostty_surface_set_content_scale(
-                surface.ghostty_surface,
+                ghostty_surface,
                 rect.scale_factor,
                 rect.scale_factor,
             );
         }
 
         if surface_state_unchanged(
-            &surface.rect,
+            &prev_rect,
             &rect,
-            surface.visible,
+            prev_visible,
             visible,
-            surface.focused,
+            prev_focused,
             focused,
         ) {
-            surface.rect.scale_factor = rect.scale_factor;
+            if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(surface_id) {
+                surface.rect.scale_factor = rect.scale_factor;
+            }
             return Ok(());
         }
 
@@ -433,39 +535,42 @@ impl SurfaceRegistry {
         );
 
         // Update NSView frame and visibility
-        surface.ns_view.setFrame(new_frame);
         let hidden = suppress || !visible;
-        surface.ns_view.setHidden(hidden);
+        unsafe {
+            let ns_view = ns_view_ptr as *mut AnyObject;
+            let _: () = objc2::msg_send![ns_view, setFrame: new_frame];
+            let _: () = objc2::msg_send![ns_view, setHidden: hidden];
+        }
 
         // Update ghostty surface size (in pixels)
         let width_px = (rect.width * rect.scale_factor) as u32;
         let height_px = (rect.height * rect.scale_factor) as u32;
         unsafe {
-            ghostty_surface_set_size(surface.ghostty_surface, width_px, height_px);
+            ghostty_surface_set_size(ghostty_surface, width_px, height_px);
         }
 
         // Update focus
         unsafe {
-            ghostty_surface_set_focus(surface.ghostty_surface, focused);
+            ghostty_surface_set_focus(ghostty_surface, focused);
         }
         if focused {
-            let _ = unsafe {
-                pandora_terminal_view_focus(Retained::as_ptr(&surface.ns_view) as *mut c_void)
-            };
+            let _ = unsafe { pandora_terminal_view_focus(ns_view_ptr) };
         }
 
         unsafe {
             ghostty_surface_set_content_scale(
-                surface.ghostty_surface,
+                ghostty_surface,
                 rect.scale_factor,
                 rect.scale_factor,
             );
         }
 
         // Persist state
-        surface.rect = rect;
-        surface.visible = visible;
-        surface.focused = focused;
+        if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(surface_id) {
+            surface.rect = rect;
+            surface.visible = visible;
+            surface.focused = focused;
+        }
 
         Ok(())
     }
@@ -477,9 +582,18 @@ impl SurfaceRegistry {
         if *d != 1 {
             return;
         }
-        let inner = self.inner.lock().unwrap();
-        for s in inner.surfaces.values() {
-            s.ns_view.setHidden(true);
+        let views = {
+            let inner = self.inner.lock().unwrap();
+            inner
+                .surfaces
+                .values()
+                .map(|surface| Retained::as_ptr(&surface.ns_view) as *mut AnyObject)
+                .collect::<Vec<_>>()
+        };
+        for view in views {
+            unsafe {
+                let _: () = objc2::msg_send![view, setHidden: true];
+            }
         }
     }
 
@@ -490,9 +604,23 @@ impl SurfaceRegistry {
         if *d > 0 {
             return;
         }
-        let inner = self.inner.lock().unwrap();
-        for s in inner.surfaces.values() {
-            s.ns_view.setHidden(!s.visible);
+        let views = {
+            let inner = self.inner.lock().unwrap();
+            inner
+                .surfaces
+                .values()
+                .map(|surface| {
+                    (
+                        Retained::as_ptr(&surface.ns_view) as *mut AnyObject,
+                        !surface.visible,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        for (view, hidden) in views {
+            unsafe {
+                let _: () = objc2::msg_send![view, setHidden: hidden];
+            }
         }
     }
 
@@ -512,82 +640,104 @@ impl SurfaceRegistry {
     /// Feed terminal output data to a surface, identified by session ID.
     ///
     /// Returns `true` if the surface was found and data was written.
-    pub fn feed_output(&self, session_id: &str, data: &[u8]) -> bool {
-        let mut inner = self.inner.lock().unwrap();
-        let surface_id = match inner.session_map.get(session_id).cloned() {
-            Some(id) => id,
-            None => {
-                inner
-                    .pending_output
-                    .entry(session_id.to_string())
-                    .or_default()
-                    .push(data.to_vec());
-                return false;
+    pub fn feed_output(
+        self: &Arc<Self>,
+        app_handle: &AppHandle,
+        session_id: &str,
+        data: &[u8],
+    ) -> bool {
+        let (surface_id, should_schedule) = {
+            let mut inner = self.inner.lock().unwrap();
+            let surface_id = match inner.session_map.get(session_id).cloned() {
+                Some(id) => id,
+                None => {
+                    inner
+                        .pending_output
+                        .entry(session_id.to_string())
+                        .or_default()
+                        .push(data.to_vec());
+                    return false;
+                }
+            };
+
+            match inner.surfaces.get_mut(&surface_id) {
+                Some(surface) => {
+                    surface.output_queue.push(data.to_vec());
+                    let should_schedule = if surface.flush_scheduled {
+                        false
+                    } else {
+                        surface.flush_scheduled = true;
+                        true
+                    };
+                    (surface_id, should_schedule)
+                }
+                None => {
+                    inner
+                        .pending_output
+                        .entry(session_id.to_string())
+                        .or_default()
+                        .push(data.to_vec());
+                    return false;
+                }
             }
         };
 
-        match inner.surfaces.get(&surface_id) {
-            Some(surface) => {
-                unsafe {
-                    ghostty_surface_write_buffer(
-                        surface.ghostty_surface,
-                        data.as_ptr(),
-                        data.len(),
-                    );
+        if should_schedule {
+            if let Err(err) = self.schedule_surface_flush(app_handle, &surface_id) {
+                eprintln!(
+                    "[surface_registry] failed to schedule surface flush for {}: {}",
+                    surface_id, err
+                );
+                if let Some(surface) = self.inner.lock().unwrap().surfaces.get_mut(&surface_id) {
+                    surface.flush_scheduled = false;
                 }
-                true
-            }
-            None => {
-                inner
-                    .pending_output
-                    .entry(session_id.to_string())
-                    .or_default()
-                    .push(data.to_vec());
-                false
             }
         }
+
+        true
     }
 
     /// Set focus on the given surface and unfocus all others.
     pub fn focus_surface(&self, surface_id: &str) -> Result<(), String> {
-        let mut inner = self.inner.lock().unwrap();
+        let surfaces = {
+            let inner = self.inner.lock().unwrap();
+            if !inner.surfaces.contains_key(surface_id) {
+                return Ok(());
+            }
+            inner
+                .surfaces
+                .iter()
+                .map(|(id, surface)| {
+                    (
+                        id.clone(),
+                        surface.ghostty_surface,
+                        Retained::as_ptr(&surface.ns_view) as *mut c_void,
+                        surface.focused,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
 
-        // Check the target surface exists
-        if !inner.surfaces.contains_key(surface_id) {
-            return Ok(());
-        }
-
-        for (id, surface) in inner.surfaces.iter_mut() {
+        for (id, ghostty_surface, ns_view_ptr, was_focused) in &surfaces {
             let should_focus = id == surface_id;
-            if surface.focused != should_focus {
+            if *was_focused != should_focus {
                 unsafe {
-                    ghostty_surface_set_focus(surface.ghostty_surface, should_focus);
+                    ghostty_surface_set_focus(*ghostty_surface, should_focus);
                 }
                 if should_focus {
-                    let _ = unsafe {
-                        pandora_terminal_view_focus(
-                            Retained::as_ptr(&surface.ns_view) as *mut c_void
-                        )
-                    };
+                    let _ = unsafe { pandora_terminal_view_focus(*ns_view_ptr) };
                 }
-                surface.focused = should_focus;
+            }
+        }
+
+        let mut inner = self.inner.lock().unwrap();
+        for (id, _, _, _) in surfaces {
+            if let Some(surface) = inner.surfaces.get_mut(&id) {
+                surface.focused = id == surface_id;
             }
         }
 
         Ok(())
-    }
-
-    pub fn session_id_for_ghostty_surface(&self, surface: ghostty_surface_t) -> Option<String> {
-        if surface.is_null() {
-            return None;
-        }
-
-        let inner = self.inner.lock().unwrap();
-        inner
-            .surfaces
-            .values()
-            .find(|native_surface| native_surface.ghostty_surface == surface)
-            .map(|native_surface| native_surface.session_id.clone())
     }
 }
 

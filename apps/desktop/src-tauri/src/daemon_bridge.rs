@@ -226,7 +226,7 @@ fn start_daemon_runtime(
                                     {
                                         let registry = app.state::<Arc<SurfaceRegistry>>();
                                         emitted_to_surface =
-                                            registry.inner().feed_output(session_id, &bytes);
+                                            registry.inner().feed_output(&app, session_id, &bytes);
                                     }
                                 }
                             }
