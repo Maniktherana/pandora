@@ -64,6 +64,21 @@ function databaseUserVersion(db: Database): number {
   return row?.user_version ?? 0;
 }
 
+function getRuntimeMetadata(db: Database, key: string): string | null {
+  const row = db
+    .query("SELECT value FROM runtime_metadata WHERE key = ?")
+    .get(key) as { value?: string } | null;
+  return row?.value ?? null;
+}
+
+function setRuntimeMetadata(db: Database, key: string, value: string): void {
+  db.query(
+    `INSERT INTO runtime_metadata (key, value)
+     VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(key, value);
+}
+
 export function openDatabase(options?: {
   dbPath?: string;
   workspacePath?: string;
@@ -113,8 +128,15 @@ export function openDatabase(options?: {
       resume_supported INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY(slot_id) REFERENCES slot_definitions(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS runtime_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
-  db.exec("PRAGMA user_version = 2;");
+  db.query(`UPDATE slot_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
+  db.query(`UPDATE session_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
+  db.exec("PRAGMA user_version = 3;");
   if (options?.dbPath === undefined || options?.workspacePath !== undefined || options?.defaultCwd !== undefined) {
     ensureSeedData(db, options?.defaultCwd ?? options?.workspacePath ?? homedir());
   }
@@ -124,6 +146,9 @@ export function openDatabase(options?: {
 function ensureSeedData(db: Database, defaultCwd: string): void {
   const slotCount = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as { count: number };
   if (slotCount.count > 0) {
+    return;
+  }
+  if (getRuntimeMetadata(db, "seed_terminal_when_empty") !== "1") {
     return;
   }
 
@@ -136,7 +161,7 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
   ).run(
     slotID,
     "terminal_slot",
-    "Local Terminal",
+    "Terminal",
     1,
     "single",
     sessionID,
@@ -152,7 +177,7 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
     sessionID,
     slotID,
     "terminal",
-    "Local Terminal",
+    "Terminal",
     "exec ${SHELL:-/bin/zsh} -i",
     defaultCwd,
     null,
@@ -161,6 +186,7 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
     1,
     1
   );
+  setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
 }
 
 export function listSlotDefinitions(db: Database): SlotDefinition[] {
@@ -259,6 +285,7 @@ export function createSlotDefinition(
     slot.persisted ? 1 : 0,
     slot.sortOrder
   );
+  setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
 
   return {
     ...slot,
@@ -310,6 +337,10 @@ export function updateSlotDefinition(db: Database, slot: Partial<SlotDefinition>
 export function removeSlotDefinition(db: Database, slotID: string): void {
   db.query("DELETE FROM session_definitions WHERE slot_id = ?").run(slotID);
   db.query("DELETE FROM slot_definitions WHERE id = ?").run(slotID);
+  const remaining = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as { count: number };
+  if (remaining.count === 0) {
+    setRuntimeMetadata(db, "seed_terminal_when_empty", "1");
+  }
 }
 
 export function createSessionDefinition(

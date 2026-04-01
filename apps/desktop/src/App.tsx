@@ -109,15 +109,7 @@ export default function App() {
           slots.map((slot) => slot.id)
         );
         store.getState().setRuntimeSlots(workspaceId, slots);
-        if (slots.length === 0) {
-          if (workspaceId.startsWith("project:")) {
-            const seeded = seedProjectTerminal(client, workspaceId);
-            store.getState().addProjectTerminalGroup(workspaceId, seeded.slotID);
-          } else {
-            seedWorkspaceTerminal(client, workspaceId);
-          }
-          return;
-        }
+        if (slots.length === 0) return;
         for (const slot of slots) {
           if (slot.kind === "terminal_slot" && slot.sessionIDs.length === 0 && slot.sessionDefIDs.length > 0) {
             client.openSessionInstance(workspaceId, slot.sessionDefIDs[0]);
@@ -150,6 +142,16 @@ export default function App() {
       onSessionClosed: (workspaceId, sessionID) => {
         store.getState().removeRuntimeSession(workspaceId, sessionID);
       },
+      onOutputChunk: (workspaceId, sessionID, data) => {
+        const decoded = (() => {
+          try {
+            return atob(data);
+          } catch {
+            return data;
+          }
+        })();
+        store.getState().noteTerminalOutput(workspaceId, sessionID, decoded);
+      },
       onError: (workspaceId, message) => {
         console.error(`Daemon error [${workspaceId}]:`, message);
       },
@@ -160,7 +162,26 @@ export default function App() {
     setTerminalDaemonClient(client);
     void client.connect();
 
+    let nativeInputUnlisten: (() => void) | undefined;
+    void listen<string>("native-terminal-input", (event) => {
+      try {
+        const payload = JSON.parse(event.payload) as {
+          workspaceId?: string;
+          sessionId?: string;
+          data?: string;
+        };
+        if (!payload.workspaceId || !payload.sessionId) return;
+        const decoded = payload.data ? atob(payload.data) : "";
+        if (!decoded) return;
+        store.getState().noteTerminalInput(payload.workspaceId, payload.sessionId, decoded);
+      } catch {
+      }
+    }).then((unlisten) => {
+      nativeInputUnlisten = unlisten;
+    });
+
     return () => {
+      nativeInputUnlisten?.();
       client.disconnect();
       (window as any).__daemonClient = null;
       setTerminalDaemonClient(null);

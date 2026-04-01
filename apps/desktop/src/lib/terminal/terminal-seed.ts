@@ -1,7 +1,5 @@
 import type { DaemonClient } from "../runtime/daemon-client";
 
-let workspaceTerminalCounter = 0;
-
 function defaultShellInfo(): { shellPath: string; shellName: string } {
   const shellPath =
     (typeof window !== "undefined" ? (window as typeof window & { __PANDORA_SHELL__?: string }).__PANDORA_SHELL__ : undefined) ||
@@ -13,8 +11,8 @@ function defaultShellInfo(): { shellPath: string; shellName: string } {
 export function seedTerminalWithName(client: DaemonClient, runtimeId: string, name?: string) {
   const slotID = crypto.randomUUID();
   const sessionDefID = crypto.randomUUID();
-  const { shellPath, shellName } = defaultShellInfo();
-  const label = name ?? shellName;
+  const { shellPath } = defaultShellInfo();
+  const label = name ?? "Terminal";
 
   client.send(runtimeId, {
     type: "create_slot",
@@ -49,14 +47,13 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
   });
 
   setTimeout(() => client.openSessionInstance(runtimeId, sessionDefID), 100);
-  return { slotID, sessionDefID, shellName };
+  return { slotID, sessionDefID, shellName: "terminal" };
 }
 
 export function seedWorkspaceTerminal(client: DaemonClient, runtimeId: string) {
-  workspaceTerminalCounter++;
-  return seedTerminalWithName(client, runtimeId, `Terminal ${workspaceTerminalCounter}`);
+  return seedTerminalWithName(client, runtimeId, "Terminal");
 }
 
 export function seedProjectTerminal(client: DaemonClient, runtimeId: string) {
-  return seedTerminalWithName(client, runtimeId);
+  return seedTerminalWithName(client, runtimeId, "Terminal");
 }

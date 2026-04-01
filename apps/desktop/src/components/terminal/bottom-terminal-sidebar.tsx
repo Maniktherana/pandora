@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Pencil, X } from "lucide-react";
 import { useTabDrag } from "@/components/dnd/tab-drag-layer";
+import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { SlotState, TerminalDisplayState, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
-import { terminalShellAppearance } from "@/lib/terminal/terminal-shell";
+import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 
 const DRAG_THRESHOLD = 5;
@@ -14,25 +15,9 @@ type SidebarRow = {
   groupIndex: number;
   slotId: string;
   slotIndex: number;
-  label: string;
+  display: TerminalDisplayState;
   treeState: "none" | "start" | "middle" | "last";
 };
-
-function ShellBadge({ name }: { name: string }) {
-  const shell = terminalShellAppearance(name);
-  return (
-    <span
-      className={cn(
-        "flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm px-1 text-[9px] font-semibold ring-1",
-        shell.className
-      )}
-      title={shell.label}
-      aria-hidden
-    >
-      {shell.badge}
-    </span>
-  );
-}
 
 function TreeGutter({ treeState }: { treeState: SidebarRow["treeState"] }) {
   if (treeState === "none") return <span className="w-2 shrink-0" aria-hidden />;
@@ -50,10 +35,6 @@ function TreeGutter({ treeState }: { treeState: SidebarRow["treeState"] }) {
   );
 }
 
-function slotLabel(slot: SlotState | undefined, fallback = "zsh"): string {
-  return slot?.name?.trim() || fallback;
-}
-
 export default function BottomTerminalSidebar({
   runtime,
   workspaceId,
@@ -65,6 +46,7 @@ export default function BottomTerminalSidebar({
   const slots = useWorkspaceStore((s) => s.runtimes[workspaceId]?.slots ?? []);
   const selectProjectTerminalGroup = useWorkspaceStore((s) => s.selectProjectTerminalGroup);
   const closeProjectTerminal = useWorkspaceStore((s) => s.closeProjectTerminal);
+  const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
   const { startDrag, dragState } = useTabDrag();
 
   const slotMap = useMemo(() => {
@@ -83,7 +65,7 @@ export default function BottomTerminalSidebar({
           groupIndex,
           slotId,
           slotIndex,
-          label: slotLabel(slotMap.get(slotId)),
+          display: terminalDisplayForSlot(slotMap.get(slotId), displayMap[slotId]),
           treeState:
             group.children.length === 1
               ? "none"
@@ -96,7 +78,7 @@ export default function BottomTerminalSidebar({
       }
     }
     return next;
-  }, [panel, slotMap]);
+  }, [displayMap, panel, slotMap]);
 
   const pendingDragRef = useRef<{
     row: SidebarRow;
@@ -135,7 +117,7 @@ export default function BottomTerminalSidebar({
         groupIndex: pending.row.groupIndex,
         slotId: pending.row.slotId,
         slotIndex: pending.row.slotIndex,
-        tabLabel: pending.row.label,
+        tabLabel: pending.row.display.label,
       });
       pendingDragRef.current = null;
     },
@@ -151,7 +133,7 @@ export default function BottomTerminalSidebar({
   const promptRename = useCallback(
     (slotId: string) => {
       const slot = slotMap.get(slotId);
-      const current = slotLabel(slot);
+      const current = terminalDisplayForSlot(slot, displayMap[slotId]).label;
       const next = window.prompt("Rename terminal", current)?.trim();
       if (!next || next === current) return;
       const client = getTerminalDaemonClient();
@@ -167,7 +149,7 @@ export default function BottomTerminalSidebar({
         });
       }
     },
-    [slotMap, workspaceId]
+    [displayMap, slotMap, workspaceId]
   );
 
   if (!panel || panel.groups.length === 0) {
@@ -238,8 +220,8 @@ export default function BottomTerminalSidebar({
                     }}
                   >
                     <TreeGutter treeState={row.treeState} />
-                    <ShellBadge name={row.label} />
-                    <span className="min-w-0 flex-1 truncate">{row.label}</span>
+                    <TerminalIdentityIcon identity={row.display} className="size-4" />
+                    <span className="min-w-0 flex-1 truncate">{row.display.label}</span>
                     <button
                       type="button"
                       className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-white/10 hover:text-neutral-100"

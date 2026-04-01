@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, X } from "lucide-react";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
+import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
 import { tabKey } from "@/lib/layout/layout-tree";
-import type { PaneTab } from "@/lib/shared/types";
+import type { PaneTab, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
+import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import { scmStatus, scmToneTextClass, statusTone, type ScmStatusEntry } from "@/lib/workspace/scm";
 import { useTabDrag } from "./tab-drag-layer";
@@ -22,10 +24,24 @@ interface TabBarProps {
 
 const DRAG_THRESHOLD = 5;
 
-function tabLabel(tab: PaneTab, slotsMap: Record<string, { name: string } | undefined>): string {
+function terminalTabDisplay(
+  tab: PaneTab,
+  slotsMap: Record<string, SlotState | undefined>,
+  displayMap: Record<string, TerminalDisplayState>
+): TerminalDisplayState {
+  if (tab.kind !== "terminal") {
+    return { kind: "terminal", label: "" };
+  }
+  return terminalDisplayForSlot(slotsMap[tab.slotId], displayMap[tab.slotId]);
+}
+
+function tabLabel(
+  tab: PaneTab,
+  slotsMap: Record<string, SlotState | undefined>,
+  displayMap: Record<string, TerminalDisplayState>
+): string {
   if (tab.kind === "terminal") {
-    const slot = slotsMap[tab.slotId];
-    return slot?.name ?? tab.slotId.slice(0, 8);
+    return terminalTabDisplay(tab, slotsMap, displayMap).label;
   }
   const base = tab.path.split("/").pop() ?? tab.path;
   if (tab.kind === "diff") {
@@ -97,6 +113,7 @@ export default function PaneTabBar({
   const { selectTabInPane, setFocusedPane, slotsByID, removePaneTabByIndex } = useWorkspaceStore();
   const { startDrag, dragState } = useTabDrag();
   const slotsMap = slotsByID(workspaceId);
+  const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const pendingDragRef = useRef<{
     sourceIndex: number;
@@ -113,12 +130,12 @@ export default function PaneTabBar({
       if (!tab) return;
       pendingDragRef.current = {
         sourceIndex: index,
-        label: tabLabel(tab, slotsMap),
+        label: tabLabel(tab, slotsMap, displayMap),
         startX: e.clientX,
         startY: e.clientY,
       };
     },
-    [tabs, slotsMap]
+    [tabs, slotsMap, displayMap]
   );
 
   const handlePointerMove = useCallback(
@@ -203,6 +220,7 @@ export default function PaneTabBar({
           dragState.sourcePaneID === paneID &&
           dragState.sourceIndex === index;
 
+        const terminalDisplay = tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, displayMap) : null;
         return (
           <div
             key={tabKey(tab)}
@@ -231,9 +249,11 @@ export default function PaneTabBar({
               <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
             ) : tab.kind === "diff" ? (
               <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
+            ) : terminalDisplay ? (
+              <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
             ) : null}
             <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
-              {tabLabel(tab, slotsMap)}
+              {tabLabel(tab, slotsMap, displayMap)}
             </span>
                 </>
               );
@@ -246,14 +266,14 @@ export default function PaneTabBar({
                 paneID={paneID}
                 index={index}
                 path={tab.path}
-                label={tabLabel(tab, slotsMap)}
+                label={tabLabel(tab, slotsMap, displayMap)}
                 isActive={isActive}
               />
             ) : tab.kind === "diff" ? (
               <div
                 role="button"
                 tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap)}`}
+                aria-label={`Close ${tabLabel(tab, slotsMap, displayMap)}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -272,7 +292,7 @@ export default function PaneTabBar({
               <div
                 role="button"
                 tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap)}`}
+                aria-label={`Close ${tabLabel(tab, slotsMap, displayMap)}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();

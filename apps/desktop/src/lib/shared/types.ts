@@ -14,6 +14,19 @@ export interface ActionCapabilities {
   canRestart: boolean;
 }
 
+export type TerminalDisplayKind =
+  | "terminal"
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "pi-agent"
+  | "gemini";
+
+export interface TerminalDisplayState {
+  kind: TerminalDisplayKind;
+  label: string;
+}
+
 export interface SlotState {
   id: string;
   kind: SlotKind;
@@ -165,6 +178,7 @@ export interface WorkspaceRuntimeState {
   workspaceId: string;
   slots: SlotState[];
   sessions: SessionState[];
+  terminalDisplayBySlotId: Record<string, TerminalDisplayState>;
   connectionState: "disconnected" | "connecting" | "connected";
   root: LayoutNode | null;
   focusedPaneID: string | null;

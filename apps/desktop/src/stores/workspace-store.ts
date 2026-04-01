@@ -43,6 +43,12 @@ import {
   setTerminalPanelVisible,
   terminalPanelContainsSlot,
 } from "@/lib/terminal/bottom-terminal-panel";
+import {
+  defaultTerminalDisplay,
+  detectTerminalDisplayFromInput,
+  detectTerminalDisplayFromOutput,
+  resetTerminalInputTracking,
+} from "@/lib/terminal/terminal-identity";
 
 export type NavigationArea = "sidebar" | "workspace";
 
@@ -124,6 +130,8 @@ interface WorkspaceStoreState {
   setRuntimeConnectionState: (workspaceId: string, state: "disconnected" | "connecting" | "connected") => void;
   setRuntimeSlots: (workspaceId: string, slots: SlotState[]) => void;
   setRuntimeSessions: (workspaceId: string, sessions: SessionState[]) => void;
+  noteTerminalInput: (workspaceId: string, sessionID: string, data: string) => void;
+  noteTerminalOutput: (workspaceId: string, sessionID: string, data: string) => void;
   updateRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
   addRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
   removeRuntimeSlot: (workspaceId: string, slotID: string) => void;
@@ -208,6 +216,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             workspaceId: pk,
             slots: [],
             sessions: [],
+            terminalDisplayBySlotId: {},
             connectionState: "connecting",
             root: placeholder,
             focusedPaneID: placeholder.id,
@@ -412,6 +421,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
               workspaceId: workspace.id,
               slots: [],
               sessions: [],
+              terminalDisplayBySlotId: {},
               connectionState: "connecting",
               root: null,
               focusedPaneID: null,
@@ -439,6 +449,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         workspaceId,
         slots: [],
         sessions: [],
+        terminalDisplayBySlotId: {},
         connectionState: "disconnected",
         root: null,
         focusedPaneID: null,
@@ -470,12 +481,19 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             runtime.terminalPanel ?? createEmptyTerminalPanel()
           )
         : runtime.terminalPanel;
+      const terminalDisplayBySlotId = Object.fromEntries(
+        slots.map((slot) => [
+          slot.id,
+          runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay(),
+        ])
+      );
       return {
         runtimes: {
           ...s.runtimes,
           [workspaceId]: {
             ...runtime,
             slots,
+            terminalDisplayBySlotId,
             terminalPanel,
             root: layout.root,
             focusedPaneID: layout.focusedPaneID,
@@ -501,6 +519,58 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       };
     });
   },
+  noteTerminalInput: (workspaceId, sessionID, data) => {
+    const detected = detectTerminalDisplayFromInput(sessionID, data);
+    if (!detected) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      const session = runtime.sessions.find((item) => item.id === sessionID);
+      if (!session) return s;
+      const current = runtime.terminalDisplayBySlotId[session.slotID];
+      if (current?.kind === detected.kind && current.label === detected.label) {
+        return s;
+      }
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalDisplayBySlotId: {
+              ...runtime.terminalDisplayBySlotId,
+              [session.slotID]: detected,
+            },
+          },
+        },
+      };
+    });
+  },
+  noteTerminalOutput: (workspaceId, sessionID, data) => {
+    const detected = detectTerminalDisplayFromOutput(data);
+    if (!detected) return;
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return s;
+      const session = runtime.sessions.find((item) => item.id === sessionID);
+      if (!session) return s;
+      const current = runtime.terminalDisplayBySlotId[session.slotID];
+      if (current?.kind === detected.kind && current.label === detected.label) {
+        return s;
+      }
+      return {
+        runtimes: {
+          ...s.runtimes,
+          [workspaceId]: {
+            ...runtime,
+            terminalDisplayBySlotId: {
+              ...runtime.terminalDisplayBySlotId,
+              [session.slotID]: detected,
+            },
+          },
+        },
+      };
+    });
+  },
   updateRuntimeSlot: (workspaceId, slot) => {
     set((s) => {
       const runtime = s.runtimes[workspaceId];
@@ -511,6 +581,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           [workspaceId]: {
             ...runtime,
             slots: runtime.slots.map((existing) => (existing.id === slot.id ? slot : existing)),
+            terminalDisplayBySlotId: {
+              ...runtime.terminalDisplayBySlotId,
+              [slot.id]: runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay(),
+            },
           },
         },
       };
@@ -530,7 +604,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       return {
         runtimes: {
           ...s.runtimes,
-          [workspaceId]: { ...runtime, slots: [...runtime.slots, slot], terminalPanel },
+          [workspaceId]: {
+            ...runtime,
+            slots: [...runtime.slots, slot],
+            terminalPanel,
+            terminalDisplayBySlotId: {
+              ...runtime.terminalDisplayBySlotId,
+              [slot.id]: runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay(),
+            },
+          },
         },
       };
     });
@@ -560,12 +642,14 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             ? runtime.focusedPaneID
             : (leaves[0]?.id ?? null)
           : runtime.focusedPaneID;
+      const { [slotID]: _, ...terminalDisplayBySlotId } = runtime.terminalDisplayBySlotId;
       return {
         runtimes: {
           ...s.runtimes,
           [workspaceId]: {
             ...runtime,
             slots: runtime.slots.filter((sl) => sl.id !== slotID),
+            terminalDisplayBySlotId,
             root: newRoot,
             terminalPanel,
             focusedPaneID,
@@ -607,6 +691,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     });
   },
   removeRuntimeSession: (workspaceId, sessionID) => {
+    resetTerminalInputTracking(sessionID);
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
