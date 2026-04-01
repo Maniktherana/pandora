@@ -46,6 +46,34 @@ import {
 
 export type NavigationArea = "sidebar" | "workspace";
 
+function sanitizeWorkspaceTerminalLayout(
+  root: LayoutNode | null,
+  focusedPaneID: string | null,
+  liveSlotIds: Set<string>
+): { root: LayoutNode | null; focusedPaneID: string | null } {
+  if (!root) {
+    return { root: null, focusedPaneID: null };
+  }
+
+  let nextRoot: LayoutNode | null = root;
+  for (const slotId of new Set(getAllTerminalSlotIds(root))) {
+    if (!liveSlotIds.has(slotId)) {
+      nextRoot = nextRoot ? removeTerminalSlotFromTree(nextRoot, slotId) : null;
+    }
+  }
+
+  if (!nextRoot) {
+    return { root: null, focusedPaneID: null };
+  }
+
+  const nextFocusedPaneID =
+    focusedPaneID && findLeaf(nextRoot, focusedPaneID)
+      ? focusedPaneID
+      : (getAllLeaves(nextRoot)[0]?.id ?? null);
+
+  return { root: nextRoot, focusedPaneID: nextFocusedPaneID };
+}
+
 interface WorkspaceStoreState {
   // ─── Project/workspace model ───
   projects: ProjectRecord[];
@@ -429,6 +457,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;
+      const liveSlotIds = new Set(slots.map((slot) => slot.id));
+      const layout = !isProjectRuntimeKey(workspaceId)
+        ? sanitizeWorkspaceTerminalLayout(runtime.root, runtime.focusedPaneID, liveSlotIds)
+        : { root: runtime.root, focusedPaneID: runtime.focusedPaneID };
       const terminalPanel = isProjectRuntimeKey(workspaceId)
         ? slots.reduce<TerminalPanelState>(
             (panel, slot) =>
@@ -441,7 +473,13 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       return {
         runtimes: {
           ...s.runtimes,
-          [workspaceId]: { ...runtime, slots, terminalPanel },
+          [workspaceId]: {
+            ...runtime,
+            slots,
+            terminalPanel,
+            root: layout.root,
+            focusedPaneID: layout.focusedPaneID,
+          },
         },
       };
     });
@@ -1210,13 +1248,23 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       set((s) => {
         const runtime = s.runtimes[workspaceId];
         if (!runtime) return s;
+        const normalizedLayout =
+          layout && runtime.slots.length > 0
+            ? sanitizeWorkspaceTerminalLayout(
+                layout.root,
+                layout.focusedPaneID,
+                new Set(runtime.slots.map((slot) => slot.id))
+              )
+            : layout;
         return {
           runtimes: {
             ...s.runtimes,
             [workspaceId]: {
               ...runtime,
               layoutLoading: false,
-              ...(layout ? { root: layout.root, focusedPaneID: layout.focusedPaneID } : {}),
+              ...(normalizedLayout
+                ? { root: normalizedLayout.root, focusedPaneID: normalizedLayout.focusedPaneID }
+                : {}),
             },
           },
         };
