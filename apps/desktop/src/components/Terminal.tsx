@@ -54,6 +54,8 @@ export default function TerminalSurface({
     const el = ctxRef.current.anchorElement ?? containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    // Guard: detached or hidden anchors can report a 0x0 rect; skip sync so we do not
+    // position the native terminal at (0,0). The next valid anchor measurement will catch up.
     if (r.width <= 0 || r.height <= 0) return;
 
     // Layout only from the webview (CSS pixels / points). Scale is applied on the native side
@@ -109,7 +111,9 @@ export default function TerminalSurface({
     let innerRaf = 0;
     let outerRaf = 0;
 
-    performSyncRef.current(true);
+    queueMicrotask(() => {
+      if (!cancelled) performSyncRef.current(true);
+    });
     outerRaf = requestAnimationFrame(() => {
       innerRaf = requestAnimationFrame(() => {
         if (!cancelled) performSyncRef.current(true);

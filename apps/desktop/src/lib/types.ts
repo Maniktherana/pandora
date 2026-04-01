@@ -182,4 +182,5 @@ export interface WorkspaceRuntimeState {
   root: LayoutNode | null;
   focusedPaneID: string | null;
   terminalPanel: TerminalPanelState | null;
+  layoutLoading: boolean;
 }

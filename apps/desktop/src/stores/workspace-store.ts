@@ -181,6 +181,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             root: placeholder,
             focusedPaneID: placeholder.id,
             terminalPanel: createEmptyTerminalPanel(),
+            layoutLoading: false,
           },
         },
       }));
@@ -382,6 +383,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
               root: null,
               focusedPaneID: null,
               terminalPanel: null,
+              layoutLoading: true,
             },
           },
         }));
@@ -408,6 +410,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         root: null,
         focusedPaneID: null,
         terminalPanel: isProjectRuntimeKey(workspaceId) ? createEmptyTerminalPanel() : null,
+        layoutLoading: false,
       };
       return {
         runtimes: {
@@ -579,6 +582,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
   ensureRuntimeLayout: (workspaceId) => {
     const runtime = get().runtimes[workspaceId];
     if (!runtime) return;
+    if (runtime.layoutLoading) return;
     if (isProjectRuntimeKey(workspaceId)) return;
 
     const existingSlotIDs = runtime.root
@@ -1169,24 +1173,38 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         workspaceId,
       });
       const layout = raw != null ? migratePersistedLayout(raw) : null;
-      if (layout) {
-        set((s) => {
-          const runtime = s.runtimes[workspaceId];
-          if (!runtime) return s;
-          return {
-            runtimes: {
-              ...s.runtimes,
-              [workspaceId]: {
-                ...runtime,
-                root: layout.root,
-                focusedPaneID: layout.focusedPaneID,
-              },
+      set((s) => {
+        const runtime = s.runtimes[workspaceId];
+        if (!runtime) return s;
+        return {
+          runtimes: {
+            ...s.runtimes,
+            [workspaceId]: {
+              ...runtime,
+              layoutLoading: false,
+              ...(layout ? { root: layout.root, focusedPaneID: layout.focusedPaneID } : {}),
             },
-          };
-        });
+          },
+        };
+      });
+      if (!layout) {
+        get().ensureRuntimeLayout(workspaceId);
       }
     } catch {
-      // No persisted layout
+      set((s) => {
+        const runtime = s.runtimes[workspaceId];
+        if (!runtime) return s;
+        return {
+          runtimes: {
+            ...s.runtimes,
+            [workspaceId]: {
+              ...runtime,
+              layoutLoading: false,
+            },
+          },
+        };
+      });
+      get().ensureRuntimeLayout(workspaceId);
     }
   },
 

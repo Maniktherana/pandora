@@ -41,6 +41,7 @@ export default function App() {
   const prevFileTreeWorkspaceIdRef = useRef<string | null>(null);
   const fileTreeLoadTicketRef = useRef(0);
   const clientRef = useRef<DaemonClient | null>(null);
+  const pendingStoppedTerminalRemovalsRef = useRef(new Set<string>());
   const store = useWorkspaceStore;
   // Survives HMR so we don't re-seed terminals on hot reload.
   const hasSeeded = ((globalThis as any).__pandoraHasSeeded ??= new Set<string>()) as Set<string>;
@@ -79,6 +80,31 @@ export default function App() {
 
   // Initialize workspace-scoped daemon client
   useEffect(() => {
+    const scheduleStoppedTerminalRemoval = (
+      workspaceId: string,
+      session: { kind: string; status: string; slotID: string }
+    ) => {
+      if (session.kind !== "terminal" || session.status !== "stopped") return;
+      const key = `${workspaceId}:${session.slotID}`;
+      if (pendingStoppedTerminalRemovalsRef.current.has(key)) return;
+      pendingStoppedTerminalRemovalsRef.current.add(key);
+      client.send(workspaceId, { type: "remove_slot", slotID: session.slotID });
+    };
+
+    const clearPendingStoppedTerminalRemovals = (
+      workspaceId: string,
+      liveSlotIds: Iterable<string>
+    ) => {
+      const live = new Set(liveSlotIds);
+      for (const key of pendingStoppedTerminalRemovalsRef.current) {
+        if (!key.startsWith(`${workspaceId}:`)) continue;
+        const slotId = key.slice(workspaceId.length + 1);
+        if (!live.has(slotId)) {
+          pendingStoppedTerminalRemovalsRef.current.delete(key);
+        }
+      }
+    };
+
     const client = new DaemonClient({
       onConnectionStateChange: (workspaceId, state) => {
         store.getState().setRuntimeConnectionState(workspaceId, state);
@@ -100,6 +126,10 @@ export default function App() {
           }
           return;
         }
+        clearPendingStoppedTerminalRemovals(
+          workspaceId,
+          slots.map((slot) => slot.id)
+        );
         store.getState().setRuntimeSlots(workspaceId, slots);
         // Auto-open session instances for terminal slots that need them
         for (const slot of slots) {
@@ -110,17 +140,22 @@ export default function App() {
       },
       onSessionSnapshot: (workspaceId, sessions) => {
         store.getState().setRuntimeSessions(workspaceId, sessions);
+        for (const session of sessions) {
+          scheduleStoppedTerminalRemoval(workspaceId, session);
+        }
       },
       onSlotStateChanged: (workspaceId, slot) => {
         store.getState().updateRuntimeSlot(workspaceId, slot);
       },
       onSessionStateChanged: (workspaceId, session) => {
         store.getState().updateRuntimeSession(workspaceId, session);
+        scheduleStoppedTerminalRemoval(workspaceId, session);
       },
       onSlotAdded: (workspaceId, slot) => {
         store.getState().addRuntimeSlot(workspaceId, slot);
       },
       onSlotRemoved: (workspaceId, slotID) => {
+        pendingStoppedTerminalRemovalsRef.current.delete(`${workspaceId}:${slotID}`);
         store.getState().removeRuntimeSlot(workspaceId, slotID);
       },
       onSessionOpened: (workspaceId, session) => {

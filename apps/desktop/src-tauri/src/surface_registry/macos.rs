@@ -16,7 +16,7 @@ use objc2_app_kit::NSView;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 unsafe extern "C" {
@@ -51,11 +51,18 @@ struct SurfaceCallbackContext {
     app_handle: AppHandle,
 }
 
+struct RegistryInner {
+    surfaces: HashMap<String, NativeSurface>,
+    session_map: HashMap<String, String>,
+    pending_output: HashMap<String, Vec<Vec<u8>>>,
+}
+
 struct NativeSurface {
     session_id: String,
     ghostty_surface: ghostty_surface_t,
     ns_view: Retained<NSView>,
-    callback_ctx: *mut SurfaceCallbackContext,
+    _callback_ctx: Arc<SurfaceCallbackContext>,
+    callback_ctx_raw: *const SurfaceCallbackContext,
     rect: SurfaceRect,
     visible: bool,
     focused: bool,
@@ -139,10 +146,7 @@ fn surface_state_unchanged(
 // ---------------------------------------------------------------------------
 
 pub struct SurfaceRegistry {
-    surfaces: Mutex<HashMap<String, NativeSurface>>,
-    /// Map session_id -> surface_id for output routing
-    session_map: Mutex<HashMap<String, String>>,
-    pending_output: Mutex<HashMap<String, Vec<Vec<u8>>>>,
+    inner: Mutex<RegistryInner>,
     /// NSWindow pointer (the main Tauri window)
     window_ptr: Mutex<Option<*mut c_void>>,
     /// Refcount: while > 0, terminal NSViews stay hidden so web UI (tab drag, pane resize) receives input.
@@ -158,9 +162,11 @@ impl SurfaceRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
-            surfaces: Mutex::new(HashMap::new()),
-            session_map: Mutex::new(HashMap::new()),
-            pending_output: Mutex::new(HashMap::new()),
+            inner: Mutex::new(RegistryInner {
+                surfaces: HashMap::new(),
+                session_map: HashMap::new(),
+                pending_output: HashMap::new(),
+            }),
             window_ptr: Mutex::new(None),
             web_overlay_depth: Mutex::new(0),
         }
@@ -168,6 +174,41 @@ impl SurfaceRegistry {
 
     fn web_ui_suppresses_native_terminals(&self) -> bool {
         *self.web_overlay_depth.lock().unwrap() > 0
+    }
+
+    fn extract_surface_locked(inner: &mut RegistryInner, surface_id: &str) -> Option<NativeSurface> {
+        let native_surface = inner.surfaces.remove(surface_id)?;
+        if inner
+            .session_map
+            .get(&native_surface.session_id)
+            .map(|id| id == surface_id)
+            .unwrap_or(false)
+        {
+            inner.session_map.remove(&native_surface.session_id);
+        }
+        inner.pending_output.remove(&native_surface.session_id);
+        Some(native_surface)
+    }
+
+    fn flush_pending_locked(inner: &mut RegistryInner, session_id: &str, surface: ghostty_surface_t) {
+        let buffered = inner.pending_output.remove(session_id).unwrap_or_default();
+        for chunk in buffered {
+            unsafe {
+                ghostty_surface_write_buffer(surface, chunk.as_ptr(), chunk.len());
+            }
+        }
+    }
+
+    unsafe fn teardown_native_surface(native_surface: NativeSurface) {
+        // IMPORTANT: Null the view's surface pointer before freeing Ghostty so any AppKit
+        // callbacks triggered by removeFromSuperview see NULL and bail out.
+        pandora_terminal_view_set_surface(
+            Retained::as_ptr(&native_surface.ns_view) as *mut c_void,
+            std::ptr::null_mut(),
+        );
+        ghostty_surface_free(native_surface.ghostty_surface);
+        let _: () = objc2::msg_send![&*native_surface.ns_view, removeFromSuperview];
+        drop(Arc::from_raw(native_surface.callback_ctx_raw));
     }
 
     /// Store the NSWindow pointer for later use when adding subviews.
@@ -200,17 +241,25 @@ impl SurfaceRegistry {
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         // Layout changes may use a new surface_id for the same PTY; tear down the old native surface.
-        let prev_for_session = {
-            let sm = self.session_map.lock().unwrap();
-            sm.get(&session_id).cloned()
-        };
-        if let Some(old_id) = prev_for_session {
-            if old_id != surface_id {
-                let _ = self.destroy_surface(&old_id);
+        let mut old_surfaces = Vec::new();
+        {
+            let mut inner = self.inner.lock().unwrap();
+
+            if let Some(old_id) = inner.session_map.get(&session_id).cloned() {
+                if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &old_id) {
+                    old_surfaces.push(native_surface);
+                } else {
+                    inner.session_map.remove(&session_id);
+                    inner.pending_output.remove(&session_id);
+                }
+            }
+
+            if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &surface_id) {
+                old_surfaces.push(native_surface);
             }
         }
-        if self.surfaces.lock().unwrap().contains_key(&surface_id) {
-            let _ = self.destroy_surface(&surface_id);
+        for native_surface in old_surfaces {
+            unsafe { Self::teardown_native_surface(native_surface) };
         }
 
         // --- NSView creation (must happen on main thread) ---
@@ -230,6 +279,8 @@ impl SurfaceRegistry {
 
         let _mtm = MainThreadMarker::new()
             .ok_or_else(|| "create_surface must run on the main thread".to_string())?;
+
+        let suppress = self.web_ui_suppresses_native_terminals();
 
         // Create the native terminal NSView subclass that can receive key/mouse events.
         let ns_view_raw = unsafe {
@@ -252,11 +303,12 @@ impl SurfaceRegistry {
         let ns_view_raw = Retained::as_ptr(&ns_view) as *mut c_void;
 
         // --- Callback context ---
-        let callback_ctx = Box::into_raw(Box::new(SurfaceCallbackContext {
+        let callback_ctx = Arc::new(SurfaceCallbackContext {
             workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
             app_handle,
-        }));
+        });
+        let callback_ctx_raw = Arc::into_raw(callback_ctx.clone());
 
         // --- Ghostty surface config ---
         let mut config = unsafe { ghostty_surface_config_new() };
@@ -267,7 +319,7 @@ impl SurfaceRegistry {
         config.backend = ghostty_surface_io_backend_e::GHOSTTY_SURFACE_IO_BACKEND_HOST_MANAGED;
         config.scale_factor = rect.scale_factor;
         config.context = ghostty_surface_context_e::GHOSTTY_SURFACE_CONTEXT_WINDOW;
-        config.receive_userdata = callback_ctx as *mut c_void;
+        config.receive_userdata = callback_ctx_raw as *mut c_void;
         config.receive_buffer = Some(receive_buffer_callback);
         config.receive_resize = Some(receive_resize_callback);
 
@@ -277,7 +329,7 @@ impl SurfaceRegistry {
             // Clean up on failure
             unsafe {
                 let _: () = objc2::msg_send![&*ns_view, removeFromSuperview];
-                drop(Box::from_raw(callback_ctx));
+                drop(Arc::from_raw(callback_ctx_raw));
             }
             return Err("ghostty_surface_new returned null".to_string());
         }
@@ -296,26 +348,19 @@ impl SurfaceRegistry {
             session_id: session_id.clone(),
             ghostty_surface: surface,
             ns_view,
-            callback_ctx,
+            _callback_ctx: callback_ctx,
+            callback_ctx_raw,
             rect,
             visible: true,
             focused: false,
         };
 
         {
-            let mut surfaces = self.surfaces.lock().unwrap();
-            surfaces.insert(surface_id.clone(), native_surface);
-        }
-        {
-            let mut session_map = self.session_map.lock().unwrap();
-            session_map.insert(session_id.clone(), surface_id.clone());
-        }
-        self.flush_pending_output(&session_id);
-
-        let suppress = self.web_ui_suppresses_native_terminals();
-        {
-            let surfaces = self.surfaces.lock().unwrap();
-            if let Some(s) = surfaces.get(&surface_id) {
+            let mut inner = self.inner.lock().unwrap();
+            inner.surfaces.insert(surface_id.clone(), native_surface);
+            inner.session_map.insert(session_id.clone(), surface_id.clone());
+            Self::flush_pending_locked(&mut inner, &session_id, surface);
+            if let Some(s) = inner.surfaces.get(&surface_id) {
                 s.ns_view.setHidden(suppress);
             }
         }
@@ -338,10 +383,11 @@ impl SurfaceRegistry {
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         let suppress = self.web_ui_suppresses_native_terminals();
-        let mut surfaces = self.surfaces.lock().unwrap();
-        let surface = surfaces
-            .get_mut(surface_id)
-            .ok_or_else(|| format!("Surface not found: {surface_id}"))?;
+        let mut inner = self.inner.lock().unwrap();
+        let surface = match inner.surfaces.get_mut(surface_id) {
+            Some(surface) => surface,
+            None => return Ok(()),
+        };
 
         // Re-apply content scale on every IPC tick so Ghostty catches up even when AppKit briefly
         // reports an unchanged scale factor (stale `surface.rect` vs fresh `rect`).
@@ -422,9 +468,8 @@ impl SurfaceRegistry {
         if *d != 1 {
             return;
         }
-        drop(d);
-        let surfaces = self.surfaces.lock().unwrap();
-        for s in surfaces.values() {
+        let inner = self.inner.lock().unwrap();
+        for s in inner.surfaces.values() {
             s.ns_view.setHidden(true);
         }
     }
@@ -436,9 +481,8 @@ impl SurfaceRegistry {
         if *d > 0 {
             return;
         }
-        drop(d);
-        let surfaces = self.surfaces.lock().unwrap();
-        for s in surfaces.values() {
+        let inner = self.inner.lock().unwrap();
+        for s in inner.surfaces.values() {
             s.ns_view.setHidden(!s.visible);
         }
     }
@@ -446,36 +490,12 @@ impl SurfaceRegistry {
     /// Destroy a surface, freeing the ghostty surface and removing the NSView.
     pub fn destroy_surface(&self, surface_id: &str) -> Result<(), String> {
         let native_surface = {
-            let mut surfaces = self.surfaces.lock().unwrap();
-            surfaces
-                .remove(surface_id)
+            let mut inner = self.inner.lock().unwrap();
+            Self::extract_surface_locked(&mut inner, surface_id)
                 .ok_or_else(|| format!("Surface not found: {surface_id}"))?
         };
 
-        // Remove from session map
-        {
-            let mut session_map = self.session_map.lock().unwrap();
-            session_map.remove(&native_surface.session_id);
-        }
-
-        // Free the ghostty surface
-        unsafe {
-            pandora_terminal_view_set_surface(
-                Retained::as_ptr(&native_surface.ns_view) as *mut c_void,
-                std::ptr::null_mut(),
-            );
-            ghostty_surface_free(native_surface.ghostty_surface);
-        }
-
-        // Remove NSView from its superview
-        unsafe {
-            let _: () = objc2::msg_send![&*native_surface.ns_view, removeFromSuperview];
-        }
-
-        // Free the callback context
-        unsafe {
-            drop(Box::from_raw(native_surface.callback_ctx));
-        }
+        unsafe { Self::teardown_native_surface(native_surface) };
 
         Ok(())
     }
@@ -484,24 +504,20 @@ impl SurfaceRegistry {
     ///
     /// Returns `true` if the surface was found and data was written.
     pub fn feed_output(&self, session_id: &str, data: &[u8]) -> bool {
-        let surface_id = {
-            let session_map = self.session_map.lock().unwrap();
-            match session_map.get(session_id) {
-                Some(id) => id.clone(),
-                None => {
-                    self.pending_output
-                        .lock()
-                        .unwrap()
-                        .entry(session_id.to_string())
-                        .or_default()
-                        .push(data.to_vec());
-                    return false;
-                }
+        let mut inner = self.inner.lock().unwrap();
+        let surface_id = match inner.session_map.get(session_id).cloned() {
+            Some(id) => id,
+            None => {
+                inner
+                    .pending_output
+                    .entry(session_id.to_string())
+                    .or_default()
+                    .push(data.to_vec());
+                return false;
             }
         };
 
-        let surfaces = self.surfaces.lock().unwrap();
-        match surfaces.get(&surface_id) {
+        match inner.surfaces.get(&surface_id) {
             Some(surface) => {
                 unsafe {
                     ghostty_surface_write_buffer(
@@ -513,10 +529,8 @@ impl SurfaceRegistry {
                 true
             }
             None => {
-                drop(surfaces);
-                self.pending_output
-                    .lock()
-                    .unwrap()
+                inner
+                    .pending_output
                     .entry(session_id.to_string())
                     .or_default()
                     .push(data.to_vec());
@@ -527,14 +541,14 @@ impl SurfaceRegistry {
 
     /// Set focus on the given surface and unfocus all others.
     pub fn focus_surface(&self, surface_id: &str) -> Result<(), String> {
-        let mut surfaces = self.surfaces.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
         // Check the target surface exists
-        if !surfaces.contains_key(surface_id) {
-            return Err(format!("Surface not found: {surface_id}"));
+        if !inner.surfaces.contains_key(surface_id) {
+            return Ok(());
         }
 
-        for (id, surface) in surfaces.iter_mut() {
+        for (id, surface) in inner.surfaces.iter_mut() {
             let should_focus = id == surface_id;
             if surface.focused != should_focus {
                 unsafe {
@@ -553,18 +567,6 @@ impl SurfaceRegistry {
 
         Ok(())
     }
-
-    fn flush_pending_output(&self, session_id: &str) {
-        let buffered = self
-            .pending_output
-            .lock()
-            .unwrap()
-            .remove(session_id)
-            .unwrap_or_default();
-        for chunk in buffered {
-            let _ = self.feed_output(session_id, &chunk);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -582,21 +584,24 @@ unsafe extern "C" fn receive_buffer_callback(
         return;
     }
 
-    let ctx = &*(userdata as *const SurfaceCallbackContext);
-    let data = std::slice::from_raw_parts(buf, len);
-    let payload = serde_json::json!({
-        "type": "input",
-        "sessionID": ctx.session_id,
-        "data": BASE64_STANDARD.encode(data),
-    })
-    .to_string();
-    let app_handle = ctx.app_handle.clone();
-    let workspace_id = ctx.workspace_id.clone();
-    tauri::async_runtime::spawn(async move {
-        let daemon_state = app_handle.state::<DaemonState>();
-        if let Err(err) = daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload).await {
-            eprintln!("[surface_registry] failed to route terminal input: {err}");
-        }
+        let arc = Arc::from_raw(userdata as *const SurfaceCallbackContext);
+        let ctx = Arc::clone(&arc);
+        let _ = Arc::into_raw(arc);
+        let data = std::slice::from_raw_parts(buf, len);
+        let session_id = ctx.session_id.clone();
+        let workspace_id = ctx.workspace_id.clone();
+        let app_handle = ctx.app_handle.clone();
+        let payload = serde_json::json!({
+            "type": "input",
+            "sessionID": session_id,
+            "data": BASE64_STANDARD.encode(data),
+        })
+        .to_string();
+        tauri::async_runtime::spawn(async move {
+            let daemon_state = app_handle.state::<DaemonState>();
+            if let Err(err) = daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload).await {
+                eprintln!("[surface_registry] failed to route terminal input: {err}");
+            }
     });
 }
 
@@ -613,16 +618,19 @@ unsafe extern "C" fn receive_resize_callback(
         return;
     }
 
-    let ctx = &*(userdata as *const SurfaceCallbackContext);
+    let arc = Arc::from_raw(userdata as *const SurfaceCallbackContext);
+    let ctx = Arc::clone(&arc);
+    let _ = Arc::into_raw(arc);
+    let session_id = ctx.session_id.clone();
+    let workspace_id = ctx.workspace_id.clone();
+    let app_handle = ctx.app_handle.clone();
     let payload = serde_json::json!({
         "type": "resize",
-        "sessionID": ctx.session_id,
+        "sessionID": session_id,
         "cols": cols,
         "rows": rows,
     })
     .to_string();
-    let app_handle = ctx.app_handle.clone();
-    let workspace_id = ctx.workspace_id.clone();
     tauri::async_runtime::spawn(async move {
         let daemon_state = app_handle.state::<DaemonState>();
         if let Err(err) = daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload).await {
