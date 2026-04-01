@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { dlog } from "./protocol";
+import { logger } from "./logger";
 import type {
   ActionCapabilities,
   AggregateStatus,
@@ -261,9 +261,7 @@ export class ProcessManager {
   writeToSession(sessionID: string, data: Buffer): void {
     const session = this.sessions.get(sessionID);
     if (session?.process) {
-      // Log user input — shows what's being typed/sent to the PTY
-      const preview = data.length <= 64 ? JSON.stringify(data.toString("utf8")) : `${data.length} bytes`;
-      dlog("PTY_WRITE", `session=${sessionID} pid=${session.instance.pid} cmd="${session.definition.command}" input=${preview}`);
+      logger.debug({ tag: "PTY_WRITE", sessionID, pid: session.instance.pid, cmd: session.definition.command, bytes: data.length }, "pty write");
       session.process.terminal?.write(data);
     }
   }
@@ -271,7 +269,7 @@ export class ProcessManager {
   resizeSession(sessionID: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionID);
     if (session) {
-      dlog("PTY_RESIZE", `session=${sessionID} pid=${session.instance.pid} cmd="${session.definition.command}" cols=${cols} rows=${rows}`);
+      logger.debug({ tag: "PTY_RESIZE", sessionID, pid: session.instance.pid, cmd: session.definition.command, cols, rows }, "pty resize");
     }
     session?.process?.terminal?.resize(Math.max(cols, 1), Math.max(rows, 1));
   }
@@ -293,7 +291,7 @@ export class ProcessManager {
     const normalizedCwd = session.definition.cwd?.trim();
     const cwd = normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : process.cwd();
 
-    dlog("SPAWN", `session=${sid} cmd="${cmd}" cwd=${cwd} shell=${shell}`);
+    logger.info({ tag: "SPAWN", sessionID: sid, cmd, cwd, shell }, "spawning session");
 
     let outputCount = 0;
     let outputBytes = 0;
@@ -311,12 +309,8 @@ export class ProcessManager {
           outputBytes += buf.length;
           session.instance.lastOutputAt = new Date().toISOString();
           const now = Date.now();
-          // Log first 5 chunks (show content), then every 50th, or every 500ms, or large chunks
-          if (outputCount <= 5) {
-            const preview = buf.length <= 200 ? JSON.stringify(buf.toString("utf8").slice(0, 200)) : `[${buf.length} bytes]`;
-            dlog("PTY_OUT", `session=${sid} cmd="${cmd}" chunk#${outputCount} bytes=${buf.length} total=${outputBytes} data=${preview}`);
-          } else if (outputCount % 50 === 0 || buf.length > 4096 || now - lastLogTime > 500) {
-            dlog("PTY_OUT", `session=${sid} cmd="${cmd}" chunk#${outputCount} bytes=${buf.length} total=${outputBytes}`);
+          if (outputCount <= 5 || outputCount % 50 === 0 || buf.length > 4096 || now - lastLogTime > 500) {
+            logger.debug({ tag: "PTY_OUT", sessionID: sid, cmd, chunk: outputCount, bytes: buf.length, totalBytes: outputBytes }, "pty output");
             lastLogTime = now;
           }
           this.onOutput(sid, buf);
@@ -330,11 +324,11 @@ export class ProcessManager {
     session.instance.startedAt = new Date().toISOString();
     session.instance.exitCode = null;
 
-    dlog("SPAWN", `session=${sid} pid=${subprocess.pid} status=running cmd="${cmd}"`);
+    logger.info({ tag: "SPAWN", sessionID: sid, pid: subprocess.pid, cmd }, "session running");
     this.onSessionStateChanged(this.sessionState(session));
 
     void subprocess.exited.then((exitCode) => {
-      dlog("EXIT", `session=${sid} pid=${session.instance.pid} exitCode=${exitCode} outputChunks=${outputCount} outputBytes=${outputBytes}`);
+      logger.info({ tag: "EXIT", sessionID: sid, pid: session.instance.pid, exitCode, outputChunks: outputCount, outputBytes }, "session exited");
       session.process?.terminal?.close();
       session.process = null;
       session.instance.pid = null;
@@ -345,13 +339,13 @@ export class ProcessManager {
       }
 
       if (session.instance.status === "restarting") {
-        dlog("EXIT", `session=${sid} restarting...`);
+        logger.info({ tag: "EXIT", sessionID: sid }, "restarting session");
         this.spawnSession(session);
         return;
       }
 
       session.instance.status = session.instance.status === "stopped" ? "stopped" : "crashed";
-      dlog("EXIT", `session=${sid} final_status=${session.instance.status}`);
+      logger.info({ tag: "EXIT", sessionID: sid, status: session.instance.status }, "session final status");
       this.onSessionStateChanged(this.sessionState(session));
     });
   }
