@@ -41,10 +41,10 @@ function sanitizeRuntimeIdForFilename(runtimeId: string): string {
   return runtimeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 96);
 }
 
-/** One DB file per daemon runtime (workspace id or `project:…`), so linked workspaces never share a DB. */
-function defaultRuntimeDatabasePath(workspacePath: string, runtimeId: string): string {
+/** One DB file per daemon runtime (workspace id or `project:…`), stored globally to avoid polluting worktrees. */
+function defaultRuntimeDatabasePath(_workspacePath: string, runtimeId: string): string {
   const safe = sanitizeRuntimeIdForFilename(runtimeId);
-  return join(workspacePath, ".pandora", `runtime-${safe}.db`);
+  return join(pandoraDirectory(), "runtime", `runtime-${safe}.db`);
 }
 
 function removeDatabaseFiles(dbPath: string): void {

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
+  GitPullRequest,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -44,6 +45,7 @@ function StatusDot({ status }: { status: WorkspaceStatus }) {
     creating: "bg-[var(--oc-warning)] animate-pulse",
     failed: "bg-[var(--oc-error)]",
     deleting: "bg-[var(--oc-text-faint)]",
+    archived: "bg-[var(--oc-text-faint)]",
   };
   return <div className={cn("w-2 h-2 rounded-full shrink-0", colors[status])} />;
 }
@@ -94,6 +96,22 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
         >
           {WORKSPACE_KIND_LABEL[workspace.workspaceKind ?? "worktree"]}
         </span>
+        {workspace.prUrl && (
+          <span
+            className={cn(
+              "shrink-0 flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded",
+              workspace.prState === "merged"
+                ? "bg-green-500/15 text-green-400/90"
+                : workspace.prState === "closed"
+                  ? "bg-red-500/15 text-red-400/90"
+                  : "bg-blue-500/15 text-blue-400/90"
+            )}
+            title={`PR #${workspace.prNumber} — ${workspace.prState}`}
+          >
+            <GitPullRequest className="size-2.5" />
+            #{workspace.prNumber}
+          </span>
+        )}
         {workspace.status === "failed" && (
           <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -137,7 +155,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
     selectProject,
   } = useWorkspaceStore();
 
-  const workspaces = workspacesForProject(project.id);
+  const workspaces = workspacesForProject(project.id).filter((w) => w.status !== "archived");
   const isSelected = project.id === selectedProjectID;
 
   return (

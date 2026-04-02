@@ -209,6 +209,9 @@ pub fn make_linked_workspace(
         created_at: now.clone(),
         updated_at: now,
         last_opened_at: None,
+        pr_url: None,
+        pr_number: None,
+        pr_state: None,
     })
 }
 
@@ -237,6 +240,9 @@ pub fn make_optimistic_workspace(
         created_at: now.clone(),
         updated_at: now,
         last_opened_at: None,
+        pr_url: None,
+        pr_number: None,
+        pr_state: None,
     }
 }
 
@@ -701,6 +707,106 @@ pub fn git_clean_untracked_path(worktree_path: &str, path: &str) -> Result<(), S
     sanitize_repo_relative_path(path)?;
     run_git(&["-C", worktree_path, "clean", "-fd", "--", path])?;
     Ok(())
+}
+
+// ─── PR context ───
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrContext {
+    pub branch_name: String,
+    pub base_branch: String,
+    pub commit_log: String,
+    pub diff_stat: String,
+    pub is_default_branch: bool,
+    pub has_commits: bool,
+}
+
+/// Determine the default branch (main or master) for a repository.
+fn default_branch(worktree_path: &str) -> String {
+    // Check remote HEAD first
+    if let Ok(out) = run_git(&["-C", worktree_path, "symbolic-ref", "refs/remotes/origin/HEAD"]) {
+        let trimmed = out.trim();
+        if let Some(branch) = trimmed.strip_prefix("refs/remotes/origin/") {
+            return branch.to_string();
+        }
+    }
+    // Fallback: check if main exists, else master
+    if run_git(&["-C", worktree_path, "rev-parse", "--verify", "refs/heads/main"]).is_ok() {
+        return "main".into();
+    }
+    "master".into()
+}
+
+pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
+    verify_git_worktree(worktree_path)?;
+    let branch_name = current_branch(worktree_path)?;
+    let base_branch = default_branch(worktree_path);
+    let is_default_branch = branch_name == base_branch;
+
+    let commit_log = run_git(&[
+        "-C", worktree_path,
+        "log", &format!("{}..HEAD", base_branch), "--oneline",
+    ])
+    .unwrap_or_default()
+    .trim()
+    .to_string();
+
+    let has_commits = !commit_log.is_empty();
+
+    let diff_stat = run_git(&[
+        "-C", worktree_path,
+        "diff", &format!("{}...HEAD", base_branch), "--stat", "--stat-count=50",
+    ])
+    .unwrap_or_default()
+    .trim()
+    .to_string();
+
+    Ok(PrContext {
+        branch_name,
+        base_branch,
+        commit_log,
+        diff_stat,
+        is_default_branch,
+        has_commits,
+    })
+}
+
+/// Check whether `gh` CLI is available on PATH.
+pub fn gh_cli_available() -> bool {
+    Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhPrInfo {
+    pub state: String,
+}
+
+/// Query the PR state via `gh pr view`.
+pub fn gh_pr_status(worktree_path: &str, pr_number: i64) -> Result<GhPrInfo, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr", "view",
+            &pr_number.to_string(),
+            "--json", "state",
+            "-q", ".state",
+        ])
+        .current_dir(worktree_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(stderr);
+    }
+
+    let state = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
+    Ok(GhPrInfo { state })
 }
 
 pub fn git_commit_message(worktree_path: &str, message: &str) -> Result<(), String> {

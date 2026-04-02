@@ -363,6 +363,13 @@ export default function App() {
             e.preventDefault();
             handleCloseFocusedTab();
             break;
+          case "p":
+          case "P":
+            if (e.shiftKey) {
+              e.preventDefault();
+              window.dispatchEvent(new CustomEvent("pandora:open-pr"));
+            }
+            break;
         }
       }
 
@@ -399,6 +406,9 @@ export default function App() {
         case "toggle-bottom-terminal":
           toggleBottomPanel();
           break;
+        case "open-pr":
+          window.dispatchEvent(new CustomEvent("pandora:open-pr"));
+          break;
       }
     }).then((fn) => {
       unlisten = fn;
@@ -408,6 +418,21 @@ export default function App() {
       unlisten?.();
     };
   }, [handleCloseFocusedTab, toggleBottomPanel]);
+
+  // PR state change listener (from backend polling)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<string>("pr-state-changed", (event) => {
+      try {
+        const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+        const { workspaceId, prState } = payload as { workspaceId: string; prState: string };
+        store.getState().updateWorkspacePrState(workspaceId, prState);
+      } catch {}
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
 
   const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
   const runtime = useWorkspaceStore((s) =>

@@ -10,6 +10,8 @@ pub enum WorkspaceStatus {
     Failed,
     #[serde(rename = "deleting")]
     Deleting,
+    #[serde(rename = "archived")]
+    Archived,
 }
 
 impl WorkspaceStatus {
@@ -19,6 +21,7 @@ impl WorkspaceStatus {
             Self::Ready => "ready",
             Self::Failed => "failed",
             Self::Deleting => "deleting",
+            Self::Archived => "archived",
         }
     }
 
@@ -28,6 +31,7 @@ impl WorkspaceStatus {
             "ready" => Some(Self::Ready),
             "failed" => Some(Self::Failed),
             "deleting" => Some(Self::Deleting),
+            "archived" => Some(Self::Archived),
             _ => None,
         }
     }
@@ -92,4 +96,7 @@ pub struct WorkspaceRecord {
     pub created_at: String,
     pub updated_at: String,
     pub last_opened_at: Option<String>,
+    pub pr_url: Option<String>,
+    pub pr_number: Option<i64>,
+    pub pr_state: Option<String>,
 }

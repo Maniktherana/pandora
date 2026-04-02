@@ -90,7 +90,18 @@ export type DaemonMessage =
   | { type: "output_chunk"; sessionID: string; data: string; workspaceId?: string }
   | { type: "error"; message: string; workspaceId?: string };
 
-export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting";
+export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting" | "archived";
+
+export type PrState = "open" | "merged" | "closed";
+
+export interface PrContext {
+  branchName: string;
+  baseBranch: string;
+  commitLog: string;
+  diffStat: string;
+  isDefaultBranch: boolean;
+  hasCommits: boolean;
+}
 
 export type WorkspaceKind = "linked" | "worktree";
 
@@ -121,6 +132,9 @@ export interface WorkspaceRecord {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;
+  prUrl: string | null;
+  prNumber: number | null;
+  prState: PrState | null;
 }
 
 export type LayoutAxis = "horizontal" | "vertical";

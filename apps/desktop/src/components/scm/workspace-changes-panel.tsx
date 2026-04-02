@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Archive,
   ChevronRight,
+  ExternalLink,
   FileText,
+  GitMerge,
+  GitPullRequest,
   Minus,
   Plus,
   RefreshCw,
   RotateCcw,
+  Send,
   Trash2,
 } from "lucide-react";
+import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
@@ -26,6 +32,14 @@ import {
   scmUnstageAll,
   type ScmStatusEntry,
 } from "@/lib/workspace/scm";
+import {
+  findAgentTerminal,
+  composePrInstruction,
+  gatherPrContext,
+  archiveWorkspace as archiveWorkspaceCmd,
+} from "@/lib/workspace/pr";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
+import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -70,6 +84,17 @@ export default function WorkspaceChangesPanel({
 
   const openFile = useEditorStore((s) => s.openFile);
   const addDiffTabForPath = useWorkspaceStore((s) => s.addDiffTabForPath);
+  const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === workspaceId));
+  const workspaceRuntime = useWorkspaceStore((s) => s.runtimes[workspaceId] ?? null);
+  const projectRuntime = useWorkspaceStore((s) => {
+    const projectId = workspace?.projectId;
+    return projectId ? s.runtimes[projectRuntimeKey(projectId)] ?? null : null;
+  });
+  const setPrAwaiting = useWorkspaceStore((s) => s.setPrAwaiting);
+  const archiveWorkspaceFromStore = useWorkspaceStore((s) => s.archiveWorkspaceFromStore);
+
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prSending, setPrSending] = useState(false);
 
   const refresh = useCallback(() => {
     void scmStatus(workspaceRoot)
@@ -126,6 +151,89 @@ export default function WorkspaceChangesPanel({
     if (!window.confirm(`Discard local changes to “${label}”? Staged changes are not removed.`)) return;
     void run(() => scmDiscardTracked(workspaceRoot, e.path));
   };
+
+  const handleOpenPr = useCallback(async () => {
+    setPrError(null);
+    setPrSending(true);
+    try {
+      const ctx = await gatherPrContext(workspaceId);
+
+      if (ctx.isDefaultBranch) {
+        if (!window.confirm(`You're on ${ctx.baseBranch}. PRs are usually from feature branches. Continue anyway?`)) {
+          setPrSending(false);
+          return;
+        }
+      }
+
+      const hasUncommittedChanges = (entries ?? []).length > 0;
+
+      if (!ctx.hasCommits && !hasUncommittedChanges) {
+        setPrError(`No commits or changes ahead of ${ctx.baseBranch}.`);
+        setPrSending(false);
+        return;
+      }
+
+      const target = findAgentTerminal(workspaceRuntime, projectRuntime);
+      if (!target) {
+        setPrError("No coding agent detected. Start an agent (claude, codex, etc.) in a terminal, then try again.");
+        setPrSending(false);
+        return;
+      }
+
+      const instruction = composePrInstruction(ctx, hasUncommittedChanges);
+      const client = getTerminalDaemonClient();
+      if (!client) {
+        setPrError("Terminal daemon not connected.");
+        setPrSending(false);
+        return;
+      }
+
+      // Paste the full instruction directly into the agent terminal
+      const prompt = instruction;
+      const bytes = new TextEncoder().encode(prompt + "\n");
+      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+      client.input(target.runtimeId, target.sessionId, btoa(binary));
+      setPrAwaiting(workspaceId, true);
+
+      // Focus the agent terminal pane
+      if (workspaceRuntime?.root) {
+        const { findLeaf } = await import("@/lib/layout/layout-tree");
+        // Try to find and focus the pane containing this terminal
+        const { getAllLeaves } = await import("@/lib/layout/layout-tree");
+        const leaves = getAllLeaves(workspaceRuntime.root);
+        for (const leaf of leaves) {
+          const tabIdx = leaf.tabs.findIndex(
+            (t) => t.kind === "terminal" && t.slotId === target.slotId
+          );
+          if (tabIdx >= 0) {
+            useWorkspaceStore.getState().setFocusedPane(leaf.id);
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      setPrError(String(e));
+    } finally {
+      setPrSending(false);
+    }
+  }, [workspaceId, workspaceRuntime, projectRuntime, setPrAwaiting, entries]);
+
+  const handleArchive = useCallback(async () => {
+    if (!window.confirm("Archive this workspace? The worktree will be removed.")) return;
+    try {
+      await archiveWorkspaceCmd(workspaceId);
+      archiveWorkspaceFromStore(workspaceId);
+    } catch (e) {
+      setPrError(String(e));
+    }
+  }, [workspaceId, archiveWorkspaceFromStore]);
+
+  // Listen for ⌘⇧P shortcut
+  useEffect(() => {
+    const handler = () => void handleOpenPr();
+    window.addEventListener("pandora:open-pr", handler);
+    return () => window.removeEventListener("pandora:open-pr", handler);
+  }, [handleOpenPr]);
 
   return (
     <div className="flex h-full min-h-0 select-none flex-col">
@@ -377,28 +485,101 @@ export default function WorkspaceChangesPanel({
       </div>
 
       <div className="shrink-0 border-t border-[var(--oc-border)] bg-[#121212] p-2">
-        <textarea
-          className="mb-2 min-h-[52px] w-full resize-y rounded border border-[var(--oc-border)] bg-[var(--oc-panel-elevated)] px-2 py-1.5 font-sans text-[12px] text-[var(--oc-text)] placeholder:text-[var(--oc-text-faint)] focus:border-[var(--oc-interactive)] focus:outline-none"
-          placeholder="Commit message"
-          rows={2}
-          value={commitMessage}
-          disabled={busy}
-          onChange={(ev) => setCommitMessage(ev.target.value)}
-        />
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 w-full text-[12px]"
-          disabled={!canCommit}
-          onClick={() =>
-            void run(async () => {
-              await scmCommit(workspaceRoot, commitMessage);
-              setCommitMessage("");
-            })
-          }
-        >
-          Commit
-        </Button>
+        {workspace?.prUrl ? (
+          /* ── PR is open/merged/closed: show PR actions instead of commit ── */
+          <div className="flex flex-col gap-2">
+            {workspace.prState === "merged" ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 w-full gap-2 bg-purple-600 text-[12px] font-medium text-white hover:bg-purple-500"
+                  onClick={() => void open(workspace.prUrl!)}
+                >
+                  <GitMerge className="size-4" />
+                  PR #{workspace.prNumber} Merged
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 w-full gap-1.5 bg-purple-600/20 text-[12px] font-medium text-purple-300 hover:bg-purple-600/30"
+                  onClick={() => void handleArchive()}
+                >
+                  <Archive className="size-3.5" />
+                  Archive Workspace
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 w-full gap-2 bg-purple-600 text-[12px] font-medium text-white hover:bg-purple-500"
+                  onClick={() => void open(workspace.prUrl!)}
+                >
+                  <ExternalLink className="size-4" />
+                  View PR #{workspace.prNumber}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-full gap-1.5 text-[11px] text-purple-300/70 hover:text-purple-200"
+                  disabled={prSending}
+                  onClick={() => void handleOpenPr()}
+                  title="Re-send PR instruction to update"
+                >
+                  <Send className="size-3" />
+                  Update PR via agent
+                </Button>
+              </>
+            )}
+          </div>
+        ) : (
+          /* ── No PR: show commit + open PR ── */
+          <>
+            <textarea
+              className="mb-2 min-h-[52px] w-full resize-y rounded border border-[var(--oc-border)] bg-[var(--oc-panel-elevated)] px-2 py-1.5 font-sans text-[12px] text-[var(--oc-text)] placeholder:text-[var(--oc-text-faint)] focus:border-[var(--oc-interactive)] focus:outline-none"
+              placeholder="Commit message"
+              rows={2}
+              value={commitMessage}
+              disabled={busy}
+              onChange={(ev) => setCommitMessage(ev.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 w-full text-[12px]"
+              disabled={!canCommit}
+              onClick={() =>
+                void run(async () => {
+                  await scmCommit(workspaceRoot, commitMessage);
+                  setCommitMessage("");
+                })
+              }
+            >
+              Commit
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-8 w-full gap-1.5 text-[12px] text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
+              disabled={prSending || busy}
+              onClick={() => void handleOpenPr()}
+              title="Open Pull Request (Cmd+Shift+P)"
+            >
+              <GitPullRequest className="size-3.5" />
+              Open Pull Request
+            </Button>
+          </>
+        )}
+
+        {prError && (
+          <div className="mt-1.5 rounded border border-red-900/40 bg-red-950/25 px-2 py-1.5 text-[11px] text-red-300/90">
+            {prError}
+          </div>
+        )}
       </div>
     </div>
   );

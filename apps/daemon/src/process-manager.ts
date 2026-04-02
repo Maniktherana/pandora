@@ -48,12 +48,16 @@ export class ProcessManager {
   private readonly slotDefinitions = new Map<string, SlotDefinition>();
   private readonly sessions = new Map<string, ManagedSession>();
 
+  private readonly defaultCwd: string;
+
   constructor(
     slotDefinitions: SlotDefinition[],
     sessionDefinitions: SessionDefinition[],
     private readonly onSessionStateChanged: (session: SessionState) => void,
-    private readonly onOutput: (sessionID: string, data: Buffer) => void
+    private readonly onOutput: (sessionID: string, data: Buffer) => void,
+    defaultCwd?: string
   ) {
+    this.defaultCwd = defaultCwd ?? process.cwd();
     for (const slot of slotDefinitions) {
       this.slotDefinitions.set(slot.id, slot);
     }
@@ -289,7 +293,7 @@ export class ProcessManager {
     const sid = session.instance.id;
     const cmd = session.definition.command;
     const normalizedCwd = session.definition.cwd?.trim();
-    const cwd = normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : process.cwd();
+    const cwd = normalizedCwd && normalizedCwd.length > 0 ? normalizedCwd : this.defaultCwd;
 
     logger.info({ tag: "SPAWN", sessionID: sid, cmd, cwd, shell }, "spawning session");
 

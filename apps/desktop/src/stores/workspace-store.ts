@@ -181,6 +181,13 @@ interface WorkspaceStoreState {
   persistLayout: () => void;
   loadPersistedLayout: (workspaceId: string) => Promise<void>;
 
+  // ─── PR ───
+  prAwaitingWorkspaceIds: Set<string>;
+  setPrAwaiting: (workspaceId: string, awaiting: boolean) => void;
+  updateWorkspacePr: (workspaceId: string, prUrl: string, prNumber: number, prState: string) => void;
+  updateWorkspacePrState: (workspaceId: string, prState: string) => void;
+  archiveWorkspaceFromStore: (workspaceId: string) => void;
+
   // ─── Navigation ───
   setNavigationArea: (area: NavigationArea) => void;
   setSearchText: (text: string) => void;
@@ -541,6 +548,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     });
   },
   noteTerminalOutput: (workspaceId, sessionID, data) => {
+    // PR URL detection: scan output for GitHub PR URLs when awaiting
+    if (get().prAwaitingWorkspaceIds.has(workspaceId)) {
+      const match = data.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/);
+      if (match) {
+        const prUrl = match[0];
+        const prNumber = parseInt(match[1], 10);
+        get().setPrAwaiting(workspaceId, false);
+        get().updateWorkspacePr(workspaceId, prUrl, prNumber, "open");
+        void invoke("pr_link", { workspaceId, prUrl, prNumber });
+      }
+    }
+
     const detected = detectTerminalDisplayFromOutput(data);
     if (!detected) return;
     set((s) => {
@@ -1367,6 +1386,63 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         };
       });
       get().ensureRuntimeLayout(workspaceId);
+    }
+  },
+
+  // ─── PR ───
+  prAwaitingWorkspaceIds: new Set<string>(),
+  setPrAwaiting: (workspaceId, awaiting) => {
+    set((s) => {
+      const next = new Set(s.prAwaitingWorkspaceIds);
+      if (awaiting) {
+        next.add(workspaceId);
+      } else {
+        next.delete(workspaceId);
+      }
+      return { prAwaitingWorkspaceIds: next };
+    });
+
+    // Auto-clear after 90s timeout
+    if (awaiting) {
+      setTimeout(() => {
+        const s = get();
+        if (s.prAwaitingWorkspaceIds.has(workspaceId)) {
+          s.setPrAwaiting(workspaceId, false);
+        }
+      }, 90_000);
+    }
+  },
+  updateWorkspacePr: (workspaceId, prUrl, prNumber, prState) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === workspaceId
+          ? { ...w, prUrl, prNumber, prState: prState as any }
+          : w
+      ),
+    }));
+  },
+  updateWorkspacePrState: (workspaceId, prState) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === workspaceId ? { ...w, prState: prState as any } : w
+      ),
+    }));
+  },
+  archiveWorkspaceFromStore: (workspaceId) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === workspaceId ? { ...w, status: "archived" as any } : w
+      ),
+    }));
+    // If archived workspace was selected, select another one
+    const { selectedWorkspaceID, workspaces, selectedProjectID } = get();
+    if (selectedWorkspaceID === workspaceId) {
+      const next = workspaces.find(
+        (w) => w.projectId === selectedProjectID && w.id !== workspaceId && w.status !== "archived"
+      );
+      if (next) {
+        get().selectWorkspace(next);
+      }
     }
   },
 

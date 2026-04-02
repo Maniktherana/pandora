@@ -4,7 +4,7 @@ use crate::git;
 use crate::models::*;
 use std::collections::HashSet;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -598,6 +598,96 @@ pub fn scm_discard_untracked(worktree_path: String, path: String) -> Result<(), 
 #[tauri::command]
 pub fn scm_commit(worktree_path: String, message: String) -> Result<(), String> {
     git::git_commit_message(&worktree_path, &message)
+}
+
+// ─── PR + archive commands ───
+
+#[tauri::command]
+pub fn pr_gather_context(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+) -> Result<git::PrContext, String> {
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+    git::gather_pr_context(&workspace.worktree_path)
+}
+
+#[tauri::command]
+pub fn pr_check_status(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+) -> Result<Option<git::GhPrInfo>, String> {
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+    let pr_number = match workspace.pr_number {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+    if !git::gh_cli_available() {
+        return Ok(None);
+    }
+    let info = git::gh_pr_status(&workspace.worktree_path, pr_number)?;
+    Ok(Some(info))
+}
+
+#[tauri::command]
+pub fn pr_write_instruction(contents: String) -> Result<String, String> {
+    let dir = PathBuf::from(git::pandora_home()).join("tmp");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("pr-instruction.md");
+    std::fs::write(&path, &contents).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn pr_link(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+    pr_url: String,
+    pr_number: i64,
+) -> Result<(), String> {
+    db.0.update_workspace_pr(&workspace_id, Some(&pr_url), Some(pr_number), Some("open"))
+}
+
+#[tauri::command]
+pub async fn archive_workspace(
+    db: tauri::State<'_, DbState>,
+    daemon_state: tauri::State<'_, DaemonState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    let workspaces = db.0.load_workspaces(None);
+    let workspace = workspaces
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+
+    // Stop runtime
+    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
+
+    // Remove worktree if applicable
+    if workspace.workspace_kind == WorkspaceKind::Worktree {
+        let projects = db.0.load_projects();
+        if let Some(project) = projects.into_iter().find(|p| p.id == workspace.project_id) {
+            let ws = workspace.clone();
+            tokio::task::spawn_blocking(move || {
+                let _ = git::remove_worktree(&ws, &project);
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Mark as archived (keep DB record)
+    db.0.update_workspace_status(&workspace_id, "archived")?;
+    Ok(())
 }
 
 // ─── Reload all data (convenience for frontend) ───

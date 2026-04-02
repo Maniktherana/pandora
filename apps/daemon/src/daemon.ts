@@ -44,6 +44,7 @@ export class DaemonServer {
     const sessionDefinitions = listSessionDefinitions(this.db);
     let broadcastOutputCount = 0;
     let broadcastOutputBytes = 0;
+    const resolvedDefaultCwd = defaultCwd ?? normalizedPath;
     this.processManager = new ProcessManager(
       slotDefinitions,
       sessionDefinitions,
@@ -59,7 +60,8 @@ export class DaemonServer {
           sessionID,
           data: data.toString("base64")
         });
-      }
+      },
+      resolvedDefaultCwd
     );
   }
 

@@ -169,6 +169,7 @@ function DirectoryNode({
   resolveDecoration,
   onOpenDiffMenu,
   activePath,
+  refreshTick,
 }: {
   workspaceRoot: string;
   workspaceId: string;
@@ -179,6 +180,7 @@ function DirectoryNode({
   resolveDecoration: ScmDecorationResolver;
   onOpenDiffMenu?: (clientX: number, clientY: number, fileRelPath: string) => void;
   activePath: string | null;
+  refreshTick: number;
 }) {
   const openFile = useEditorStore((s) => s.openFile);
   const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
@@ -209,7 +211,7 @@ function DirectoryNode({
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceRoot, relPath]);
+  }, [open, workspaceRoot, relPath, refreshTick]);
 
   return (
     <Collapsible open={open} onOpenChange={(next) => setPathExpanded(relPath, next)}>
@@ -257,6 +259,7 @@ function DirectoryNode({
                 resolveDecoration={resolveDecoration}
                 onOpenDiffMenu={onOpenDiffMenu}
                 activePath={activePath}
+                refreshTick={refreshTick}
               />
             ) : (
               <FileTreeRow
@@ -386,29 +389,41 @@ export default function WorkspaceFileTreePanel({
   );
   const resolveDecoration = useMemo(() => createDecorationResolver(scmEntries), [scmEntries]);
 
+  // Tick counter that increments periodically to drive file tree + SCM refreshes.
+  const [refreshTick, setRefreshTick] = useState(0);
+
   useEffect(() => {
-    const refreshScm = () => {
-      void scmStatus(workspaceRoot)
-        .then((list) => setScmEntries(list))
-        .catch(() => setScmEntries([]));
-    };
-    refreshScm();
+    // Refresh immediately on mount, then poll every 3s when visible
     const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") refreshScm();
-    }, 2000);
+      if (document.visibilityState === "visible") {
+        setRefreshTick((t) => t + 1);
+      }
+    }, 3000);
     return () => clearInterval(id);
-  }, [workspaceRoot]);
+  }, []);
+
+  useEffect(() => {
+    void scmStatus(workspaceRoot)
+      .then((list) => setScmEntries(list))
+      .catch(() => setScmEntries([]));
+  }, [workspaceRoot, refreshTick]);
 
   useEffect(() => {
     let cancelled = false;
-    setRootEntries(null);
-    setRootError(null);
+    if (refreshTick === 0) {
+      // Only show loading spinner on first load, not on refreshes
+      setRootEntries(null);
+      setRootError(null);
+    }
     void invoke<DirEntry[]>("list_workspace_directory", {
       workspaceRoot,
       relativePath: "",
     })
       .then((list) => {
-        if (!cancelled) setRootEntries(list);
+        if (!cancelled) {
+          setRootEntries(list);
+          setRootError(null);
+        }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -419,7 +434,7 @@ export default function WorkspaceFileTreePanel({
     return () => {
       cancelled = true;
     };
-  }, [workspaceRoot]);
+  }, [workspaceRoot, refreshTick]);
 
   return (
     <div className="flex h-full min-w-0 flex-col border-l border-[var(--oc-border)] bg-[#151515] select-none">
@@ -499,6 +514,7 @@ export default function WorkspaceFileTreePanel({
                   resolveDecoration={resolveDecoration}
                   onOpenDiffMenu={onOpenDiffMenu}
                   activePath={activePath}
+                  refreshTick={refreshTick}
                 />
               ) : (
                 <FileTreeRow

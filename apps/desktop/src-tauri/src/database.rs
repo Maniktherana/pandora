@@ -94,6 +94,14 @@ impl AppDatabase {
             )
             .map_err(|e| e.to_string())?;
         }
+        if !cols.iter().any(|c| c == "pr_url") {
+            conn.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN pr_url TEXT;
+                 ALTER TABLE workspaces ADD COLUMN pr_number INTEGER;
+                 ALTER TABLE workspaces ADD COLUMN pr_state TEXT;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 
@@ -173,10 +181,10 @@ impl AppDatabase {
     pub fn load_workspaces(&self, project_id: Option<&str>) -> Vec<WorkspaceRecord> {
         let conn = self.conn.lock().unwrap();
         let sql = if project_id.is_some() {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
              FROM workspaces WHERE project_id = ?1 ORDER BY created_at ASC"
         } else {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
              FROM workspaces ORDER BY created_at ASC"
         };
 
@@ -206,6 +214,9 @@ impl AppDatabase {
                 created_at: row.get(11)?,
                 updated_at: row.get(12)?,
                 last_opened_at: row.get(13)?,
+                pr_url: row.get(14)?,
+                pr_number: row.get(15)?,
+                pr_state: row.get(16)?,
             })
         };
 
@@ -224,8 +235,8 @@ impl AppDatabase {
     pub fn upsert_workspace(&self, w: &WorkspaceRecord) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(id) DO UPDATE SET
                project_id = excluded.project_id,
                name = excluded.name,
@@ -238,7 +249,10 @@ impl AppDatabase {
                status = excluded.status,
                failure_message = excluded.failure_message,
                updated_at = excluded.updated_at,
-               last_opened_at = excluded.last_opened_at",
+               last_opened_at = excluded.last_opened_at,
+               pr_url = excluded.pr_url,
+               pr_number = excluded.pr_number,
+               pr_state = excluded.pr_state",
             params![
                 w.id,
                 w.project_id,
@@ -254,10 +268,46 @@ impl AppDatabase {
                 w.created_at,
                 w.updated_at,
                 w.last_opened_at,
+                w.pr_url,
+                w.pr_number,
+                w.pr_state,
             ],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub fn update_workspace_pr(
+        &self,
+        id: &str,
+        pr_url: Option<&str>,
+        pr_number: Option<i64>,
+        pr_state: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET pr_url = ?2, pr_number = ?3, pr_state = ?4, updated_at = ?5 WHERE id = ?1",
+            params![id, pr_url, pr_number, pr_state, now_iso8601()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_workspace_status(&self, id: &str, status: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET status = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, status, now_iso8601()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn workspaces_with_open_prs(&self) -> Vec<WorkspaceRecord> {
+        self.load_workspaces(None)
+            .into_iter()
+            .filter(|w| w.pr_state.as_deref() == Some("open") && w.pr_number.is_some())
+            .collect()
     }
 
     pub fn remove_workspace(&self, id: &str) -> Result<(), String> {

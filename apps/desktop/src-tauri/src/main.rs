@@ -169,6 +169,12 @@ fn main() {
             commands::scm_discard_tracked,
             commands::scm_discard_untracked,
             commands::scm_commit,
+            // PR + archive
+            commands::pr_gather_context,
+            commands::pr_check_status,
+            commands::pr_write_instruction,
+            commands::pr_link,
+            commands::archive_workspace,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());
@@ -207,6 +213,39 @@ fn main() {
             let daemon_state_ref = daemon_state.inner();
             rt.block_on(async {
                 daemon_bridge::set_daemon_dir(daemon_state_ref, daemon_dir_clone).await;
+            });
+
+            // PR status polling: check open PRs every 60s for merge/close
+            let poll_handle = handle.clone();
+            let poll_db = poll_handle.state::<DbState>().0.clone();
+            std::thread::spawn(move || {
+                // Give the app a moment to initialize before starting polls
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                if !git::gh_cli_available() {
+                    return;
+                }
+                loop {
+                    let open_prs = poll_db.workspaces_with_open_prs();
+                    for ws in open_prs {
+                        if let Some(pr_number) = ws.pr_number {
+                            if let Ok(info) = git::gh_pr_status(&ws.worktree_path, pr_number) {
+                                if info.state != "open" {
+                                    let _ = poll_db.update_workspace_pr(
+                                        &ws.id,
+                                        ws.pr_url.as_deref(),
+                                        ws.pr_number,
+                                        Some(&info.state),
+                                    );
+                                    let _ = poll_handle.emit("pr-state-changed", serde_json::json!({
+                                        "workspaceId": ws.id,
+                                        "prState": info.state,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
             });
 
             // Start tokio runtime in background for async operations
