@@ -8,6 +8,7 @@ import {
   removeMatchingTabFromTree,
   removeTabAtIndexInTree,
   splitPaneAroundTab,
+  splitPaneWithinLeaf,
 } from "@/lib/layout/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { invoke } from "@tauri-apps/api/core";
@@ -33,6 +34,17 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
         const srcLeaf = findLeaf(runtime.root, sourcePaneID);
         const tab = srcLeaf?.tabs[sourceTabIndex];
         if (!tab) return;
+
+        if (targetPaneID === sourcePaneID) {
+          runtime.root = splitPaneWithinLeaf(
+            runtime.root,
+            sourcePaneID,
+            sourceTabIndex,
+            axis,
+            position
+          ) as WritableDraft<LayoutNode>;
+          return;
+        }
 
         let root: LayoutNode | null = removeTabAtIndexInTree(runtime.root, sourcePaneID, sourceTabIndex);
         if (!root) {

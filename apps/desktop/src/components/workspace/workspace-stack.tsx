@@ -38,6 +38,7 @@ function WorkspaceStack({ items, className }: WorkspaceStackProps) {
             workspaceRoot={item.workspaceRoot}
             runtime={item.runtime}
             layoutTargetOnFocus={item.layoutTargetOnFocus ?? null}
+            isVisible={item.isActive}
           />
         </div>
       ))}

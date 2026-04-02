@@ -1,4 +1,5 @@
 import type { WritableDraft } from "immer";
+import { Effect, Fiber } from "effect";
 import type {
   LayoutNode,
   ProjectRecord,
@@ -7,6 +8,7 @@ import type {
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
 import type { AppState } from "@/lib/shared/types";
+import { LayoutLoadError, RuntimeStartError } from "@/lib/runtime/errors";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { createEmptyTerminalPanel } from "@/lib/terminal/bottom-terminal-panel";
 import { createLeaf } from "@/lib/layout/layout-tree";
@@ -16,16 +18,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { NavigationArea } from "../workspace-store";
 import type { ImmerSet, Get } from "./types";
 
-let workspaceSwitchGeneration = 0;
-
-function nextWorkspaceSwitchGeneration() {
-  workspaceSwitchGeneration += 1;
-  return workspaceSwitchGeneration;
-}
-
-function isCurrentWorkspaceSwitchGeneration(generation: number) {
-  return workspaceSwitchGeneration === generation;
-}
+let currentWorkspaceStartup:
+  | {
+      workspaceId: string;
+      fiber: Fiber.RuntimeFiber<void, never>;
+    }
+  | null = null;
 
 function createWorkspaceRuntimeState(
   workspaceId: string,
@@ -57,53 +55,100 @@ function createWorkspaceRuntimeState(
   };
 }
 
-async function loadWorkspaceLayout(
+function loadWorkspaceLayoutEffect(
   get: Get,
   set: ImmerSet,
-  workspaceId: string,
-  generation: number
+  workspaceId: string
 ) {
-  try {
-    const raw = await invoke<unknown>("load_workspace_layout", { workspaceId });
-    if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+  return Effect.tryPromise({
+    try: () => invoke<unknown>("load_workspace_layout", { workspaceId }),
+    catch: (cause) =>
+      new LayoutLoadError({
+        workspaceId,
+        cause,
+      }),
+  }).pipe(
+    Effect.map((raw) => (raw != null ? migratePersistedLayout(raw) : null)),
+    Effect.tap((layout) =>
+      Effect.sync(() => {
+        set((s) => {
+          const runtime = s.runtimes[workspaceId];
+          if (!runtime) return;
 
-    const layout = raw != null ? migratePersistedLayout(raw) : null;
+          const normalizedLayout =
+            layout && runtime.slots.length > 0
+              ? sanitizeWorkspaceTerminalLayout(
+                  layout.root,
+                  layout.focusedPaneID,
+                  new Set(runtime.slots.map((slot) => slot.id))
+                )
+              : layout;
 
-    set((s) => {
-      const runtime = s.runtimes[workspaceId];
-      if (!runtime) return;
+          runtime.layoutLoading = false;
+          runtime.layoutLoaded = true;
+          runtime.root = (normalizedLayout?.root ?? null) as WritableDraft<LayoutNode> | null;
+          runtime.focusedPaneID = normalizedLayout?.focusedPaneID ?? null;
+        });
 
-      const normalizedLayout =
-        layout && runtime.slots.length > 0
-          ? sanitizeWorkspaceTerminalLayout(
-              layout.root,
-              layout.focusedPaneID,
-              new Set(runtime.slots.map((slot) => slot.id))
-            )
-          : layout;
+        if (!layout) {
+          get().ensureRuntimeLayout(workspaceId);
+        }
+      })
+    ),
+    Effect.asVoid
+  );
+}
 
-      runtime.layoutLoading = false;
-      runtime.layoutLoaded = true;
-      if (normalizedLayout) {
-        runtime.root = normalizedLayout.root as WritableDraft<LayoutNode> | null;
-        runtime.focusedPaneID = normalizedLayout.focusedPaneID;
-      }
-    });
-
-    if (!layout) {
-      get().ensureRuntimeLayout(workspaceId);
+function resetWorkspaceStartupState(
+  set: ImmerSet,
+  workspaceId: string,
+  disconnected = false
+) {
+  set((s) => {
+    const runtime = s.runtimes[workspaceId];
+    if (!runtime) return;
+    runtime.layoutLoading = false;
+    runtime.layoutLoaded = false;
+    if (disconnected) {
+      runtime.connectionState = "disconnected";
     }
-  } catch {
-    if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+  });
+}
 
-    set((s) => {
-      const runtime = s.runtimes[workspaceId];
-      if (!runtime) return;
-      runtime.layoutLoading = false;
-      runtime.layoutLoaded = true;
+function startWorkspaceRuntimeEffect(
+  get: Get,
+  set: ImmerSet,
+  workspace: WorkspaceRecord
+) {
+  const defaultCwd = workspace.workspaceContextSubpath
+    ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
+    : workspace.worktreePath;
+
+  return Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: () =>
+        invoke("start_workspace_runtime", {
+          workspaceId: workspace.id,
+          workspacePath: workspace.worktreePath,
+          defaultCwd,
+        }),
+      catch: (cause) =>
+        new RuntimeStartError({
+          workspaceId: workspace.id,
+          cause,
+        }),
     });
-    get().ensureRuntimeLayout(workspaceId);
-  }
+
+    yield* loadWorkspaceLayoutEffect(get, set, workspace.id);
+  }).pipe(
+    Effect.timeout("10 seconds"),
+    Effect.catchAll((error) =>
+      Effect.sync(() => {
+        console.error("Workspace startup failed:", error);
+        resetWorkspaceStartupState(set, workspace.id, true);
+      })
+    )
+  );
 }
 
 export function createWorkspaceActions(set: ImmerSet, get: Get) {
@@ -226,6 +271,10 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
 
     removeWorkspace: async (workspaceId: string) => {
       try {
+        if (currentWorkspaceStartup?.workspaceId === workspaceId) {
+          void Effect.runFork(Fiber.interrupt(currentWorkspaceStartup.fiber));
+          currentWorkspaceStartup = null;
+        }
         await invoke("remove_workspace", { workspaceId });
         set((s) => {
           delete s.runtimes[workspaceId];
@@ -242,7 +291,12 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
 
     selectWorkspace: (workspace: WorkspaceRecord) => {
       const previousWorkspaceId = get().selectedWorkspaceID;
-      const generation = nextWorkspaceSwitchGeneration();
+
+      if (currentWorkspaceStartup && currentWorkspaceStartup.workspaceId !== workspace.id) {
+        resetWorkspaceStartupState(set, currentWorkspaceStartup.workspaceId);
+        void Effect.runFork(Fiber.interrupt(currentWorkspaceStartup.fiber));
+        currentWorkspaceStartup = null;
+      }
 
       set((s) => {
         if (previousWorkspaceId && previousWorkspaceId !== workspace.id) {
@@ -266,10 +320,6 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
 
         const runtime = get().runtimes[workspace.id];
         if (!runtime || (!runtime.layoutLoaded && !runtime.layoutLoading)) {
-          const defaultCwd = workspace.workspaceContextSubpath
-            ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
-            : workspace.worktreePath;
-
           set((s) => {
             const existing = s.runtimes[workspace.id];
             if (existing) {
@@ -287,26 +337,16 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
             }
           });
 
-          void (async () => {
-            try {
-              await invoke("start_workspace_runtime", {
-                workspaceId: workspace.id,
-                workspacePath: workspace.worktreePath,
-                defaultCwd,
-              });
-              if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
-              await loadWorkspaceLayout(get, set, workspace.id, generation);
-            } catch (error) {
-              if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
-              console.error("Failed to start workspace runtime:", error);
-              set((s) => {
-                const runtime = s.runtimes[workspace.id];
-                if (!runtime) return;
-                runtime.layoutLoading = false;
-                runtime.layoutLoaded = false;
-              });
+          const fiber = Effect.runFork(startWorkspaceRuntimeEffect(get, set, workspace));
+          fiber.addObserver(() => {
+            if (currentWorkspaceStartup?.fiber === fiber) {
+              currentWorkspaceStartup = null;
             }
-          })();
+          });
+          currentWorkspaceStartup = {
+            workspaceId: workspace.id,
+            fiber,
+          };
         } else if (!runtime.layoutLoaded && runtime.layoutLoading) {
           // Reuse the in-flight load instead of kicking off a duplicate IPC chain.
         }

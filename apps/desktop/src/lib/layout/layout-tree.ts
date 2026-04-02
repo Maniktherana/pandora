@@ -160,3 +160,51 @@ export function splitPaneAroundTab(
 
   return splitNode(root);
 }
+
+export function splitPaneWithinLeaf(
+  root: LayoutNode,
+  paneID: string,
+  tabIndex: number,
+  axis: LayoutAxis,
+  position: "before" | "after"
+): LayoutNode {
+  function splitNode(node: LayoutNode): LayoutNode {
+    if (node.type === "leaf" && node.id === paneID) {
+      const tab = node.tabs[tabIndex];
+      if (!tab) return node;
+
+      const remainingTabs = node.tabs.filter((_, index) => index !== tabIndex);
+      if (remainingTabs.length === 0) return node;
+
+      let selectedIndex = node.selectedIndex;
+      if (tabIndex < selectedIndex) selectedIndex--;
+      else if (tabIndex === selectedIndex) {
+        selectedIndex = Math.min(selectedIndex, remainingTabs.length - 1);
+      }
+
+      const remainingLeaf: LayoutLeaf = {
+        ...node,
+        tabs: remainingTabs,
+        selectedIndex: Math.max(0, selectedIndex),
+      };
+      const movedLeaf = createLeaf([tab]);
+      const children = position === "before" ? [movedLeaf, remainingLeaf] : [remainingLeaf, movedLeaf];
+
+      return {
+        type: "split",
+        id: uuid(),
+        axis,
+        children,
+        ratios: [0.5, 0.5],
+      } as LayoutSplit;
+    }
+
+    if (node.type === "split") {
+      return { ...node, children: node.children.map(splitNode) };
+    }
+
+    return node;
+  }
+
+  return splitNode(root);
+}

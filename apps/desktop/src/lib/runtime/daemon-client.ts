@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { Effect, Schedule } from "effect";
 import type {
   ClientMessage,
   DaemonMessage,
   SessionState,
   SlotState,
 } from "../shared/types";
+import { DaemonConnectionError, DaemonSendError } from "./errors";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
 
@@ -32,26 +34,50 @@ export class DaemonClient {
   }
 
   async connect() {
-    const unlisten1 = await listen<string>("daemon-connection", (event) => {
-      try {
-        const data = JSON.parse(event.payload);
-        const workspaceId = data.workspaceId as string;
-        const state = data.state as ConnectionState;
-        this.callbacks.onConnectionStateChange(workspaceId, state);
-      } catch {}
-    });
+    const connectEffect = Effect.tryPromise({
+      try: async () => {
+        const unlisten1 = await listen<string>("daemon-connection", (event) => {
+          try {
+            const data = JSON.parse(event.payload);
+            const workspaceId = data.workspaceId as string;
+            const state = data.state as ConnectionState;
+            this.callbacks.onConnectionStateChange(workspaceId, state);
+          } catch (cause) {
+            console.error("Failed to parse daemon connection event:", cause);
+          }
+        });
 
-    const unlisten2 = await listen<string>("daemon-message", (event) => {
-      try {
-        const message = JSON.parse(event.payload) as DaemonMessage;
-        const workspaceId = message.workspaceId ?? "";
-        this.handleMessage(workspaceId, message);
-      } catch (e) {
-        console.error("Failed to parse daemon message:", e);
-      }
-    });
+        const unlisten2 = await listen<string>("daemon-message", (event) => {
+          try {
+            const message = JSON.parse(event.payload) as DaemonMessage;
+            const workspaceId = message.workspaceId ?? "";
+            this.handleMessage(workspaceId, message);
+          } catch (cause) {
+            console.error("Failed to parse daemon message:", cause);
+          }
+        });
 
-    this.unlisteners = [unlisten1, unlisten2];
+        return [unlisten1, unlisten2] satisfies UnlistenFn[];
+      },
+      catch: (cause) =>
+        new DaemonConnectionError({
+          workspaceId: "global",
+          cause,
+        }),
+    }).pipe(
+      Effect.tap((unlisteners) =>
+        Effect.sync(() => {
+          this.unlisteners = unlisteners;
+        })
+      ),
+      Effect.catchAll((error) =>
+        Effect.sync(() => {
+          console.error("Failed to connect daemon client:", error);
+        })
+      )
+    );
+
+    await Effect.runPromise(connectEffect);
   }
 
   disconnect() {
@@ -62,13 +88,34 @@ export class DaemonClient {
   }
 
   async send(workspaceId: string, message: ClientMessage) {
-    try {
-      await invoke("daemon_send", {
-        workspaceId,
-        message: JSON.stringify(message),
-      });
-    } catch {
-    }
+    await Effect.runPromise(this.sendEffect(workspaceId, message));
+  }
+
+  sendEffect(workspaceId: string, message: ClientMessage) {
+    return Effect.tryPromise({
+      try: () =>
+        invoke("daemon_send", {
+          workspaceId,
+          message: JSON.stringify(message),
+        }),
+      catch: (cause) =>
+        new DaemonSendError({
+          workspaceId,
+          cause,
+        }),
+    }).pipe(
+      Effect.retry(
+        Schedule.intersect(
+          Schedule.exponential("100 millis"),
+          Schedule.recurs(2)
+        )
+      ),
+      Effect.catchAll((error) =>
+        Effect.sync(() => {
+          console.error("Daemon send failed after retries:", error);
+        })
+      )
+    );
   }
 
   input(workspaceId: string, sessionID: string, data: string) {

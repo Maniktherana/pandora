@@ -37,9 +37,12 @@ type TerminalAnchorInfo = {
   onFocus?: () => void;
 };
 
-const NativeTerminalRegContext = createContext<
-  ((sessionId: string, info: TerminalAnchorInfo | null) => void) | null
->(null);
+type NativeTerminalRegistration = {
+  register: (sessionId: string, info: TerminalAnchorInfo | null) => void;
+  workspaceVisible: boolean;
+};
+
+const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
 
 function PaneTerminalAnchorSlot({
   sessionForSlot,
@@ -56,7 +59,7 @@ function PaneTerminalAnchorSlot({
   leafId: string;
   layoutTargetOnFocus: string | null;
 }) {
-  const registerTerminalAnchor = useContext(NativeTerminalRegContext);
+  const terminalRegistration = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
   const setFocusedPane = useWorkspaceStore((s) => s.setFocusedPane);
   const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
@@ -69,18 +72,18 @@ function PaneTerminalAnchorSlot({
   }, [leafId, layoutTargetOnFocus, setFocusedPane, setLayoutTargetRuntimeId, setNavigationArea]);
 
   useLayoutEffect(() => {
-    if (!registerTerminalAnchor) return;
+    if (!terminalRegistration) return;
     const el = anchorRef.current;
     if (!el) return;
-    registerTerminalAnchor(sessionForSlot.id, {
+    terminalRegistration.register(sessionForSlot.id, {
       el,
       workspaceId,
-      visible: isActiveTab,
-      focused: isFocused && isActiveTab,
+      visible: terminalRegistration.workspaceVisible && isActiveTab,
+      focused: terminalRegistration.workspaceVisible && isFocused && isActiveTab,
       onFocus: handleFocus,
     });
   }, [
-    registerTerminalAnchor,
+    terminalRegistration,
     sessionForSlot.id,
     workspaceId,
     isActiveTab,
@@ -89,9 +92,9 @@ function PaneTerminalAnchorSlot({
   ]);
 
   useLayoutEffect(() => {
-    if (!registerTerminalAnchor) return;
-    return () => registerTerminalAnchor(sessionForSlot.id, null);
-  }, [registerTerminalAnchor, sessionForSlot.id]);
+    if (!terminalRegistration) return;
+    return () => terminalRegistration.register(sessionForSlot.id, null);
+  }, [terminalRegistration, sessionForSlot.id]);
 
   return (
     <div
@@ -381,11 +384,13 @@ export function WorkspaceRuntimeView({
   workspaceRoot,
   runtime,
   layoutTargetOnFocus = null,
+  isVisible = true,
 }: {
   workspaceId: string;
   workspaceRoot: string;
   runtime: WorkspaceRuntimeState;
   layoutTargetOnFocus?: string | null;
+  isVisible?: boolean;
 }) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
 
@@ -412,8 +417,16 @@ export function WorkspaceRuntimeView({
     });
   }, []);
 
+  const terminalRegistration = useMemo<NativeTerminalRegistration>(
+    () => ({
+      register: registerTerminalAnchor,
+      workspaceVisible: isVisible,
+    }),
+    [registerTerminalAnchor, isVisible]
+  );
+
   return (
-    <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
+    <NativeTerminalRegContext.Provider value={terminalRegistration}>
       <div className="relative h-full w-full min-h-0">
         <div className="relative h-full min-h-0 min-w-0">
           <MemoLayoutRenderer
