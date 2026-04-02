@@ -161,8 +161,13 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     NSString *text = [event characters];
     // Control/command chords should be delivered as key events only. Passing printable
     // text here makes Ghostty treat shortcuts like Ctrl+C as modified text input.
+    // Function keys (arrows, home, end, etc.) use AppKit private-use Unicode (0xF700–0xF8FF);
+    // passing them as text bypasses Ghostty's keycode→escape-sequence translation (DECCKM, etc.).
     if (!ctrl && !cmd && text.length > 0) {
-        key.text = text.UTF8String;
+        unichar ch = [text characterAtIndex:0];
+        if (ch < 0xF700 || ch > 0xF8FF) {
+            key.text = text.UTF8String;
+        }
     }
 
     ghostty_surface_key(self.surface, key);
