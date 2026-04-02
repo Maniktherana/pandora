@@ -1,11 +1,110 @@
-import type { ProjectRecord, WorkspaceRecord, WorkspaceKind, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { WritableDraft } from "immer";
+import type {
+  LayoutNode,
+  ProjectRecord,
+  WorkspaceRecord,
+  WorkspaceKind,
+  WorkspaceRuntimeState,
+} from "@/lib/shared/types";
 import type { AppState } from "@/lib/shared/types";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { createEmptyTerminalPanel } from "@/lib/terminal/bottom-terminal-panel";
 import { createLeaf } from "@/lib/layout/layout-tree";
+import { migratePersistedLayout } from "@/lib/layout/layout-migrate";
+import { sanitizeWorkspaceTerminalLayout } from "./runtime-actions";
 import { invoke } from "@tauri-apps/api/core";
 import type { NavigationArea } from "../workspace-store";
 import type { ImmerSet, Get } from "./types";
+
+let workspaceSwitchGeneration = 0;
+
+function nextWorkspaceSwitchGeneration() {
+  workspaceSwitchGeneration += 1;
+  return workspaceSwitchGeneration;
+}
+
+function isCurrentWorkspaceSwitchGeneration(generation: number) {
+  return workspaceSwitchGeneration === generation;
+}
+
+function createWorkspaceRuntimeState(
+  workspaceId: string,
+  {
+    root = null,
+    focusedPaneID = null,
+    terminalPanel = null,
+    layoutLoading,
+    layoutLoaded,
+  }: {
+    root?: LayoutNode | null;
+    focusedPaneID?: string | null;
+    terminalPanel?: WorkspaceRuntimeState["terminalPanel"];
+    layoutLoading: boolean;
+    layoutLoaded: boolean;
+  }
+): WorkspaceRuntimeState {
+  return {
+    workspaceId,
+    slots: [],
+    sessions: [],
+    terminalDisplayBySlotId: {},
+    connectionState: "connecting",
+    root,
+    focusedPaneID,
+    terminalPanel,
+    layoutLoading,
+    layoutLoaded,
+  };
+}
+
+async function loadWorkspaceLayout(
+  get: Get,
+  set: ImmerSet,
+  workspaceId: string,
+  generation: number
+) {
+  try {
+    const raw = await invoke<unknown>("load_workspace_layout", { workspaceId });
+    if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+
+    const layout = raw != null ? migratePersistedLayout(raw) : null;
+
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return;
+
+      const normalizedLayout =
+        layout && runtime.slots.length > 0
+          ? sanitizeWorkspaceTerminalLayout(
+              layout.root,
+              layout.focusedPaneID,
+              new Set(runtime.slots.map((slot) => slot.id))
+            )
+          : layout;
+
+      runtime.layoutLoading = false;
+      runtime.layoutLoaded = true;
+      if (normalizedLayout) {
+        runtime.root = normalizedLayout.root as WritableDraft<LayoutNode> | null;
+        runtime.focusedPaneID = normalizedLayout.focusedPaneID;
+      }
+    });
+
+    if (!layout) {
+      get().ensureRuntimeLayout(workspaceId);
+    }
+  } catch {
+    if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+
+    set((s) => {
+      const runtime = s.runtimes[workspaceId];
+      if (!runtime) return;
+      runtime.layoutLoading = false;
+      runtime.layoutLoaded = true;
+    });
+    get().ensureRuntimeLayout(workspaceId);
+  }
+}
 
 export function createWorkspaceActions(set: ImmerSet, get: Get) {
   const syncProjectScopedRuntime = (workspace: WorkspaceRecord) => {
@@ -22,17 +121,13 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
       });
       const placeholder = createLeaf([]);
       set((s) => {
-        s.runtimes[pk] = {
-          workspaceId: pk,
-          slots: [],
-          sessions: [],
-          terminalDisplayBySlotId: {},
-          connectionState: "connecting",
+        s.runtimes[pk] = createWorkspaceRuntimeState(pk, {
           root: placeholder,
           focusedPaneID: placeholder.id,
           terminalPanel: createEmptyTerminalPanel(),
           layoutLoading: false,
-        } as WorkspaceRuntimeState as WritableDraft<WorkspaceRuntimeState>;
+          layoutLoaded: true,
+        }) as WritableDraft<WorkspaceRuntimeState>;
       });
     }
   };
@@ -136,7 +231,7 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
           delete s.runtimes[workspaceId];
           if (s.selectedWorkspaceID === workspaceId) {
             s.selectedWorkspaceID =
-              s.workspaces.find((w) => w.id !== workspaceId)?.id ?? null;
+            s.workspaces.find((w) => w.id !== workspaceId)?.id ?? null;
           }
         });
         await get().reloadFromBackend();
@@ -146,7 +241,16 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
     },
 
     selectWorkspace: (workspace: WorkspaceRecord) => {
+      const previousWorkspaceId = get().selectedWorkspaceID;
+      const generation = nextWorkspaceSwitchGeneration();
+
       set((s) => {
+        if (previousWorkspaceId && previousWorkspaceId !== workspace.id) {
+          const previousRuntime = s.runtimes[previousWorkspaceId];
+          if (previousRuntime && previousRuntime.layoutLoading && !previousRuntime.layoutLoaded) {
+            previousRuntime.layoutLoading = false;
+          }
+        }
         s.selectedWorkspaceID = workspace.id;
         s.selectedProjectID = workspace.projectId;
         s.navigationArea = "sidebar" as NavigationArea;
@@ -161,32 +265,50 @@ export function createWorkspaceActions(set: ImmerSet, get: Get) {
         syncProjectScopedRuntime(workspace);
 
         const runtime = get().runtimes[workspace.id];
-        if (!runtime) {
+        if (!runtime || (!runtime.layoutLoaded && !runtime.layoutLoading)) {
           const defaultCwd = workspace.workspaceContextSubpath
             ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
             : workspace.worktreePath;
 
-          void invoke("start_workspace_runtime", {
-            workspaceId: workspace.id,
-            workspacePath: workspace.worktreePath,
-            defaultCwd,
-          });
-
           set((s) => {
-            s.runtimes[workspace.id] = {
-              workspaceId: workspace.id,
-              slots: [],
-              sessions: [],
-              terminalDisplayBySlotId: {},
-              connectionState: "connecting",
-              root: null,
-              focusedPaneID: null,
-              terminalPanel: null,
-              layoutLoading: true,
-            } as WorkspaceRuntimeState as WritableDraft<WorkspaceRuntimeState>;
+            const existing = s.runtimes[workspace.id];
+            if (existing) {
+              existing.layoutLoading = true;
+              existing.layoutLoaded = false;
+              existing.connectionState = "connecting";
+              existing.root = existing.root ?? null;
+              existing.focusedPaneID = existing.focusedPaneID ?? null;
+              existing.terminalPanel = existing.terminalPanel ?? null;
+            } else {
+              s.runtimes[workspace.id] = createWorkspaceRuntimeState(workspace.id, {
+                layoutLoading: true,
+                layoutLoaded: false,
+              }) as WritableDraft<WorkspaceRuntimeState>;
+            }
           });
 
-          void get().loadPersistedLayout(workspace.id);
+          void (async () => {
+            try {
+              await invoke("start_workspace_runtime", {
+                workspaceId: workspace.id,
+                workspacePath: workspace.worktreePath,
+                defaultCwd,
+              });
+              if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+              await loadWorkspaceLayout(get, set, workspace.id, generation);
+            } catch (error) {
+              if (!isCurrentWorkspaceSwitchGeneration(generation)) return;
+              console.error("Failed to start workspace runtime:", error);
+              set((s) => {
+                const runtime = s.runtimes[workspace.id];
+                if (!runtime) return;
+                runtime.layoutLoading = false;
+                runtime.layoutLoaded = false;
+              });
+            }
+          })();
+        } else if (!runtime.layoutLoaded && runtime.layoutLoading) {
+          // Reuse the in-flight load instead of kicking off a duplicate IPC chain.
         }
       }
 

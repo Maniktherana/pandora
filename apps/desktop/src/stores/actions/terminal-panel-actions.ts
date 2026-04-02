@@ -1,3 +1,4 @@
+import type { WritableDraft } from "immer";
 import type { TerminalPanelState } from "@/lib/shared/types";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";

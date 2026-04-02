@@ -82,6 +82,9 @@ export function migratePersistedLayout(raw: unknown): {
   const o = raw as Record<string, unknown>;
   const root = migrateLayoutNode(o.root);
   if (!root) return null;
+  if (root.type === "leaf" && root.tabs.length === 0) {
+    return null;
+  }
   const fp = o.focusedPaneID;
   return {
     root,

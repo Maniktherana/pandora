@@ -1,3 +1,4 @@
+import type { WritableDraft } from "immer";
 import type {
   SlotState,
   SessionState,
@@ -68,6 +69,7 @@ export function createRuntimeActions(set: ImmerSet, get: Get) {
             focusedPaneID: null,
             terminalPanel: isProjectRuntimeKey(workspaceId) ? createEmptyTerminalPanel() : null,
             layoutLoading: false,
+            layoutLoaded: isProjectRuntimeKey(workspaceId),
           } as WorkspaceRuntimeState;
         }
         s.runtimes[workspaceId].connectionState = state;
@@ -184,7 +186,7 @@ export function createRuntimeActions(set: ImmerSet, get: Get) {
 
         const newRoot =
           !isProjectRuntimeKey(workspaceId) && runtime.root
-            ? (removeTerminalSlotFromTree(runtime.root, slotID) ?? createLeaf([]))
+            ? removeTerminalSlotFromTree(runtime.root, slotID)
             : runtime.root
               ? removeTerminalSlotFromTree(runtime.root, slotID)
               : null;
@@ -324,6 +326,7 @@ export function createRuntimeActions(set: ImmerSet, get: Get) {
               : layout;
 
           runtime.layoutLoading = false;
+          runtime.layoutLoaded = true;
           if (normalizedLayout) {
             runtime.root = normalizedLayout.root as WritableDraft<LayoutNode> | null;
             runtime.focusedPaneID = normalizedLayout.focusedPaneID;
@@ -338,6 +341,7 @@ export function createRuntimeActions(set: ImmerSet, get: Get) {
           const runtime = s.runtimes[workspaceId];
           if (!runtime) return;
           runtime.layoutLoading = false;
+          runtime.layoutLoaded = true;
         });
         get().ensureRuntimeLayout(workspaceId);
       }

@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  memo,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -15,7 +16,13 @@ import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { tabKey } from "@/lib/layout/layout-tree";
-import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type {
+  LayoutNode,
+  LayoutLeaf,
+  SessionState,
+  SlotState,
+  WorkspaceRuntimeState,
+} from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
@@ -51,7 +58,9 @@ function PaneTerminalAnchorSlot({
 }) {
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const { setFocusedPane, setNavigationArea, setLayoutTargetRuntimeId } = useWorkspaceStore();
+  const setFocusedPane = useWorkspaceStore((s) => s.setFocusedPane);
+  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
 
   const handleFocus = useCallback(() => {
     setLayoutTargetRuntimeId(layoutTargetOnFocus);
@@ -116,9 +125,26 @@ function PaneView({
   hideTabBar = false,
   isResizing,
 }: PaneViewProps) {
-  const { slotsByID, sessionsByID } = useWorkspaceStore();
-  const slotsMap = slotsByID(workspaceId);
-  const sessionsMap = sessionsByID(workspaceId);
+  const runtime = useWorkspaceStore((s) => s.runtimes[workspaceId]);
+  const setFocusedPane = useWorkspaceStore((s) => s.setFocusedPane);
+  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+
+  const slotsMap = useMemo(() => {
+    const map: Record<string, SlotState> = {};
+    for (const slot of runtime?.slots ?? []) {
+      map[slot.id] = slot;
+    }
+    return map;
+  }, [runtime?.slots]);
+
+  const sessionsMap = useMemo(() => {
+    const map: Record<string, SessionState> = {};
+    for (const session of runtime?.sessions ?? []) {
+      map[session.id] = session;
+    }
+    return map;
+  }, [runtime?.sessions]);
   const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
   const activeSlotId =
     activeTab?.kind === "terminal" ? activeTab.slotId : null;
@@ -240,6 +266,8 @@ function PaneView({
   );
 }
 
+const MemoPaneView = memo(PaneView);
+
 interface LayoutRendererProps {
   node: LayoutNode;
   focusedPaneID: string | null;
@@ -264,7 +292,7 @@ function LayoutRenderer({
 
   if (node.type === "leaf") {
     return (
-      <PaneView
+      <MemoPaneView
         leaf={node}
         isFocused={node.id === focusedPaneID}
         workspaceId={workspaceId}
@@ -295,7 +323,7 @@ function LayoutRenderer({
             />
           )}
           <ResizablePanel defaultSize={node.ratios[i] * 100} minSize={10}>
-            <LayoutRenderer
+            <MemoLayoutRenderer
               node={child}
               focusedPaneID={focusedPaneID}
               workspaceId={workspaceId}
@@ -309,6 +337,8 @@ function LayoutRenderer({
     </ResizablePanelGroup>
   );
 }
+
+const MemoLayoutRenderer = memo(LayoutRenderer);
 
 function HoistedNativeTerminals({
   runtime,
@@ -343,6 +373,8 @@ function HoistedNativeTerminals({
     </>
   );
 }
+
+const MemoHoistedNativeTerminals = memo(HoistedNativeTerminals);
 
 export function WorkspaceRuntimeView({
   workspaceId,
@@ -384,7 +416,7 @@ export function WorkspaceRuntimeView({
     <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
       <div className="relative h-full w-full min-h-0">
         <div className="relative h-full min-h-0 min-w-0">
-          <LayoutRenderer
+          <MemoLayoutRenderer
             node={runtime.root!}
             focusedPaneID={runtime.focusedPaneID}
             workspaceId={workspaceId}
@@ -392,7 +424,7 @@ export function WorkspaceRuntimeView({
             layoutTargetOnFocus={layoutTargetOnFocus}
             hideTabBar={false}
           />
-          <HoistedNativeTerminals runtime={runtime} anchors={anchors} />
+          <MemoHoistedNativeTerminals runtime={runtime} anchors={anchors} />
         </div>
       </div>
     </NativeTerminalRegContext.Provider>

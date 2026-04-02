@@ -198,4 +198,6 @@ export interface WorkspaceRuntimeState {
   focusedPaneID: string | null;
   terminalPanel: TerminalPanelState | null;
   layoutLoading: boolean;
+  /** True once the persisted layout attempt has settled, even if the result is empty. */
+  layoutLoaded: boolean;
 }

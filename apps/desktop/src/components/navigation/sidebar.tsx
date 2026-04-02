@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Search,
   Plus,
@@ -51,14 +52,12 @@ function StatusDot({ status }: { status: WorkspaceStatus }) {
 }
 
 function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
-  const {
-    selectedWorkspaceID,
-    selectWorkspace,
-    retryWorkspace,
-    removeWorkspace,
-    setNavigationArea,
-    navigationArea,
-  } = useWorkspaceStore();
+  const selectedWorkspaceID = useWorkspaceStore((s) => s.selectedWorkspaceID);
+  const navigationArea = useWorkspaceStore((s) => s.navigationArea);
+  const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
+  const retryWorkspace = useWorkspaceStore((s) => s.retryWorkspace);
+  const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
+  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -146,6 +145,8 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
   );
 }
 
+const MemoWorkspaceRow = memo(WorkspaceRow);
+
 function ProjectRow({ project }: { project: ProjectRecord }) {
   const {
     workspacesForProject,
@@ -227,7 +228,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
       {project.isExpanded && (
         <div className="mt-0.5 space-y-0.5">
           {workspaces.map((ws) => (
-            <WorkspaceRow key={ws.id} workspace={ws} />
+            <MemoWorkspaceRow key={ws.id} workspace={ws} />
           ))}
           {workspaces.length === 0 && (
             <div className="flex flex-col gap-1.5 px-2.5 py-1.5">

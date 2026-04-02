@@ -1,3 +1,4 @@
+import type { WritableDraft } from "immer";
 import type { DiffSource, LayoutAxis, LayoutNode } from "@/lib/shared/types";
 import {
   createLeaf,
@@ -81,15 +82,15 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
         const runtime = s.runtimes[rid];
         if (!runtime?.root) return;
 
-        let newRoot: LayoutNode | null = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
-        if (!newRoot) {
-          newRoot = createLeaf([]);
-        }
-        const leaves = getAllLeaves(newRoot);
-        const focusedOK = runtime.focusedPaneID && findLeaf(newRoot, runtime.focusedPaneID);
+        const newRoot = removeTabAtIndexInTree(runtime.root, paneID, tabIndex);
+        const leaves = newRoot ? getAllLeaves(newRoot) : [];
+        const focusedOK =
+          newRoot && runtime.focusedPaneID
+            ? findLeaf(newRoot, runtime.focusedPaneID)
+            : null;
         const focusedPaneID = focusedOK ? runtime.focusedPaneID : (leaves[0]?.id ?? null);
 
-        runtime.root = newRoot as WritableDraft<LayoutNode>;
+        runtime.root = newRoot as WritableDraft<LayoutNode> | null;
         runtime.focusedPaneID = focusedPaneID;
       });
 
@@ -349,10 +350,13 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
       const id = get().effectiveLayoutRuntimeId();
       if (!id || isProjectRuntimeKey(id)) return;
       const runtime = get().runtimes[id];
-      if (!runtime?.root) return;
+      const root =
+        runtime?.root?.type === "leaf" && runtime.root.tabs.length === 0
+          ? null
+          : runtime?.root ?? null;
       const layout = {
-        root: runtime.root,
-        focusedPaneID: runtime.focusedPaneID,
+        root,
+        focusedPaneID: root ? runtime?.focusedPaneID ?? null : null,
       };
       void invoke("save_workspace_layout", { workspaceId: id, layout });
     },
