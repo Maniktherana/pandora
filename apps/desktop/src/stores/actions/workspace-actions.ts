@@ -108,7 +108,9 @@ function resetWorkspaceStartupState(
     const runtime = s.runtimes[workspaceId];
     if (!runtime) return;
     runtime.layoutLoading = false;
-    runtime.layoutLoaded = false;
+    if (!runtime.root) {
+      runtime.layoutLoaded = false;
+    }
     if (disconnected) {
       runtime.connectionState = "disconnected";
     }
@@ -125,21 +127,25 @@ function startWorkspaceRuntimeEffect(
     : workspace.worktreePath;
 
   return Effect.gen(function* () {
-    yield* Effect.tryPromise({
-      try: () =>
-        invoke("start_workspace_runtime", {
-          workspaceId: workspace.id,
-          workspacePath: workspace.worktreePath,
-          defaultCwd,
+    yield* Effect.all(
+      [
+        Effect.tryPromise({
+          try: () =>
+            invoke("start_workspace_runtime", {
+              workspaceId: workspace.id,
+              workspacePath: workspace.worktreePath,
+              defaultCwd,
+            }),
+          catch: (cause) =>
+            new RuntimeStartError({
+              workspaceId: workspace.id,
+              cause,
+            }),
         }),
-      catch: (cause) =>
-        new RuntimeStartError({
-          workspaceId: workspace.id,
-          cause,
-        }),
-    });
-
-    yield* loadWorkspaceLayoutEffect(get, set, workspace.id);
+        loadWorkspaceLayoutEffect(get, set, workspace.id),
+      ],
+      { concurrency: "unbounded" }
+    );
   }).pipe(
     Effect.timeout("10 seconds"),
     Effect.catchAll((error) =>

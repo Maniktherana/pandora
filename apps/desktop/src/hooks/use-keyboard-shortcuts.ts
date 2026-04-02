@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useAppView, useLayoutCommands, useWorkspaceCommands } from "@/hooks/use-app-view";
 
 interface UseKeyboardShortcutsParams {
   onNewTerminal: () => void;
@@ -15,31 +15,26 @@ export default function useKeyboardShortcuts({
   onToggleSidebar,
   onToggleBottomPanel,
 }: UseKeyboardShortcutsParams) {
-  const store = useWorkspaceStore;
+  const navigationArea = useAppView((view) => view.navigationArea);
+  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const workspaces = useAppView((view) => view.workspaces);
+  const { activateSidebarSelection, navigateSidebar, updateWorkspacePrState } = useWorkspaceCommands();
+  const { cycleTab } = useLayoutCommands();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const {
-        navigationArea,
-        navigateSidebar,
-        selectWorkspace,
-        setNavigationArea,
-        selectedWorkspaceID,
-        workspaces,
-      } = store.getState();
-
       if (e.metaKey) {
         switch (e.key) {
           case "[":
             if (e.shiftKey) {
               e.preventDefault();
-              store.getState().cycleTab(-1);
+              cycleTab(-1);
             }
             break;
           case "]":
             if (e.shiftKey) {
               e.preventDefault();
-              store.getState().cycleTab(1);
+              cycleTab(1);
             }
             break;
           case "ArrowLeft":
@@ -51,8 +46,7 @@ export default function useKeyboardShortcuts({
             if (navigationArea === "sidebar" && selectedWorkspaceID) {
               e.preventDefault();
               const ws = workspaces.find((w) => w.id === selectedWorkspaceID);
-              if (ws) selectWorkspace(ws);
-              setNavigationArea("workspace");
+              if (ws) activateSidebarSelection();
             }
             break;
           case "ArrowUp":
@@ -97,7 +91,18 @@ export default function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onCloseTab, onNewTerminal, onToggleBottomPanel, onToggleSidebar, store]);
+  }, [
+    activateSidebarSelection,
+    cycleTab,
+    navigationArea,
+    navigateSidebar,
+    onCloseTab,
+    onNewTerminal,
+    onToggleBottomPanel,
+    onToggleSidebar,
+    selectedWorkspaceID,
+    workspaces,
+  ]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -108,10 +113,10 @@ export default function useKeyboardShortcuts({
           onCloseTab();
           break;
         case "previous-tab":
-          store.getState().cycleTab(-1);
+          cycleTab(-1);
           break;
         case "next-tab":
-          store.getState().cycleTab(1);
+          cycleTab(1);
           break;
         case "new-terminal":
           onNewTerminal();
@@ -133,7 +138,7 @@ export default function useKeyboardShortcuts({
     return () => {
       unlisten?.();
     };
-  }, [onCloseTab, onNewTerminal, onToggleBottomPanel, onToggleSidebar, store]);
+  }, [cycleTab, onCloseTab, onNewTerminal, onToggleBottomPanel, onToggleSidebar]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -141,11 +146,11 @@ export default function useKeyboardShortcuts({
       try {
         const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
         const { workspaceId, prState } = payload as { workspaceId: string; prState: string };
-        store.getState().updateWorkspacePrState(workspaceId, prState);
+        updateWorkspacePrState(workspaceId, prState);
       } catch {}
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [store]);
+  }, [updateWorkspacePrState]);
 }

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   Search,
   Plus,
@@ -10,7 +10,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useAppView, useWorkspaceCommands } from "@/hooks/use-app-view";
 import type {
   ProjectRecord,
   WorkspaceKind,
@@ -52,12 +52,9 @@ function StatusDot({ status }: { status: WorkspaceStatus }) {
 }
 
 function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
-  const selectedWorkspaceID = useWorkspaceStore((s) => s.selectedWorkspaceID);
-  const navigationArea = useWorkspaceStore((s) => s.navigationArea);
-  const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
-  const retryWorkspace = useWorkspaceStore((s) => s.retryWorkspace);
-  const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const navigationArea = useAppView((view) => view.navigationArea);
+  const workspaceCommands = useWorkspaceCommands();
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -66,12 +63,12 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
     <div className="group">
       <button
         onClick={() => {
-          selectWorkspace(workspace);
-          setNavigationArea("sidebar");
+          workspaceCommands.selectWorkspace(workspace.id);
+          workspaceCommands.setNavigationArea("sidebar");
         }}
         onDoubleClick={() => {
-          selectWorkspace(workspace);
-          setNavigationArea("workspace");
+          workspaceCommands.selectWorkspace(workspace.id);
+          workspaceCommands.setNavigationArea("workspace");
         }}
         className={cn(
           "flex w-full select-none items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
@@ -116,7 +113,7 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                void retryWorkspace(workspace.id);
+                workspaceCommands.retryWorkspace(workspace.id);
               }}
               className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
               title="Retry"
@@ -126,7 +123,7 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                void removeWorkspace(workspace.id);
+                workspaceCommands.removeWorkspace(workspace.id);
               }}
               className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
               title="Remove"
@@ -148,15 +145,17 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
 const MemoWorkspaceRow = memo(WorkspaceRow);
 
 function ProjectRow({ project }: { project: ProjectRecord }) {
-  const {
-    workspacesForProject,
-    toggleProject,
-    createWorkspace,
-    selectedProjectID,
-    selectProject,
-  } = useWorkspaceStore();
+  const selectedProjectID = useAppView((view) => view.selectedProjectID);
+  const allWorkspaces = useAppView((view) => view.workspaces);
+  const workspaceCommands = useWorkspaceCommands();
+  const workspaces = useMemo(
+    () =>
+      allWorkspaces.filter(
+        (workspace) => workspace.projectId === project.id && workspace.status !== "archived"
+      ),
+    [allWorkspaces, project.id]
+  );
 
-  const workspaces = workspacesForProject(project.id).filter((w) => w.status !== "archived");
   const isSelected = project.id === selectedProjectID;
 
   return (
@@ -168,8 +167,8 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
           isSelected ? "bg-[var(--oc-panel-hover)]" : "hover:bg-[var(--oc-panel-hover)]"
         )}
         onClick={() => {
-          selectProject(project.id);
-          void toggleProject(project.id);
+          workspaceCommands.selectProject(project.id);
+          workspaceCommands.toggleProject(project.id);
         }}
       >
         {project.isExpanded ? (
@@ -202,7 +201,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   className="flex flex-col items-start gap-0.5 py-2"
-                  onClick={() => void createWorkspace(project.id, "worktree")}
+                  onClick={() => workspaceCommands.createWorkspace(project.id, "worktree")}
                 >
                   <span className="font-medium text-foreground">Worktree</span>
                   <span className="text-[10px] font-normal text-muted-foreground">
@@ -211,7 +210,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="flex flex-col items-start gap-0.5 py-2"
-                  onClick={() => void createWorkspace(project.id, "linked")}
+                  onClick={() => workspaceCommands.createWorkspace(project.id, "linked")}
                 >
                   <span className="font-medium text-foreground">Local workspace</span>
                   <span className="text-[10px] font-normal text-muted-foreground">
@@ -237,14 +236,14 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
                 <Button
                   variant="link"
                   className="h-auto p-0 text-left text-[11px] font-normal"
-                  onClick={() => void createWorkspace(project.id, "worktree")}
+                  onClick={() => workspaceCommands.createWorkspace(project.id, "worktree")}
                 >
                   + Worktree workspace
                 </Button>
                 <Button
                   variant="link"
                   className="h-auto p-0 text-left text-[11px] font-normal"
-                  onClick={() => void createWorkspace(project.id, "linked")}
+                  onClick={() => workspaceCommands.createWorkspace(project.id, "linked")}
                 >
                   + Local workspace
                 </Button>
@@ -262,14 +261,18 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ onCollapse }: SidebarProps) {
-  const {
-    filteredProjects,
-    searchText,
-    setSearchText,
-    addProject,
-  } = useWorkspaceStore();
-
-  const projects = filteredProjects();
+  const projects = useAppView((view) => view.projects);
+  const searchText = useAppView((view) => view.searchText);
+  const workspaceCommands = useWorkspaceCommands();
+  const filteredProjects = useMemo(
+    () =>
+      projects.filter((project) =>
+        searchText
+          ? project.displayName.toLowerCase().includes(searchText.toLowerCase())
+          : true
+      ),
+    [projects, searchText]
+  );
 
   const handleAddProject = async () => {
     const selected = await open({
@@ -278,7 +281,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
       title: "Add Project — Choose a folder inside a Git repository",
     });
     if (selected) {
-      await addProject(selected);
+      workspaceCommands.addProject(selected);
     }
   };
 
@@ -292,7 +295,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
             type="text"
             placeholder="Search..."
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={(e) => workspaceCommands.setSearchText(e.target.value)}
             className="w-full rounded-md border border-[var(--oc-border)] bg-transparent pl-7 pr-2 py-1 text-xs text-[var(--oc-text)] placeholder:text-[var(--oc-text-subtle)] focus:border-[var(--oc-interactive)] focus:outline-none"
           />
         </div>
@@ -314,11 +317,11 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
 
       {/* Project/workspace list */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1">
-        {projects.map((project) => (
+        {filteredProjects.map((project) => (
           <ProjectRow key={project.id} project={project} />
         ))}
 
-        {projects.length === 0 && (
+        {filteredProjects.length === 0 && (
           <div className="mt-8 px-4 text-center text-xs text-[var(--oc-text-faint)]">
             {searchText ? (
               "No matching projects"

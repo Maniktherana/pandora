@@ -1,80 +1,82 @@
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
-import * as SubscriptionRef from "effect/SubscriptionRef";
+import { Context, Effect, Layer } from "effect";
+import { invoke } from "@tauri-apps/api/core";
 import { NativeSurfaceError } from "../errors";
-import type { NativeSurfaceManagerService, SurfaceAnchorRegistration, SurfaceReleaseKey } from "./contracts";
-import { NativeSurfaceManager } from "./contracts";
 
-function surfaceKey(input: SurfaceReleaseKey) {
-  return `${input.workspaceId}:${input.sessionId}:${input.surfaceId}`;
+export interface SurfaceRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly scaleFactor: number;
 }
 
-function makeInitialView() {
-  return {
-    surfaces: {},
-  } as const;
+export interface SurfaceAnchorRegistration {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly surfaceId: string;
 }
 
-export function makeNativeSurfaceManagerLive() {
-  return Layer.effect(
-    NativeSurfaceManager,
-    Effect.gen(function* () {
-      const view = yield* SubscriptionRef.make(makeInitialView());
-      const surfaces = yield* Ref.make(new Map<string, SurfaceAnchorRegistration>());
-
-      const updateView = Effect.sync(() => {
-        const next: Record<string, SurfaceAnchorRegistration> = {};
-        for (const [key, value] of Ref.unsafeGet(surfaces).entries()) {
-          next[key] = value;
-        }
-        void SubscriptionRef.set(view, { surfaces: next });
-      });
-
-      const service: NativeSurfaceManagerService = {
-        view,
-        registerAnchor: (input: SurfaceAnchorRegistration) =>
-          Effect.gen(function* () {
-            const key = surfaceKey(input);
-            yield* Ref.set(surfaces, new Map(Ref.unsafeGet(surfaces)).set(key, input));
-            yield* updateView;
-            return {
-              workspaceId: input.workspaceId,
-              sessionId: input.sessionId,
-              surfaceId: input.surfaceId,
-            } satisfies SurfaceReleaseKey;
-          }),
-        updateVisibility: (key: SurfaceReleaseKey, input) =>
-          Effect.gen(function* () {
-            const lookup = surfaceKey(key);
-            const current = Ref.unsafeGet(surfaces).get(lookup);
-            if (!current) {
-              throw new NativeSurfaceError({
-                workspaceId: key.workspaceId,
-                sessionId: key.sessionId,
-                cause: new Error("surface not registered"),
-              });
-            }
-            yield* Ref.set(
-              surfaces,
-              new Map(Ref.unsafeGet(surfaces)).set(lookup, {
-                ...current,
-                ...input,
-              })
-            );
-            yield* updateView;
-          }),
-        releaseSurface: (key: SurfaceReleaseKey) =>
-          Effect.gen(function* () {
-            const lookup = surfaceKey(key);
-            const next = new Map(Ref.unsafeGet(surfaces));
-            next.delete(lookup);
-            yield* Ref.set(surfaces, next);
-            yield* updateView;
-          }),
-      };
-
-      return service;
-    })
-  );
+export interface NativeSurfaceManagerService {
+  readonly registerAnchor: (input: SurfaceAnchorRegistration) => Effect.Effect<string>;
+  readonly beginWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
+  readonly endWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
+  readonly createSurface: (
+    workspaceId: string,
+    sessionId: string,
+    surfaceId: string,
+    rect: SurfaceRect
+  ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly updateSurface: (
+    surfaceId: string,
+    rect: SurfaceRect,
+    visible: boolean,
+    focused: boolean
+  ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly releaseSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
 }
+
+export class NativeSurfaceManager extends Context.Tag("pandora/NativeSurfaceManager")<
+  NativeSurfaceManager,
+  NativeSurfaceManagerService
+>() {}
+
+export const NativeSurfaceManagerLive = Layer.succeed(NativeSurfaceManager, {
+  registerAnchor: (input) => Effect.succeed(`${input.workspaceId}:${input.sessionId}`),
+  beginWebOverlay: () =>
+    Effect.tryPromise({
+      try: () => invoke("terminal_surfaces_begin_web_overlay"),
+      catch: (cause) => new NativeSurfaceError({ cause, surfaceId: "web-overlay" }),
+    }),
+  endWebOverlay: () =>
+    Effect.tryPromise({
+      try: () => invoke("terminal_surfaces_end_web_overlay"),
+      catch: (cause) => new NativeSurfaceError({ cause, surfaceId: "web-overlay" }),
+    }),
+  createSurface: (workspaceId, sessionId, surfaceId, rect) =>
+    Effect.tryPromise({
+      try: () =>
+        invoke("terminal_surface_create", {
+          workspaceId,
+          sessionId,
+          surfaceId,
+          rect,
+        }),
+      catch: (cause) => new NativeSurfaceError({ cause, surfaceId }),
+    }),
+  updateSurface: (surfaceId, rect, visible, focused) =>
+    Effect.tryPromise({
+      try: () =>
+        invoke("terminal_surface_update", {
+          surfaceId,
+          rect,
+          visible,
+          focused,
+        }),
+      catch: (cause) => new NativeSurfaceError({ cause, surfaceId }),
+    }),
+  releaseSurface: (surfaceId) =>
+    Effect.tryPromise({
+      try: () => invoke("terminal_surface_destroy", { surfaceId }),
+      catch: (cause) => new NativeSurfaceError({ cause, surfaceId }),
+    }),
+} satisfies NativeSurfaceManagerService);

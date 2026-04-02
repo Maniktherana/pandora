@@ -17,6 +17,13 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
+import {
+  useAppView,
+  useLayoutCommands,
+  useProjectTerminalView,
+  useWorkspaceCommands,
+  useWorkspaceView,
+} from "@/hooks/use-app-view";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import {
@@ -41,7 +48,7 @@ import {
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { useEditorStore } from "@/stores/editor-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { findLeaf, getAllLeaves } from "@/lib/layout/layout-tree";
 
 function hasStaged(e: ScmStatusEntry): boolean {
   return e.stagedKind != null && e.stagedKind !== "";
@@ -83,15 +90,15 @@ export default function WorkspaceChangesPanel({
   const [changesOpen, setChangesOpen] = useState(true);
 
   const openFile = useEditorStore((s) => s.openFile);
-  const addDiffTabForPath = useWorkspaceStore((s) => s.addDiffTabForPath);
-  const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === workspaceId));
-  const workspaceRuntime = useWorkspaceStore((s) => s.runtimes[workspaceId] ?? null);
-  const projectRuntime = useWorkspaceStore((s) => {
-    const projectId = workspace?.projectId;
-    return projectId ? s.runtimes[projectRuntimeKey(projectId)] ?? null : null;
-  });
-  const setPrAwaiting = useWorkspaceStore((s) => s.setPrAwaiting);
-  const archiveWorkspaceFromStore = useWorkspaceStore((s) => s.archiveWorkspaceFromStore);
+  const layoutCommands = useLayoutCommands();
+  const workspaceCommands = useWorkspaceCommands();
+  const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
+  const workspaceRuntime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
+  const projectRuntime = useProjectTerminalView(
+    projectRuntimeId ?? "",
+    (view) => view.runtime
+  );
 
   const [prError, setPrError] = useState<string | null>(null);
   const [prSending, setPrSending] = useState(false);
@@ -138,7 +145,7 @@ export default function WorkspaceChangesPanel({
   };
 
   const onOpenDiff = (path: string, source: DiffSource) => {
-    addDiffTabForPath(path, source);
+    layoutCommands.addDiffTabForPath(path, source);
   };
 
   const onDiscard = (e: ScmStatusEntry) => {
@@ -193,20 +200,17 @@ export default function WorkspaceChangesPanel({
       const bytes = new TextEncoder().encode(prompt + "\n");
       const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
       client.input(target.runtimeId, target.sessionId, btoa(binary));
-      setPrAwaiting(workspaceId, true);
+      workspaceCommands.setPrAwaiting(workspaceId, true);
 
       // Focus the agent terminal pane
       if (workspaceRuntime?.root) {
-        const { findLeaf } = await import("@/lib/layout/layout-tree");
-        // Try to find and focus the pane containing this terminal
-        const { getAllLeaves } = await import("@/lib/layout/layout-tree");
         const leaves = getAllLeaves(workspaceRuntime.root);
         for (const leaf of leaves) {
           const tabIdx = leaf.tabs.findIndex(
             (t) => t.kind === "terminal" && t.slotId === target.slotId
           );
           if (tabIdx >= 0) {
-            useWorkspaceStore.getState().setFocusedPane(leaf.id);
+            layoutCommands.setFocusedPane(leaf.id);
             break;
           }
         }
@@ -216,17 +220,17 @@ export default function WorkspaceChangesPanel({
     } finally {
       setPrSending(false);
     }
-  }, [workspaceId, workspaceRuntime, projectRuntime, setPrAwaiting, entries]);
+  }, [entries, layoutCommands, projectRuntime, workspaceCommands, workspaceId, workspaceRuntime]);
 
   const handleArchive = useCallback(async () => {
     if (!window.confirm("Archive this workspace? The worktree will be removed.")) return;
     try {
       await archiveWorkspaceCmd(workspaceId);
-      archiveWorkspaceFromStore(workspaceId);
+      workspaceCommands.archiveWorkspace(workspaceId);
     } catch (e) {
       setPrError(String(e));
     }
-  }, [workspaceId, archiveWorkspaceFromStore]);
+  }, [workspaceCommands, workspaceId]);
 
   // Listen for ⌘⇧P shortcut
   useEffect(() => {

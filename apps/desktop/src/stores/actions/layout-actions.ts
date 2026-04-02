@@ -4,6 +4,7 @@ import {
   createLeaf,
   findLeaf,
   getAllLeaves,
+  getVisualLeaves,
   insertTabInPane,
   removeMatchingTabFromTree,
   removeTabAtIndexInTree,
@@ -34,6 +35,7 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
         const srcLeaf = findLeaf(runtime.root, sourcePaneID);
         const tab = srcLeaf?.tabs[sourceTabIndex];
         if (!tab) return;
+        if (targetPaneID !== sourcePaneID && !findLeaf(runtime.root, targetPaneID)) return;
 
         if (targetPaneID === sourcePaneID) {
           runtime.root = splitPaneWithinLeaf(
@@ -53,6 +55,7 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
           runtime.focusedPaneID = root.type === "leaf" ? root.id : runtime.focusedPaneID;
           return;
         }
+        if (!findLeaf(root, targetPaneID)) return;
         root = splitPaneAroundTab(root, targetPaneID, tab, axis, position);
         runtime.root = root as WritableDraft<LayoutNode>;
       });
@@ -70,6 +73,7 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
         const srcLeaf = findLeaf(runtime.root, sourcePaneID);
         const tab = srcLeaf?.tabs[sourceTabIndex];
         if (!tab) return;
+        if (!findLeaf(runtime.root, targetPaneID)) return;
 
         let root: LayoutNode | null = removeMatchingTabFromTree(runtime.root, tab);
         if (!root) {
@@ -147,9 +151,11 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
         const srcLeaf = findLeaf(runtime.root, fromPaneID);
         const tab = srcLeaf?.tabs[fromIndex];
         if (!tab) return;
+        if (!findLeaf(runtime.root, toPaneID)) return;
 
         let root: LayoutNode | null = removeTabAtIndexInTree(runtime.root, fromPaneID, fromIndex);
         if (!root) return;
+        if (!findLeaf(root, toPaneID)) return;
 
         let insertIndex = toIndex;
         if (fromPaneID === toPaneID && fromIndex < toIndex) {
@@ -317,20 +323,11 @@ export function createLayoutActions(set: ImmerSet, get: Get) {
 
       if (!runtime.root || !runtime.focusedPaneID) return;
 
-      const leaves = getAllLeaves(runtime.root);
+      const leaves = getVisualLeaves(runtime.root).filter((leaf) => leaf.tabs.length > 0);
       if (leaves.length === 0) return;
 
       const currentLeaf = leaves.find((l) => l.id === runtime.focusedPaneID);
       if (!currentLeaf) return;
-
-      if (currentLeaf.tabs.length === 0) {
-        const withTabs = leaves.find((l) => l.tabs.length > 0);
-        if (withTabs) {
-          get().selectTabInPane(withTabs.id, 0);
-          get().setFocusedPane(withTabs.id);
-        }
-        return;
-      }
 
       // Try cycling within the current pane first
       const nextIndex = currentLeaf.selectedIndex + direction;

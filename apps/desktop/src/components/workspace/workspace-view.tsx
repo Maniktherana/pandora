@@ -14,7 +14,12 @@ import DiffViewer from "@/components/editor/diff-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import {
+  useAppView,
+  useLayoutCommands,
+  useWorkspaceCommands,
+  useWorkspaceView,
+} from "@/hooks/use-app-view";
 import { tabKey } from "@/lib/layout/layout-tree";
 import type {
   LayoutNode,
@@ -61,15 +66,14 @@ function PaneTerminalAnchorSlot({
 }) {
   const terminalRegistration = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const setFocusedPane = useWorkspaceStore((s) => s.setFocusedPane);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
-  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+  const layoutCommands = useLayoutCommands();
+  const workspaceCommands = useWorkspaceCommands();
 
   const handleFocus = useCallback(() => {
-    setLayoutTargetRuntimeId(layoutTargetOnFocus);
-    setFocusedPane(leafId);
-    setNavigationArea("workspace");
-  }, [leafId, layoutTargetOnFocus, setFocusedPane, setLayoutTargetRuntimeId, setNavigationArea]);
+    workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
+    layoutCommands.setFocusedPane(leafId);
+    workspaceCommands.setNavigationArea("workspace");
+  }, [leafId, layoutCommands, layoutTargetOnFocus, workspaceCommands]);
 
   useLayoutEffect(() => {
     if (!terminalRegistration) return;
@@ -128,10 +132,9 @@ function PaneView({
   hideTabBar = false,
   isResizing,
 }: PaneViewProps) {
-  const runtime = useWorkspaceStore((s) => s.runtimes[workspaceId]);
-  const setFocusedPane = useWorkspaceStore((s) => s.setFocusedPane);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
-  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const layoutCommands = useLayoutCommands();
+  const workspaceCommands = useWorkspaceCommands();
 
   const slotsMap = useMemo(() => {
     const map: Record<string, SlotState> = {};
@@ -168,6 +171,7 @@ function PaneView({
   return (
     <div
       data-pane-id={leaf.id}
+      data-workspace-id={workspaceId}
       className="flex flex-col h-full overflow-hidden rounded-sm relative"
     >
       {!hideTabBar && (
@@ -186,6 +190,11 @@ function PaneView({
         style={{
           background: terminalTheme.background ?? "#0a0a0a",
           pointerEvents: isResizing ? "none" : undefined,
+        }}
+        onPointerDownCapture={() => {
+          workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
+          workspaceCommands.setNavigationArea("workspace");
+          layoutCommands.setFocusedPane(leaf.id);
         }}
       >
         {leaf.tabs.map((tab, idx) => {
@@ -445,11 +454,11 @@ export function WorkspaceRuntimeView({
 }
 
 function EmptyWorkspaceState() {
-  const { selectedWorkspace, selectedProject } = useWorkspaceStore();
-  const workspace = selectedWorkspace();
+  const workspace = useAppView((view) => view.selectedWorkspace);
+  const project = useAppView((view) => view.selectedProject);
+  const workspaceCommands = useWorkspaceCommands();
 
   if (!workspace) {
-    const project = selectedProject();
     if (!project) {
       return (
         <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)]">
@@ -485,7 +494,6 @@ function EmptyWorkspaceState() {
   }
 
   if (workspace.status === "failed") {
-    const { retryWorkspace, removeWorkspace } = useWorkspaceStore.getState();
     return (
       <div className="flex items-center justify-center h-full text-[var(--oc-text-subtle)]">
         <div className="text-center max-w-md">
@@ -497,14 +505,14 @@ function EmptyWorkspaceState() {
           )}
           <div className="flex gap-2 justify-center mt-4">
             <button
-              onClick={() => void retryWorkspace(workspace.id)}
+              onClick={() => workspaceCommands.retryWorkspace(workspace.id)}
               className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Retry
             </button>
             <button
-              onClick={() => void removeWorkspace(workspace.id)}
+              onClick={() => workspaceCommands.removeWorkspace(workspace.id)}
               className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -556,13 +564,12 @@ function WorkspaceRuntimeLoading({ message }: { message: string }) {
 }
 
 export default function WorkspaceView() {
-  const selectedWorkspaceID = useWorkspaceStore((s) => s.selectedWorkspaceID);
-  const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
-  const runtime = useWorkspaceStore(
-    (s) => (selectedWorkspaceID ? s.runtimes[selectedWorkspaceID] : null)
+  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const selectedWs = useAppView((view) => view.selectedWorkspace);
+  const runtime = useAppView((view) =>
+    view.selectedWorkspaceID ? view.runtimes[view.selectedWorkspaceID] ?? null : null
   );
-  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const workspaceCommands = useWorkspaceCommands();
 
   if (!selectedWs || selectedWs.status !== "ready") {
     return <EmptyWorkspaceState />;
@@ -572,11 +579,10 @@ export default function WorkspaceView() {
     return <WorkspaceRuntimeLoading message="Loading workspace…" />;
   }
 
-  if (runtime.layoutLoading) {
-    return <WorkspaceRuntimeLoading message="Starting workspace…" />;
-  }
-
   if (!runtime.root) {
+    if (runtime.layoutLoading) {
+      return <WorkspaceRuntimeLoading message="Starting workspace…" />;
+    }
     return <EmptyWorkspaceLayout workspaceId={selectedWorkspaceID!} />;
   }
 
@@ -584,8 +590,8 @@ export default function WorkspaceView() {
     <div
       className="h-full min-h-0"
       onPointerDownCapture={() => {
-        setLayoutTargetRuntimeId(null);
-        setNavigationArea("workspace");
+        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setNavigationArea("workspace");
       }}
     >
       <WorkspaceRuntimeView

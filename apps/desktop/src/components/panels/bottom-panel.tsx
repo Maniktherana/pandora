@@ -2,7 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Plus, SplitSquareHorizontal } from "lucide-react";
 import BottomTerminalPanelView from "@/components/terminal/bottom-terminal-panel-view";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import {
+  useAppView,
+  useProjectTerminalCommands,
+  useProjectTerminalView,
+  useWorkspaceCommands,
+  useWorkspaceView,
+} from "@/hooks/use-app-view";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { cn } from "@/lib/shared/utils";
 import type { SessionState } from "@/lib/shared/types";
@@ -207,23 +213,21 @@ function PortsTabContent({
 
 export default function BottomPanel() {
   const [tab, setTab] = useState<BottomTab>("terminal");
-  const project = useWorkspaceStore((s) => s.selectedProject());
-  const selectedWs = useWorkspaceStore((s) => s.selectedWorkspace());
-  const workspaceRuntime = useWorkspaceStore((s) =>
-    s.selectedWorkspaceID ? s.runtimes[s.selectedWorkspaceID] : null
-  );
+  const project = useAppView((view) => view.selectedProject);
+  const selectedWs = useAppView((view) => view.selectedWorkspace);
+  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const workspaceRuntime = useWorkspaceView(selectedWorkspaceID ?? "", (view) => view.runtime);
   const projectKey = project ? projectRuntimeKey(project.id) : "";
-  const projectRuntime = useWorkspaceStore((s) => (projectKey ? s.runtimes[projectKey] : null));
-  const addProjectTerminalGroup = useWorkspaceStore((s) => s.addProjectTerminalGroup);
-  const splitProjectTerminalGroup = useWorkspaceStore((s) => s.splitProjectTerminalGroup);
-  const setProjectTerminalPanelVisible = useWorkspaceStore((s) => s.setProjectTerminalPanelVisible);
+  const projectRuntime = useProjectTerminalView(projectKey, (view) => view.runtime);
+  const projectTerminalCommands = useProjectTerminalCommands();
+  const workspaceCommands = useWorkspaceCommands();
 
   const addProjectTerminal = useCallback(() => {
     const client = getTerminalDaemonClient();
     if (!client || !projectKey) return;
     const seeded = seedProjectTerminal(client, projectKey);
-    addProjectTerminalGroup(projectKey, seeded.slotID);
-  }, [addProjectTerminalGroup, projectKey]);
+    projectTerminalCommands.addProjectTerminalGroup(projectKey, seeded.slotID);
+  }, [projectKey, projectTerminalCommands]);
 
   const splitActiveGroup = useCallback(() => {
     const client = getTerminalDaemonClient();
@@ -231,8 +235,8 @@ export default function BottomPanel() {
       projectRuntime?.terminalPanel?.groups[projectRuntime.terminalPanel.activeGroupIndex] ?? null;
     if (!client || !projectKey || !activeGroup) return;
     const seeded = seedProjectTerminal(client, projectKey);
-    splitProjectTerminalGroup(projectKey, activeGroup.id, seeded.slotID);
-  }, [projectKey, projectRuntime?.terminalPanel, splitProjectTerminalGroup]);
+    projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id, seeded.slotID);
+  }, [projectKey, projectRuntime?.terminalPanel, projectTerminalCommands]);
 
   if (!project || selectedWs?.status !== "ready") {
     return <div className="h-full min-h-[120px] bg-neutral-950" />;
@@ -250,7 +254,7 @@ export default function BottomPanel() {
     <div
       className="flex h-full min-h-0 flex-col border-t border-neutral-800 bg-neutral-950"
       onPointerDownCapture={() => {
-        useWorkspaceStore.getState().setLayoutTargetRuntimeId(projectKey);
+        workspaceCommands.setLayoutTargetRuntimeId(projectKey);
       }}
     >
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-neutral-800 px-2">
@@ -261,7 +265,7 @@ export default function BottomPanel() {
             onClick={() => {
               setTab(id);
               if (id === "terminal") {
-                setProjectTerminalPanelVisible(projectKey, true);
+                projectTerminalCommands.setProjectTerminalPanelVisible(projectKey, true);
                 if ((projectRuntime.terminalPanel?.groups.length ?? 0) === 0) {
                   addProjectTerminal();
                 }

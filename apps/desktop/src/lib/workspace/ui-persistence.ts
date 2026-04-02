@@ -98,6 +98,11 @@ export async function loadFileTreeOpenForWorkspace(workspaceId: string): Promise
   return map[workspaceId] === true;
 }
 
+export async function loadPersistedFileTreeOpenMap(): Promise<Record<string, boolean>> {
+  const raw = await getUiState(UI_KEYS.workspaceFileTreeOpen);
+  return parseOpenMap(raw);
+}
+
 export async function persistFileTreeOpenForWorkspace(
   workspaceId: string,
   open: boolean

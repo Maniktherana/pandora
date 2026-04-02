@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
+import { useWorkspaceCommands } from "@/hooks/use-app-view";
 import { useEditorStore } from "@/stores/editor-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 import { languageFromRelativePath } from "@/lib/editor/editor-language";
 import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
 
@@ -57,8 +57,7 @@ export default function PaneEditor({
     };
   }, [isActive, workspaceId, workspaceRoot, relativePath, mergeSaved]);
   const saveFile = useEditorStore((s) => s.saveFile);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
-  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
+  const workspaceCommands = useWorkspaceCommands();
 
   const language = useMemo(
     () => languageFromRelativePath(relativePath),
@@ -76,11 +75,11 @@ export default function PaneEditor({
       });
 
       editor.onDidFocusEditorWidget(() => {
-        setLayoutTargetRuntimeId(null);
-        setNavigationArea("workspace");
+        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setNavigationArea("workspace");
       });
     },
-    [workspaceId, workspaceRoot, relativePath, saveFile, setNavigationArea, setLayoutTargetRuntimeId]
+    [workspaceCommands, workspaceId, workspaceRoot, relativePath, saveFile]
   );
 
   const onChange = useCallback(

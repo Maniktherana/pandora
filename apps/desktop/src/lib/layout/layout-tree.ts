@@ -32,6 +32,76 @@ export function getAllLeaves(node: LayoutNode): LayoutLeaf[] {
   return node.children.flatMap(getAllLeaves);
 }
 
+type NormalizedRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type PositionedLeaf = {
+  leaf: LayoutLeaf;
+  rect: NormalizedRect;
+};
+
+function normalizeRatios(ratios: number[], length: number): number[] {
+  if (length === 0) return [];
+  if (ratios.length !== length) {
+    return Array.from({ length }, () => 1 / length);
+  }
+  const total = ratios.reduce((sum, ratio) => sum + (Number.isFinite(ratio) ? ratio : 0), 0);
+  if (total <= 0) {
+    return Array.from({ length }, () => 1 / length);
+  }
+  return ratios.map((ratio) => (Number.isFinite(ratio) ? ratio / total : 0));
+}
+
+function collectPositionedLeaves(node: LayoutNode, rect: NormalizedRect): PositionedLeaf[] {
+  if (node.type === "leaf") {
+    return [{ leaf: node, rect }];
+  }
+
+  const ratios = normalizeRatios(node.ratios, node.children.length);
+  let offset = 0;
+
+  return node.children.flatMap((child, index) => {
+    const ratio = ratios[index] ?? 0;
+    const childRect: NormalizedRect =
+      node.axis === "horizontal"
+        ? {
+            x: rect.x + rect.width * offset,
+            y: rect.y,
+            width: rect.width * ratio,
+            height: rect.height,
+          }
+        : {
+            x: rect.x,
+            y: rect.y + rect.height * offset,
+            width: rect.width,
+            height: rect.height * ratio,
+          };
+    offset += ratio;
+    return collectPositionedLeaves(child, childRect);
+  });
+}
+
+export function getVisualLeaves(node: LayoutNode): LayoutLeaf[] {
+  return collectPositionedLeaves(node, { x: 0, y: 0, width: 1, height: 1 })
+    .sort((a, b) => {
+      const rowDelta = a.rect.y - b.rect.y;
+      if (Math.abs(rowDelta) > 0.001) return rowDelta;
+
+      const columnDelta = a.rect.x - b.rect.x;
+      if (Math.abs(columnDelta) > 0.001) return columnDelta;
+
+      const heightDelta = b.rect.height - a.rect.height;
+      if (Math.abs(heightDelta) > 0.001) return heightDelta;
+
+      return a.leaf.id.localeCompare(b.leaf.id);
+    })
+    .map((entry) => entry.leaf);
+}
+
 export function getAllTerminalSlotIds(node: LayoutNode): string[] {
   if (node.type === "leaf") {
     return node.tabs.filter((t): t is { kind: "terminal"; slotId: string } => t.kind === "terminal").map((t) => t.slotId);

@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Effect } from "effect";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppRuntime } from "@/hooks/use-app-runtime";
+import { NativeSurfaceManager } from "@/lib/effect/services/native-surface-manager";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 interface TerminalSurfaceRect {
@@ -38,6 +41,7 @@ export default function TerminalSurface({
   anchorElement = null,
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const runtime = useAppRuntime();
   const createdRef = useRef(false);
   const [nativeOk, setNativeOk] = useState<boolean | null>(null);
   const lastSignatureRef = useRef<string | null>(null);
@@ -121,12 +125,11 @@ export default function TerminalSurface({
       lastSignatureRef.current = null;
       pendingCreateRef.current = false;
       createdRef.current = true;
-      await invoke("terminal_surface_create", {
-        surfaceId: sfid,
-        workspaceId: wid,
-        sessionId: sid,
-        rect: payload.rect,
-      }).catch((e) => {
+      await runtime.runPromise(
+        Effect.flatMap(NativeSurfaceManager, (manager) =>
+          manager.createSurface(wid, sid, sfid, payload.rect)
+        )
+      ).catch((e) => {
         createdRef.current = false;
         throw e;
       });
@@ -135,16 +138,15 @@ export default function TerminalSurface({
     if (lastSignatureRef.current === payload.signature) return;
     lastSignatureRef.current = payload.signature;
 
-    await invoke("terminal_surface_update", {
-      surfaceId: sfid,
-      rect: payload.rect,
-      visible: vis,
-      focused: foc,
-    }).catch((error) => {
+    await runtime.runPromise(
+      Effect.flatMap(NativeSurfaceManager, (manager) =>
+        manager.updateSurface(sfid, payload.rect, vis, foc)
+      )
+    ).catch((error) => {
       lastSignatureRef.current = null;
       throw error;
     });
-  }, [buildPayload]);
+  }, [buildPayload, runtime]);
 
   const runSync = useCallback(async () => {
     if (syncInFlightRef.current) {
@@ -193,9 +195,13 @@ export default function TerminalSurface({
       resyncRequestedRef.current = false;
       createdRef.current = false;
       lastSignatureRef.current = null;
-      void invoke("terminal_surface_destroy", { surfaceId }).catch(() => {});
+      void runtime.runPromise(
+        Effect.flatMap(NativeSurfaceManager, (manager) =>
+          manager.releaseSurface(surfaceId)
+        )
+      ).catch(() => {});
     };
-  }, [nativeOk, sessionID, surfaceId, scheduleSync]);
+  }, [nativeOk, runtime, sessionID, surfaceId, scheduleSync]);
 
   useEffect(() => {
     if (nativeOk !== true) return;

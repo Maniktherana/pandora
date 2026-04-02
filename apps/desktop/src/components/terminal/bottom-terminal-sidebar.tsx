@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { Pencil, X } from "lucide-react";
 import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useProjectTerminalCommands } from "@/hooks/use-app-view";
 import type {
   SessionState,
   SlotState,
@@ -48,10 +48,9 @@ export default function BottomTerminalSidebar({
   workspaceId: string;
 }) {
   const panel = runtime.terminalPanel;
-  const slots = useWorkspaceStore((s) => s.runtimes[workspaceId]?.slots ?? []);
-  const selectProjectTerminalGroup = useWorkspaceStore((s) => s.selectProjectTerminalGroup);
-  const closeProjectTerminal = useWorkspaceStore((s) => s.closeProjectTerminal);
-  const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
+  const slots = runtime.slots;
+  const displayMap = runtime.terminalDisplayBySlotId ?? {};
+  const projectTerminalCommands = useProjectTerminalCommands();
   const sessionsMap = useMemo(() => {
     const map = new Map<string, SessionState>();
     for (const session of runtime.sessions) {
@@ -100,9 +99,9 @@ export default function BottomTerminalSidebar({
 
   const onSelectRow = useCallback(
     (row: SidebarRow) => {
-      selectProjectTerminalGroup(workspaceId, row.groupId, row.slotId);
+      projectTerminalCommands.selectProjectTerminalGroup(workspaceId, row.groupId, row.slotId);
     },
-    [selectProjectTerminalGroup, workspaceId]
+    [projectTerminalCommands, workspaceId]
   );
 
   const handlePointerDown = useCallback((e: React.PointerEvent, row: SidebarRow) => {
@@ -252,7 +251,7 @@ export default function BottomTerminalSidebar({
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
-                        closeProjectTerminal(workspaceId, row.slotId);
+                        projectTerminalCommands.closeProjectTerminal(workspaceId, row.slotId);
                       }}
                       title="Close terminal"
                     >

@@ -26,8 +26,15 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { Effect } from "effect";
+import {
+  useAppView,
+  useLayoutCommands,
+  useProjectTerminalCommands,
+} from "@/hooks/use-app-view";
+import { useAppRuntime } from "@/hooks/use-app-runtime";
+import { useAppViewStore } from "@/stores/app-view-store";
+import { NativeSurfaceManager } from "@/lib/effect/services/native-surface-manager";
 import { findLeaf } from "@/lib/layout/layout-migrate";
 import { tabsEqual } from "@/lib/layout/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
@@ -129,9 +136,28 @@ export function useTabDrag() {
 
 // ── Hit testing ────────────────────────────────────────────────────────
 
-function hitTestPanes(x: number, y: number): { paneID: string; rect: DOMRect; zone: DropZone } | null {
+function isVisibleForHitTest(element: HTMLElement | null): boolean {
+  let current: HTMLElement | null = element;
+  while (current) {
+    if (current.getAttribute("aria-hidden") === "true") return false;
+    const style = window.getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden") {
+      return false;
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
+function hitTestPanes(
+  x: number,
+  y: number,
+  workspaceId: string | null
+): { paneID: string; rect: DOMRect; zone: DropZone } | null {
   const panes = document.querySelectorAll<HTMLElement>("[data-pane-id]");
   for (const pane of panes) {
+    if (workspaceId && pane.dataset.workspaceId !== workspaceId) continue;
+    if (!isVisibleForHitTest(pane)) continue;
     const rect = pane.getBoundingClientRect();
     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
       const rx = (x - rect.left) / rect.width;
@@ -253,7 +279,7 @@ function hitTestBottomTerminalPanes(x: number, y: number): BottomTerminalPaneDro
   return null;
 }
 
-function hitTestTabs(x: number, y: number): TabDropTarget | null {
+function hitTestTabs(x: number, y: number, workspaceId: string | null): TabDropTarget | null {
   const tabs = document.querySelectorAll<HTMLElement>("[data-tab-pane][data-tab-index]");
   if (tabs.length === 0) return null;
 
@@ -261,6 +287,8 @@ function hitTestTabs(x: number, y: number): TabDropTarget | null {
   const byPane = new Map<string, HTMLElement[]>();
   for (const tab of tabs) {
     if (tab.dataset.terminalSidebar === "true") continue;
+    if (workspaceId && tab.dataset.workspaceId !== workspaceId) continue;
+    if (!isVisibleForHitTest(tab)) continue;
     const paneID = tab.dataset.tabPane!;
     if (!byPane.has(paneID)) byPane.set(paneID, []);
     byPane.get(paneID)!.push(tab);
@@ -320,18 +348,9 @@ function TabDragOverlay({
   const [cursor, setCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [target, setTarget] = useState<DropTarget | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
-  const {
-    splitPane,
-    addTabToPane,
-    reorderTab,
-    moveTab,
-    moveProjectTerminalToGroup,
-    moveProjectTerminalToNewGroup,
-    selectProjectTerminalGroup,
-    focusProjectTerminal,
-    reorderProjectTerminalGroupChildren,
-    reorderProjectTerminalGroups,
-  } = useWorkspaceStore();
+  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const layoutCommands = useLayoutCommands();
+  const projectTerminalCommands = useProjectTerminalCommands();
 
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
@@ -360,14 +379,14 @@ function TabDragOverlay({
       }
 
       // Tab bar hit test takes priority over pane hit test
-      const tabHit = hitTestTabs(e.clientX, e.clientY);
+      const tabHit = hitTestTabs(e.clientX, e.clientY, selectedWorkspaceID);
       if (tabHit) {
         targetRef.current = tabHit;
         setTarget(tabHit);
         return;
       }
 
-      const paneHit = hitTestPanes(e.clientX, e.clientY);
+      const paneHit = hitTestPanes(e.clientX, e.clientY, selectedWorkspaceID);
       if (paneHit) {
         const t: PaneDropTarget = {
           kind: "pane",
@@ -392,21 +411,21 @@ function TabDragOverlay({
     }
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
-      const st = useWorkspaceStore.getState();
-      const rid = st.effectiveLayoutRuntimeId();
-      const runtime = rid ? st.runtimes[rid] : null;
-      const terminalPanel = drag.runtimeId ? st.runtimes[drag.runtimeId]?.terminalPanel : null;
+      const appView = useAppViewStore.getState().appView;
+      const rid = appView.layoutTargetRuntimeId ?? appView.selectedWorkspaceID;
+      const runtime = rid ? appView.runtimes[rid] : null;
+      const terminalPanel = drag.runtimeId ? appView.runtimes[drag.runtimeId]?.terminalPanel : null;
 
       if (drag.kind === "bottom-terminal-group") {
         if (tgt.kind === "bottom-terminal-pane" && drag.runtimeId === tgt.runtimeId) {
           if (tgt.zone === "center") {
-            selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, null);
+            projectTerminalCommands.selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, null);
           } else {
             const toIndex = terminalPanel?.groups.findIndex((group) => group.id === tgt.groupId) ?? -1;
             const fromIndex = drag.groupIndex ?? -1;
             if (toIndex >= 0 && fromIndex >= 0) {
               const insertIndex = tgt.zone === "left" ? toIndex : toIndex + 1;
-              reorderProjectTerminalGroups(
+              projectTerminalCommands.reorderProjectTerminalGroups(
                 tgt.runtimeId,
                 fromIndex,
                 fromIndex < insertIndex ? insertIndex - 1 : insertIndex
@@ -420,7 +439,7 @@ function TabDragOverlay({
         let toIndex = tgt.insertIndex;
         if (fromIndex < toIndex) toIndex -= 1;
         if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
-          reorderProjectTerminalGroups(tgt.runtimeId, fromIndex, toIndex);
+          projectTerminalCommands.reorderProjectTerminalGroups(tgt.runtimeId, fromIndex, toIndex);
         }
         return;
       }
@@ -429,7 +448,11 @@ function TabDragOverlay({
         if (!drag.runtimeId || !drag.slotId || !terminalPanel) return;
         if (tgt.kind === "bottom-terminal-pane" && tgt.runtimeId === drag.runtimeId) {
           if (tgt.zone === "center") {
-            selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, drag.slotId);
+            projectTerminalCommands.selectProjectTerminalGroup(
+              tgt.runtimeId,
+              drag.groupId!,
+              drag.slotId
+            );
             return;
           }
           const targetGroup = terminalPanel.groups.find((group) => group.id === tgt.groupId);
@@ -441,12 +464,26 @@ function TabDragOverlay({
             let toIndex = insertIndex;
             if (fromIndex < toIndex) toIndex -= 1;
             if (fromIndex !== toIndex && fromIndex >= 0) {
-              reorderProjectTerminalGroupChildren(tgt.runtimeId, tgt.groupId, fromIndex, toIndex);
+              projectTerminalCommands.reorderProjectTerminalGroupChildren(
+                tgt.runtimeId,
+                tgt.groupId,
+                fromIndex,
+                toIndex
+              );
             }
           } else {
-            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId, insertIndex);
+            projectTerminalCommands.moveProjectTerminalToGroup(
+              tgt.runtimeId,
+              drag.slotId,
+              tgt.groupId,
+              insertIndex
+            );
           }
-          selectProjectTerminalGroup(tgt.runtimeId, tgt.groupId, drag.slotId);
+          projectTerminalCommands.selectProjectTerminalGroup(
+            tgt.runtimeId,
+            tgt.groupId,
+            drag.slotId
+          );
           return;
         }
         if (tgt.kind === "bottom-terminal-slot" && tgt.runtimeId === drag.runtimeId) {
@@ -456,16 +493,30 @@ function TabDragOverlay({
             toIndex -= 1;
           }
           if (drag.groupId === tgt.groupId && fromIndex >= 0 && fromIndex !== toIndex) {
-            reorderProjectTerminalGroupChildren(tgt.runtimeId, tgt.groupId, fromIndex, toIndex);
+            projectTerminalCommands.reorderProjectTerminalGroupChildren(
+              tgt.runtimeId,
+              tgt.groupId,
+              fromIndex,
+              toIndex
+            );
           } else if (drag.groupId !== tgt.groupId) {
-            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId, tgt.insertIndex);
+            projectTerminalCommands.moveProjectTerminalToGroup(
+              tgt.runtimeId,
+              drag.slotId,
+              tgt.groupId,
+              tgt.insertIndex
+            );
           }
           return;
         }
 
         if (tgt.kind === "bottom-terminal-group" && tgt.runtimeId === drag.runtimeId) {
           if (drag.groupId !== tgt.groupId) {
-            moveProjectTerminalToGroup(tgt.runtimeId, drag.slotId, tgt.groupId);
+            projectTerminalCommands.moveProjectTerminalToGroup(
+              tgt.runtimeId,
+              drag.slotId,
+              tgt.groupId
+            );
           }
           return;
         }
@@ -476,7 +527,11 @@ function TabDragOverlay({
           if (sourceGroup && sourceGroup.children.length === 1 && (drag.groupIndex ?? -1) < insertIndex) {
             insertIndex -= 1;
           }
-          moveProjectTerminalToNewGroup(tgt.runtimeId, drag.slotId, insertIndex);
+          projectTerminalCommands.moveProjectTerminalToNewGroup(
+            tgt.runtimeId,
+            drag.slotId,
+            insertIndex
+          );
         }
         return;
       }
@@ -489,10 +544,10 @@ function TabDragOverlay({
           let toIndex = tgt.insertIndex;
           if (fromIndex < toIndex) toIndex--;
           if (fromIndex !== toIndex) {
-            reorderTab(tgt.paneID, fromIndex, toIndex);
+            layoutCommands.reorderTab(tgt.paneID, fromIndex, toIndex);
           }
         } else {
-          moveTab(drag.sourcePaneID!, tgt.paneID, drag.sourceIndex!, tgt.insertIndex);
+          layoutCommands.moveTab(drag.sourcePaneID!, tgt.paneID, drag.sourceIndex!, tgt.insertIndex);
         }
       } else {
         if (tgt.kind !== "pane") return;
@@ -503,7 +558,7 @@ function TabDragOverlay({
           const moving = srcLeaf?.tabs[drag.sourceIndex!];
           if (!moving) return;
           if (leaf?.tabs.some((t) => tabsEqual(t, moving))) return;
-          addTabToPane(paneID, drag.sourcePaneID!, drag.sourceIndex!);
+          layoutCommands.addTabToPane(paneID, drag.sourcePaneID!, drag.sourceIndex!);
         } else {
           if (drag.sourcePaneID === paneID) {
             const leaf = findLeaf(runtime.root, paneID);
@@ -527,7 +582,7 @@ function TabDragOverlay({
             axis = "horizontal";
             position = zone === "top" ? "before" : "after";
           }
-          splitPane(paneID, drag.sourcePaneID!, drag.sourceIndex!, axis, position);
+          layoutCommands.splitPane(paneID, drag.sourcePaneID!, drag.sourceIndex!, axis, position);
         }
       }
     }
@@ -542,17 +597,10 @@ function TabDragOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     dragState,
+    layoutCommands,
     onDone,
-    splitPane,
-    addTabToPane,
-    reorderTab,
-    moveTab,
-    moveProjectTerminalToGroup,
-    moveProjectTerminalToNewGroup,
-    selectProjectTerminalGroup,
-    focusProjectTerminal,
-    reorderProjectTerminalGroupChildren,
-    reorderProjectTerminalGroups,
+    projectTerminalCommands,
+    selectedWorkspaceID,
   ]);
 
   return createPortal(
@@ -664,14 +712,23 @@ function TabDragOverlay({
 
 export function TabDragProvider({ children }: { children: ReactNode }) {
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const runtime = useAppRuntime();
 
   useEffect(() => {
     if (!dragState) return;
-    void invoke("terminal_surfaces_begin_web_overlay").catch(() => {});
+    void runtime.runPromise(
+      Effect.flatMap(NativeSurfaceManager, (manager) => manager.beginWebOverlay()).pipe(
+        Effect.catchAll(() => Effect.void)
+      )
+    );
     return () => {
-      void invoke("terminal_surfaces_end_web_overlay").catch(() => {});
+      void runtime.runPromise(
+        Effect.flatMap(NativeSurfaceManager, (manager) => manager.endWebOverlay()).pipe(
+          Effect.catchAll(() => Effect.void)
+        )
+      );
     };
-  }, [dragState]);
+  }, [dragState, runtime]);
 
   const startDrag = useCallback((state: DragState) => {
     setDragState(state);

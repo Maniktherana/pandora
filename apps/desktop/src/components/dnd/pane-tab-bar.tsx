@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, X } from "lucide-react";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useLayoutCommands, useWorkspaceView } from "@/hooks/use-app-view";
 import { useEditorStore } from "@/stores/editor-store";
 import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
 import { tabKey } from "@/lib/layout/layout-tree";
@@ -117,11 +117,19 @@ export default function PaneTabBar({
   workspaceRoot,
   isFocused,
 }: TabBarProps) {
-  const { selectTabInPane, setFocusedPane, slotsByID, removePaneTabByIndex } = useWorkspaceStore();
   const { startDrag, dragState } = useTabDrag();
-  const slotsMap = slotsByID(workspaceId);
-  const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
-  const sessions = useWorkspaceStore((s) => s.runtimes[workspaceId]?.sessions ?? []);
+  const layoutCommands = useLayoutCommands();
+  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const slotsMap = useMemo(
+    () =>
+      Object.fromEntries((runtime?.slots ?? []).map((slot) => [slot.id, slot] as const)) as Record<
+        string,
+        SlotState | undefined
+      >,
+    [runtime?.slots]
+  );
+  const displayMap = runtime?.terminalDisplayBySlotId ?? {};
+  const sessions = runtime?.sessions ?? [];
   const sessionsMap = useMemo(
     () =>
       Object.fromEntries(sessions.map((session) => [session.slotID, session] as const)) as Record<
@@ -176,12 +184,12 @@ export default function PaneTabBar({
   const handlePointerUp = useCallback(
     (_e: React.PointerEvent, index: number) => {
       if (pendingDragRef.current) {
-        selectTabInPane(paneID, index);
-        setFocusedPane(paneID);
+        layoutCommands.selectTabInPane(paneID, index);
+        layoutCommands.setFocusedPane(paneID);
         pendingDragRef.current = null;
       }
     },
-    [paneID, selectTabInPane, setFocusedPane]
+    [layoutCommands, paneID]
   );
 
   const closeTerminalTab = useCallback(
@@ -244,6 +252,7 @@ export default function PaneTabBar({
             data-tab-pane={paneID}
             data-tab-index={index}
             data-tab-kind={tab.kind}
+            data-workspace-id={workspaceId}
             onPointerDown={(e) => handlePointerDown(e, index)}
             onPointerUp={(e) => handlePointerUp(e, index)}
             className={cn(
@@ -294,7 +303,7 @@ export default function PaneTabBar({
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  removePaneTabByIndex(paneID, index);
+                  layoutCommands.removePaneTabByIndex(paneID, index);
                 }}
                 className={cn(
                   "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",

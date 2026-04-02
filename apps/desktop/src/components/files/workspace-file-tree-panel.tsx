@@ -14,6 +14,7 @@ import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
+import { useLayoutCommands, useWorkspaceView } from "@/hooks/use-app-view";
 import { cn } from "@/lib/shared/utils";
 import {
   decorationForScmEntry,
@@ -25,7 +26,6 @@ import {
 import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
 import { findLeaf } from "@/lib/layout/layout-tree";
 import { useEditorStore } from "@/stores/editor-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 
 type DirEntry = { name: string; isDirectory: boolean; isIgnored?: boolean };
 type LeftPanelMode = "files" | "changes";
@@ -294,8 +294,8 @@ export default function WorkspaceFileTreePanel({
   const [diffMenu, setDiffMenu] = useState<{ x: number; y: number; relPath: string } | null>(null);
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const openFile = useEditorStore((s) => s.openFile);
-  const addDiffTabForPath = useWorkspaceStore((s) => s.addDiffTabForPath);
-  const runtime = useWorkspaceStore((s) => s.runtimes[workspaceId] ?? null);
+  const layoutCommands = useLayoutCommands();
+  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
 
   const activePath = useMemo(() => {
     if (!runtime?.root || !runtime.focusedPaneID) return null;
@@ -453,7 +453,7 @@ export default function WorkspaceFileTreePanel({
               type="button"
               className="block w-full px-3 py-1.5 text-left text-[var(--oc-text)] hover:bg-[var(--oc-panel-hover)]"
               onClick={() => {
-                addDiffTabForPath(diffMenu.relPath, "staged");
+                layoutCommands.addDiffTabForPath(diffMenu.relPath, "staged");
                 setDiffMenu(null);
               }}
             >

@@ -11,7 +11,7 @@ import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar";
 import TerminalSurface from "@/components/terminal/terminal-surface";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useProjectTerminalCommands, useWorkspaceCommands } from "@/hooks/use-app-view";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
@@ -42,19 +42,17 @@ function ProjectTerminalAnchorSlot({
 }) {
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const focusProjectTerminal = useWorkspaceStore((s) => s.focusProjectTerminal);
-  const setLayoutTargetRuntimeId = useWorkspaceStore((s) => s.setLayoutTargetRuntimeId);
-  const setNavigationArea = useWorkspaceStore((s) => s.setNavigationArea);
+  const projectTerminalCommands = useProjectTerminalCommands();
+  const workspaceCommands = useWorkspaceCommands();
 
   const handleFocus = useCallback(() => {
-    setLayoutTargetRuntimeId(workspaceId);
-    setNavigationArea("workspace");
-    focusProjectTerminal(workspaceId, slotId);
+    workspaceCommands.setLayoutTargetRuntimeId(workspaceId);
+    workspaceCommands.setNavigationArea("workspace");
+    projectTerminalCommands.focusProjectTerminal(workspaceId, slotId);
   }, [
-    focusProjectTerminal,
-    setLayoutTargetRuntimeId,
-    setNavigationArea,
+    projectTerminalCommands,
     slotId,
+    workspaceCommands,
     workspaceId,
   ]);
 
@@ -103,7 +101,7 @@ function TerminalPane({
   visible: boolean;
   active: boolean;
 }) {
-  const focusProjectTerminal = useWorkspaceStore((s) => s.focusProjectTerminal);
+  const projectTerminalCommands = useProjectTerminalCommands();
 
   return (
     <div
@@ -116,7 +114,7 @@ function TerminalPane({
       )}
       style={{ background: terminalTheme.background ?? "#0a0a0a" }}
       onPointerDownCapture={() => {
-        if (visible) focusProjectTerminal(workspaceId, slot?.id ?? null);
+        if (visible) projectTerminalCommands.focusProjectTerminal(workspaceId, slot?.id ?? null);
       }}
     >
       {session?.status === "running" && slot ? (
