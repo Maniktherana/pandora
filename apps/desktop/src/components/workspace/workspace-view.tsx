@@ -19,6 +19,8 @@ import type { LayoutNode, LayoutLeaf, SessionState, WorkspaceRuntimeState } from
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
+import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
+import { seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 
 type TerminalAnchorInfo = {
   el: HTMLElement;
@@ -208,10 +210,19 @@ function PaneView({
         })}
 
         {leaf.tabs.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-[var(--oc-text-subtle)]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-[var(--oc-text-subtle)]">
             <p>No open tabs</p>
-            <p className="max-w-xs text-xs text-[var(--oc-text-faint)]">
-              Open a file from the file tree, or add a terminal with + in the title bar.
+            <button
+              onClick={() => {
+                const client = getTerminalDaemonClient();
+                if (client) seedWorkspaceTerminal(client, workspaceId);
+              }}
+              className="mt-2 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+            >
+              New Terminal
+            </button>
+            <p className="mt-1 max-w-xs text-xs text-[var(--oc-text-faint)]">
+              or open a file from the file tree
             </p>
           </div>
         )}
@@ -463,6 +474,31 @@ function EmptyWorkspaceState() {
   return null;
 }
 
+function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
+  const handleNewTerminal = useCallback(() => {
+    const client = getTerminalDaemonClient();
+    if (!client) return;
+    seedWorkspaceTerminal(client, workspaceId);
+  }, [workspaceId]);
+
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="text-center">
+        <p className="text-sm text-[var(--oc-text-subtle)]">No open tabs</p>
+        <button
+          onClick={handleNewTerminal}
+          className="mt-3 rounded-md bg-[var(--oc-panel-elevated)] px-4 py-2 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+        >
+          New Terminal
+        </button>
+        <p className="mt-2 text-xs text-[var(--oc-text-faint)]">
+          or open a file from the file tree
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceRuntimeLoading({ message }: { message: string }) {
   return (
     <div className="flex h-full items-center justify-center text-[var(--oc-text-subtle)]">
@@ -487,10 +523,16 @@ export default function WorkspaceView() {
     return <EmptyWorkspaceState />;
   }
 
-  if (!runtime?.root) {
-    return (
-      <WorkspaceRuntimeLoading message={runtime ? "Starting workspace…" : "Loading workspace…"} />
-    );
+  if (!runtime) {
+    return <WorkspaceRuntimeLoading message="Loading workspace…" />;
+  }
+
+  if (runtime.layoutLoading) {
+    return <WorkspaceRuntimeLoading message="Starting workspace…" />;
+  }
+
+  if (!runtime.root) {
+    return <EmptyWorkspaceLayout workspaceId={selectedWorkspaceID!} />;
   }
 
   return (
