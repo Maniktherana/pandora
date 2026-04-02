@@ -162,26 +162,7 @@ export default function App() {
     setTerminalDaemonClient(client);
     void client.connect();
 
-    let nativeInputUnlisten: (() => void) | undefined;
-    void listen<string>("native-terminal-input", (event) => {
-      try {
-        const payload = JSON.parse(event.payload) as {
-          workspaceId?: string;
-          sessionId?: string;
-          data?: string;
-        };
-        if (!payload.workspaceId || !payload.sessionId) return;
-        const decoded = payload.data ? atob(payload.data) : "";
-        if (!decoded) return;
-        store.getState().noteTerminalInput(payload.workspaceId, payload.sessionId, decoded);
-      } catch {
-      }
-    }).then((unlisten) => {
-      nativeInputUnlisten = unlisten;
-    });
-
     return () => {
-      nativeInputUnlisten?.();
       client.disconnect();
       (window as any).__daemonClient = null;
       setTerminalDaemonClient(null);

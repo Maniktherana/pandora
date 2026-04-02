@@ -6,7 +6,12 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
 import { tabKey } from "@/lib/layout/layout-tree";
-import type { PaneTab, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import type {
+  PaneTab,
+  SessionState,
+  SlotState,
+  TerminalDisplayState,
+} from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
@@ -27,21 +32,23 @@ const DRAG_THRESHOLD = 5;
 function terminalTabDisplay(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
+  sessionsMap: Record<string, SessionState | undefined>,
   displayMap: Record<string, TerminalDisplayState>
 ): TerminalDisplayState {
   if (tab.kind !== "terminal") {
     return { kind: "terminal", label: "" };
   }
-  return terminalDisplayForSlot(slotsMap[tab.slotId], displayMap[tab.slotId]);
+  return terminalDisplayForSlot(slotsMap[tab.slotId], sessionsMap[tab.slotId], displayMap[tab.slotId]);
 }
 
 function tabLabel(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
+  sessionsMap: Record<string, SessionState | undefined>,
   displayMap: Record<string, TerminalDisplayState>
 ): string {
   if (tab.kind === "terminal") {
-    return terminalTabDisplay(tab, slotsMap, displayMap).label;
+    return terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap).label;
   }
   const base = tab.path.split("/").pop() ?? tab.path;
   if (tab.kind === "diff") {
@@ -114,6 +121,15 @@ export default function PaneTabBar({
   const { startDrag, dragState } = useTabDrag();
   const slotsMap = slotsByID(workspaceId);
   const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
+  const sessions = useWorkspaceStore((s) => s.runtimes[workspaceId]?.sessions ?? []);
+  const sessionsMap = useMemo(
+    () =>
+      Object.fromEntries(sessions.map((session) => [session.slotID, session] as const)) as Record<
+        string,
+        SessionState | undefined
+      >,
+    [sessions]
+  );
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const pendingDragRef = useRef<{
     sourceIndex: number;
@@ -130,12 +146,12 @@ export default function PaneTabBar({
       if (!tab) return;
       pendingDragRef.current = {
         sourceIndex: index,
-        label: tabLabel(tab, slotsMap, displayMap),
+        label: tabLabel(tab, slotsMap, sessionsMap, displayMap),
         startX: e.clientX,
         startY: e.clientY,
       };
     },
-    [tabs, slotsMap, displayMap]
+    [tabs, slotsMap, sessionsMap, displayMap]
   );
 
   const handlePointerMove = useCallback(
@@ -220,7 +236,8 @@ export default function PaneTabBar({
           dragState.sourcePaneID === paneID &&
           dragState.sourceIndex === index;
 
-        const terminalDisplay = tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, displayMap) : null;
+        const terminalDisplay =
+          tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
         return (
           <div
             key={tabKey(tab)}
@@ -253,7 +270,7 @@ export default function PaneTabBar({
               <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
             ) : null}
             <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
-              {tabLabel(tab, slotsMap, displayMap)}
+              {tabLabel(tab, slotsMap, sessionsMap, displayMap)}
             </span>
                 </>
               );
@@ -266,14 +283,14 @@ export default function PaneTabBar({
                 paneID={paneID}
                 index={index}
                 path={tab.path}
-                label={tabLabel(tab, slotsMap, displayMap)}
+                label={tabLabel(tab, slotsMap, sessionsMap, displayMap)}
                 isActive={isActive}
               />
             ) : tab.kind === "diff" ? (
               <div
                 role="button"
                 tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap, displayMap)}`}
+                aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -292,7 +309,7 @@ export default function PaneTabBar({
               <div
                 role="button"
                 tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap, displayMap)}`}
+                aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();

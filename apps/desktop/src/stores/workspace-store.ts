@@ -44,9 +44,6 @@ import {
 } from "@/lib/terminal/bottom-terminal-panel";
 import {
   defaultTerminalDisplay,
-  detectTerminalDisplayFromInput,
-  detectTerminalDisplayFromOutput,
-  resetTerminalInputTracking,
 } from "@/lib/terminal/terminal-identity";
 
 export type NavigationArea = "sidebar" | "workspace";
@@ -127,7 +124,6 @@ interface WorkspaceStoreState {
   setRuntimeConnectionState: (workspaceId: string, state: "disconnected" | "connecting" | "connected") => void;
   setRuntimeSlots: (workspaceId: string, slots: SlotState[]) => void;
   setRuntimeSessions: (workspaceId: string, sessions: SessionState[]) => void;
-  noteTerminalInput: (workspaceId: string, sessionID: string, data: string) => void;
   noteTerminalOutput: (workspaceId: string, sessionID: string, data: string) => void;
   updateRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
   addRuntimeSlot: (workspaceId: string, slot: SlotState) => void;
@@ -521,33 +517,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       };
     });
   },
-  noteTerminalInput: (workspaceId, sessionID, data) => {
-    const detected = detectTerminalDisplayFromInput(sessionID, data);
-    if (!detected) return;
-    set((s) => {
-      const runtime = s.runtimes[workspaceId];
-      if (!runtime) return s;
-      const session = runtime.sessions.find((item) => item.id === sessionID);
-      if (!session) return s;
-      const current = runtime.terminalDisplayBySlotId[session.slotID];
-      if (current?.kind === detected.kind && current.label === detected.label) {
-        return s;
-      }
-      return {
-        runtimes: {
-          ...s.runtimes,
-          [workspaceId]: {
-            ...runtime,
-            terminalDisplayBySlotId: {
-              ...runtime.terminalDisplayBySlotId,
-              [session.slotID]: detected,
-            },
-          },
-        },
-      };
-    });
-  },
-  noteTerminalOutput: (workspaceId, sessionID, data) => {
+  noteTerminalOutput: (workspaceId, _sessionID, data) => {
     // PR URL detection: scan output for GitHub PR URLs when awaiting
     if (get().prAwaitingWorkspaceIds.has(workspaceId)) {
       const match = data.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/);
@@ -559,31 +529,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         void invoke("pr_link", { workspaceId, prUrl, prNumber });
       }
     }
-
-    const detected = detectTerminalDisplayFromOutput(data);
-    if (!detected) return;
-    set((s) => {
-      const runtime = s.runtimes[workspaceId];
-      if (!runtime) return s;
-      const session = runtime.sessions.find((item) => item.id === sessionID);
-      if (!session) return s;
-      const current = runtime.terminalDisplayBySlotId[session.slotID];
-      if (current?.kind === detected.kind && current.label === detected.label) {
-        return s;
-      }
-      return {
-        runtimes: {
-          ...s.runtimes,
-          [workspaceId]: {
-            ...runtime,
-            terminalDisplayBySlotId: {
-              ...runtime.terminalDisplayBySlotId,
-              [session.slotID]: detected,
-            },
-          },
-        },
-      };
-    });
   },
   updateRuntimeSlot: (workspaceId, slot) => {
     set((s) => {
@@ -705,7 +650,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     });
   },
   removeRuntimeSession: (workspaceId, sessionID) => {
-    resetTerminalInputTracking(sessionID);
     set((s) => {
       const runtime = s.runtimes[workspaceId];
       if (!runtime) return s;

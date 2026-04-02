@@ -3,7 +3,12 @@ import { Pencil, X } from "lucide-react";
 import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import type { SlotState, TerminalDisplayState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type {
+  SessionState,
+  SlotState,
+  TerminalDisplayState,
+  WorkspaceRuntimeState,
+} from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
@@ -47,6 +52,13 @@ export default function BottomTerminalSidebar({
   const selectProjectTerminalGroup = useWorkspaceStore((s) => s.selectProjectTerminalGroup);
   const closeProjectTerminal = useWorkspaceStore((s) => s.closeProjectTerminal);
   const displayMap = useWorkspaceStore((s) => s.runtimes[workspaceId]?.terminalDisplayBySlotId ?? {});
+  const sessionsMap = useMemo(() => {
+    const map = new Map<string, SessionState>();
+    for (const session of runtime.sessions) {
+      map.set(session.slotID, session);
+    }
+    return map;
+  }, [runtime.sessions]);
   const { startDrag, dragState } = useTabDrag();
 
   const slotMap = useMemo(() => {
@@ -65,7 +77,7 @@ export default function BottomTerminalSidebar({
           groupIndex,
           slotId,
           slotIndex,
-          display: terminalDisplayForSlot(slotMap.get(slotId), displayMap[slotId]),
+          display: terminalDisplayForSlot(slotMap.get(slotId), sessionsMap.get(slotId), displayMap[slotId]),
           treeState:
             group.children.length === 1
               ? "none"
@@ -78,7 +90,7 @@ export default function BottomTerminalSidebar({
       }
     }
     return next;
-  }, [displayMap, panel, slotMap]);
+  }, [displayMap, panel, sessionsMap, slotMap]);
 
   const pendingDragRef = useRef<{
     row: SidebarRow;
@@ -133,7 +145,7 @@ export default function BottomTerminalSidebar({
   const promptRename = useCallback(
     (slotId: string) => {
       const slot = slotMap.get(slotId);
-      const current = terminalDisplayForSlot(slot, displayMap[slotId]).label;
+      const current = terminalDisplayForSlot(slot, sessionsMap.get(slotId), displayMap[slotId]).label;
       const next = window.prompt("Rename terminal", current)?.trim();
       if (!next || next === current) return;
       const client = getTerminalDaemonClient();
@@ -149,7 +161,7 @@ export default function BottomTerminalSidebar({
         });
       }
     },
-    [displayMap, slotMap, workspaceId]
+    [displayMap, sessionsMap, slotMap, workspaceId]
   );
 
   if (!panel || panel.groups.length === 0) {

@@ -17,6 +17,27 @@ interface ManagedSession {
   instance: SessionInstance;
   process: Bun.Subprocess | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
+  fgPollTimer: ReturnType<typeof setInterval> | null;
+}
+
+const FG_POLL_INTERVAL_MS = 2_000;
+
+function getForegroundProcess(shellPid: number): string | null {
+  try {
+    const tpgidResult = Bun.spawnSync(["ps", "-o", "tpgid=", "-p", String(shellPid)]);
+    const tpgid = parseInt(tpgidResult.stdout.toString().trim(), 10);
+    if (!tpgid || tpgid < 0 || tpgid === shellPid) {
+      return null;
+    }
+    const argsResult = Bun.spawnSync(["ps", "-o", "args=", "-p", String(tpgid)]);
+    const args = argsResult.stdout.toString().trim();
+    if (!args) {
+      return null;
+    }
+    return args;
+  } catch {
+    return null;
+  }
 }
 
 function capabilitiesForStatus(status: SessionStatus, definition: SessionDefinition): ActionCapabilities {
@@ -108,6 +129,7 @@ export class ProcessManager {
 
   closeAllSessions(): void {
     for (const session of this.sessions.values()) {
+      this.stopForegroundPolling(session);
       if (session.stopTimer) {
         clearTimeout(session.stopTimer);
         session.stopTimer = null;
@@ -118,6 +140,7 @@ export class ProcessManager {
       session.instance.status = "stopped";
       session.instance.pid = null;
       session.instance.exitCode = null;
+      session.instance.foregroundProcess = null;
     }
     this.sessions.clear();
   }
@@ -175,6 +198,7 @@ export class ProcessManager {
     }
 
     session.instance.status = "stopped";
+    session.instance.foregroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
     session.process.kill("SIGTERM");
     session.stopTimer = setTimeout(() => {
@@ -209,6 +233,7 @@ export class ProcessManager {
     }
     session.process.kill("SIGSTOP");
     session.instance.status = "paused";
+    session.instance.foregroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
   }
 
@@ -238,10 +263,12 @@ export class ProcessManager {
         pid: null,
         exitCode: null,
         startedAt: null,
-        lastOutputAt: null
+        lastOutputAt: null,
+        foregroundProcess: null
       },
       process: null,
-      stopTimer: null
+      stopTimer: null,
+      fgPollTimer: null
     };
 
     this.sessions.set(managed.instance.id, managed);
@@ -254,6 +281,7 @@ export class ProcessManager {
     if (!session) {
       return;
     }
+    this.stopForegroundPolling(session);
     if (session.stopTimer) {
       clearTimeout(session.stopTimer);
     }
@@ -327,16 +355,21 @@ export class ProcessManager {
     session.instance.status = "running";
     session.instance.startedAt = new Date().toISOString();
     session.instance.exitCode = null;
+    session.instance.foregroundProcess = null;
 
     logger.info({ tag: "SPAWN", sessionID: sid, pid: subprocess.pid, cmd }, "session running");
     this.onSessionStateChanged(this.sessionState(session));
 
+    this.startForegroundPolling(session);
+
     void subprocess.exited.then((exitCode) => {
       logger.info({ tag: "EXIT", sessionID: sid, pid: session.instance.pid, exitCode, outputChunks: outputCount, outputBytes }, "session exited");
+      this.stopForegroundPolling(session);
       session.process?.terminal?.close();
       session.process = null;
       session.instance.pid = null;
       session.instance.exitCode = exitCode;
+      session.instance.foregroundProcess = null;
       if (session.stopTimer) {
         clearTimeout(session.stopTimer);
         session.stopTimer = null;
@@ -352,6 +385,34 @@ export class ProcessManager {
       logger.info({ tag: "EXIT", sessionID: sid, status: session.instance.status }, "session final status");
       this.onSessionStateChanged(this.sessionState(session));
     });
+  }
+
+  private startForegroundPolling(session: ManagedSession): void {
+    this.stopForegroundPolling(session);
+
+    const updateForegroundProcess = () => {
+      if (!session.process || session.instance.pid == null || session.instance.status !== "running") {
+        return;
+      }
+
+      const foregroundProcess = getForegroundProcess(session.instance.pid);
+      if (session.instance.foregroundProcess === foregroundProcess) {
+        return;
+      }
+
+      session.instance.foregroundProcess = foregroundProcess;
+      this.onSessionStateChanged(this.sessionState(session));
+    };
+
+    updateForegroundProcess();
+    session.fgPollTimer = setInterval(updateForegroundProcess, FG_POLL_INTERVAL_MS);
+  }
+
+  private stopForegroundPolling(session: ManagedSession): void {
+    if (session.fgPollTimer) {
+      clearInterval(session.fgPollTimer);
+      session.fgPollTimer = null;
+    }
   }
 
   private sessionDefinitionsForSlot(slotID: string): SessionDefinition[] {

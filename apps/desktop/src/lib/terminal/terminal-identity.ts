@@ -1,4 +1,9 @@
-import type { SlotState, TerminalDisplayKind, TerminalDisplayState } from "@/lib/shared/types";
+import type {
+  SessionState,
+  SlotState,
+  TerminalDisplayKind,
+  TerminalDisplayState,
+} from "@/lib/shared/types";
 
 const TERMINAL_LABEL = "Terminal";
 
@@ -19,8 +24,6 @@ const DETECTORS: Detector[] = [
   { kind: "gemini", label: "Gemini CLI", pattern: /\bgemini(?:\s+cli)?\b/i },
 ];
 
-const pendingInputBySessionId = new Map<string, string>();
-
 function detectTerminalDisplay(source: string): TerminalDisplayState | null {
   for (const detector of DETECTORS) {
     if (detector.pattern.test(source)) {
@@ -30,54 +33,11 @@ function detectTerminalDisplay(source: string): TerminalDisplayState | null {
   return null;
 }
 
-export function detectTerminalDisplayFromOutput(data: string): TerminalDisplayState | null {
-  return detectTerminalDisplay(data);
-}
-
-export function detectTerminalDisplayFromInput(
-  sessionID: string,
-  data: string
+export function detectTerminalDisplayFromProcess(
+  foregroundProcess: string | null | undefined
 ): TerminalDisplayState | null {
-  let buffer = pendingInputBySessionId.get(sessionID) ?? "";
-
-  for (const char of data) {
-    if (char === "\u0003") {
-      buffer = "";
-      continue;
-    }
-    if (char === "\u007f" || char === "\b") {
-      buffer = buffer.slice(0, -1);
-      continue;
-    }
-    if (char === "\r" || char === "\n") {
-      const line = buffer.trim();
-      buffer = "";
-      if (!line) continue;
-      const command = line
-        .split(/[|;&]/, 1)[0]
-        ?.trim()
-        .split(/\s+/, 1)[0]
-        ?.replace(/^exec\s+/i, "")
-        .trim();
-      if (!command) continue;
-      const detected = detectTerminalDisplay(command);
-      if (detected) {
-        pendingInputBySessionId.delete(sessionID);
-        return detected;
-      }
-      continue;
-    }
-    if (char >= " " && char !== "\u001b") {
-      buffer += char;
-    }
-  }
-
-  pendingInputBySessionId.set(sessionID, buffer.slice(-256));
-  return null;
-}
-
-export function resetTerminalInputTracking(sessionID: string): void {
-  pendingInputBySessionId.delete(sessionID);
+  if (!foregroundProcess) return null;
+  return detectTerminalDisplay(foregroundProcess);
 }
 
 function customSlotLabel(slot: SlotState | undefined): string | null {
@@ -91,8 +51,24 @@ function customSlotLabel(slot: SlotState | undefined): string | null {
 
 export function terminalDisplayForSlot(
   slot: SlotState | undefined,
+  session: SessionState | undefined,
   detected: TerminalDisplayState | undefined
 ): TerminalDisplayState {
+  const liveDetected = detectTerminalDisplayFromProcess(session?.foregroundProcess);
+  if (liveDetected && liveDetected.kind !== "terminal") {
+    return liveDetected;
+  }
+
+  // If the daemon says there's no live foreground app, don't resurrect a stale
+  // regex-detected identity from earlier terminal input/output.
+  if (session) {
+    const customLabel = customSlotLabel(slot);
+    if (customLabel) {
+      return { kind: "terminal", label: customLabel };
+    }
+    return { kind: "terminal", label: TERMINAL_LABEL };
+  }
+
   if (detected && detected.kind !== "terminal") {
     return detected;
   }

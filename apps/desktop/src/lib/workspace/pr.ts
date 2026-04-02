@@ -6,6 +6,7 @@ import type {
 } from "@/lib/shared/types";
 import { findLeaf } from "@/lib/layout/layout-tree";
 import { getAllLeaves } from "@/lib/layout/layout-tree";
+import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 
 const AGENT_KINDS: TerminalDisplayKind[] = [
   "claude-code",
@@ -41,14 +42,15 @@ export function findAgentTerminal(
 function findAgentInRuntime(
   runtime: WorkspaceRuntimeState
 ): AgentTerminalTarget | null {
-  const { terminalDisplayBySlotId, sessions, root, focusedPaneID } = runtime;
+  const { slots, terminalDisplayBySlotId, sessions, root, focusedPaneID } = runtime;
 
   const trySlotId = (slotId: string): AgentTerminalTarget | null => {
-    const display = terminalDisplayBySlotId[slotId];
-    if (!display || !AGENT_KINDS.includes(display.kind)) return null;
+    const slot = slots.find((item) => item.id === slotId);
     const session = sessions.find(
       (s) => s.slotID === slotId && s.status === "running"
     );
+    const display = terminalDisplayForSlot(slot, session, terminalDisplayBySlotId[slotId]);
+    if (!display || !AGENT_KINDS.includes(display.kind)) return null;
     if (!session) return null;
     return {
       slotId,

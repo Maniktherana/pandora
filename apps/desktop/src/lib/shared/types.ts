@@ -53,6 +53,7 @@ export interface SessionState {
   port: number | null;
   startedAt: string | null;
   lastOutputAt: string | null;
+  foregroundProcess: string | null;
   capabilities: ActionCapabilities;
 }
 

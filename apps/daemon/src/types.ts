@@ -50,6 +50,7 @@ export interface SessionInstance {
   exitCode: number | null;
   startedAt: string | null;
   lastOutputAt: string | null;
+  foregroundProcess: string | null;
 }
 
 export interface SlotState extends SlotDefinition {
