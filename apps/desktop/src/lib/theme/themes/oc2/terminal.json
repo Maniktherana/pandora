@@ -1,0 +1,28 @@
+{
+  "typography": {
+    "fontFamily": "JetBrains Mono",
+    "fontSize": 13
+  },
+  "black": "#505050",
+  "red": "#FC533A",
+  "green": "#12C905",
+  "yellow": "#FCD53A",
+  "blue": "#8CB0FF",
+  "magenta": "#EDB2F1",
+  "cyan": "#00CEB9",
+  "white": "#EDEDED",
+  "brightBlack": "#707070",
+  "brightRed": "#FF8A7A",
+  "brightGreen": "#B8DB87",
+  "brightYellow": "#FFE98A",
+  "brightBlue": "#B6CBFF",
+  "brightMagenta": "#F8D1FB",
+  "brightCyan": "#93E9F6",
+  "brightWhite": "#FFFFFF",
+  "background": "#151515",
+  "foreground": "#EDEDED",
+  "cursor": "#FAB283",
+  "cursorAccent": "#171311",
+  "selectionBackground": "#0D172B",
+  "selectionForeground": "#EDEDED"
+}

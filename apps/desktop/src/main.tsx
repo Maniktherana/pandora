@@ -1,8 +1,9 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { applyOc2Theme } from "@/lib/theme/oc2";
+import { applyTheme } from "@/lib/theme/theme";
+import { defaultTheme } from "@/lib/theme/themes";
 
-applyOc2Theme();
+applyTheme(defaultTheme);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

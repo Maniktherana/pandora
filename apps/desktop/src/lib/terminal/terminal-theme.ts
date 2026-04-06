@@ -1,35 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { oc2Theme } from "@/lib/theme/oc2";
+import type { TerminalThemeColors } from "@/lib/theme/theme";
+import { defaultTheme } from "@/lib/theme/themes";
 
 /**
  * Ghostty-format theme config (for UI chrome around the native terminal).
  * Uses the same key=value format as ~/.config/ghostty/config and Ghostty theme files.
  */
-
-export interface TerminalThemeColors {
-  black?: string;
-  red?: string;
-  green?: string;
-  yellow?: string;
-  blue?: string;
-  magenta?: string;
-  cyan?: string;
-  white?: string;
-  brightBlack?: string;
-  brightRed?: string;
-  brightGreen?: string;
-  brightYellow?: string;
-  brightBlue?: string;
-  brightMagenta?: string;
-  brightCyan?: string;
-  brightWhite?: string;
-  background?: string;
-  foreground?: string;
-  cursor?: string;
-  cursorAccent?: string;
-  selectionBackground?: string;
-  selectionForeground?: string;
-}
 
 export interface GhosttyConfigSource {
   path: string | null;
@@ -62,33 +38,12 @@ export function buildGhosttyThemeConfig(theme: TerminalThemeColors): string {
   if (theme.cursorAccent) lines.push(`cursor-text = ${theme.cursorAccent}`);
   if (theme.selectionBackground) lines.push(`selection-background = ${theme.selectionBackground}`);
   if (theme.selectionForeground) lines.push(`selection-foreground = ${theme.selectionForeground}`);
+  if (theme.typography?.fontFamily) lines.push(`font-family = ${theme.typography.fontFamily}`);
+  if (theme.typography?.fontSize) lines.push(`font-size = ${theme.typography.fontSize}`);
   return `${lines.join("\n")}\n`;
 }
 
-const THEME_CONFIG = buildGhosttyThemeConfig({
-  black: "#505050",
-  red: oc2Theme.colors.error,
-  green: oc2Theme.colors.success,
-  yellow: oc2Theme.colors.warning,
-  blue: oc2Theme.colors.syntaxPrimitive,
-  magenta: oc2Theme.colors.info,
-  cyan: oc2Theme.colors.syntaxString,
-  white: oc2Theme.colors.text,
-  brightBlack: oc2Theme.colors.textSubtle,
-  brightRed: "#FF8A7A",
-  brightGreen: oc2Theme.colors.diffAdd,
-  brightYellow: "#FFE98A",
-  brightBlue: "#B6CBFF",
-  brightMagenta: "#F8D1FB",
-  brightCyan: "#93E9F6",
-  brightWhite: "#FFFFFF",
-  background: "#151515",
-  foreground: oc2Theme.colors.text,
-  cursor: oc2Theme.colors.primary,
-  cursorAccent: "#171311",
-  selectionBackground: oc2Theme.colors.selection,
-  selectionForeground: oc2Theme.colors.text,
-});
+const THEME_CONFIG = buildGhosttyThemeConfig(defaultTheme.terminal);
 
 const PALETTE_KEYS: Record<number, keyof TerminalThemeColors> = {
   0: "black",
@@ -143,6 +98,13 @@ export function parseGhosttyTheme(config: string): TerminalThemeColors {
       theme.selectionBackground = value;
     } else if (key === "selection-foreground") {
       theme.selectionForeground = value;
+    } else if (key === "font-family") {
+      theme.typography = { ...(theme.typography ?? {}), fontFamily: value };
+    } else if (key === "font-size") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        theme.typography = { ...(theme.typography ?? {}), fontSize: parsed };
+      }
     }
   }
 

@@ -259,17 +259,17 @@ function PaneView({
         })}
 
         {leaf.tabs.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-[var(--oc-text-subtle)]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-sm text-[var(--theme-text-subtle)]">
             <p>No open tabs</p>
             <button
               onClick={() => {
                 terminalCommands.createWorkspaceTerminal(workspaceId);
               }}
-              className="mt-2 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+              className="mt-2 rounded-md bg-[var(--theme-panel-elevated)] px-3 py-1.5 text-sm text-[var(--theme-text)] transition-colors hover:bg-[var(--theme-panel-hover)]"
             >
               New Terminal
             </button>
-            <p className="mt-1 max-w-xs text-xs text-[var(--oc-text-faint)]">
+            <p className="mt-1 max-w-xs text-xs text-[var(--theme-text-faint)]">
               or open a file from the file tree
             </p>
           </div>
@@ -329,10 +329,10 @@ function LayoutRenderer({
             <PanelResizeHandle
               hitAreaMargins={{ coarse: 0, fine: 0 }}
               className={cn(
-                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-[var(--oc-interactive)]",
+                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-[var(--theme-interactive)]",
                 direction === "horizontal"
-                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-[var(--oc-text-faint)]"
-                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-[var(--oc-text-faint)]"
+                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-[var(--theme-text-faint)]"
+                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-[var(--theme-text-faint)]"
               )}
               onDragging={setLocalResizing}
             />
@@ -459,7 +459,7 @@ function EmptyWorkspaceState() {
   if (!workspace) {
     if (!project) {
       return (
-        <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)]">
+        <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
           <div className="text-center">
             <p className="text-lg font-medium">No project selected</p>
             <p className="text-sm mt-1">
@@ -470,7 +470,7 @@ function EmptyWorkspaceState() {
       );
     }
     return (
-      <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)]">
+      <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
         <div className="text-center">
           <p className="text-lg font-medium">No workspace selected</p>
           <p className="text-sm mt-1">Create a workspace in the sidebar</p>
@@ -481,11 +481,11 @@ function EmptyWorkspaceState() {
 
   if (workspace.status === "creating") {
     return (
-      <div className="flex items-center justify-center h-full text-[var(--oc-text-subtle)]">
+      <div className="flex items-center justify-center h-full text-[var(--theme-text-subtle)]">
         <div className="text-center">
-          <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--oc-text-faint)] border-t-[var(--oc-interactive)]" />
+          <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--theme-text-faint)] border-t-[var(--theme-interactive)]" />
           <p className="text-sm">Creating workspace...</p>
-          <p className="mt-1 text-xs text-[var(--oc-text-faint)]">Setting up git worktree</p>
+          <p className="mt-1 text-xs text-[var(--theme-text-faint)]">Setting up git worktree</p>
         </div>
       </div>
     );
@@ -493,25 +493,25 @@ function EmptyWorkspaceState() {
 
   if (workspace.status === "failed") {
     return (
-      <div className="flex items-center justify-center h-full text-[var(--oc-text-subtle)]">
+      <div className="flex items-center justify-center h-full text-[var(--theme-text-subtle)]">
         <div className="text-center max-w-md">
           <p className="text-sm text-red-400">Workspace creation failed</p>
           {workspace.failureMessage && (
-            <p className="mt-1 break-words text-xs text-[var(--oc-text-faint)]">
+            <p className="mt-1 break-words text-xs text-[var(--theme-text-faint)]">
               {workspace.failureMessage}
             </p>
           )}
           <div className="flex gap-2 justify-center mt-4">
             <button
               onClick={() => workspaceCommands.retryWorkspace(workspace.id)}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--theme-panel-elevated)] px-3 py-1.5 text-sm text-[var(--theme-text)] transition-colors hover:bg-[var(--theme-panel-hover)]"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Retry
             </button>
             <button
               onClick={() => workspaceCommands.removeWorkspace(workspace.id)}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--theme-panel-elevated)] px-3 py-1.5 text-sm text-[var(--theme-text)] transition-colors hover:bg-[var(--theme-panel-hover)]"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Remove
@@ -534,14 +534,14 @@ function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="text-center">
-        <p className="text-sm text-[var(--oc-text-subtle)]">No open tabs</p>
+        <p className="text-sm text-[var(--theme-text-subtle)]">No open tabs</p>
         <button
           onClick={handleNewTerminal}
-          className="mt-3 rounded-md bg-[var(--oc-panel-elevated)] px-4 py-2 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
+          className="mt-3 rounded-md bg-[var(--theme-panel-elevated)] px-4 py-2 text-sm text-[var(--theme-text)] transition-colors hover:bg-[var(--theme-panel-hover)]"
         >
           New Terminal
         </button>
-        <p className="mt-2 text-xs text-[var(--oc-text-faint)]">
+        <p className="mt-2 text-xs text-[var(--theme-text-faint)]">
           or open a file from the file tree
         </p>
       </div>
@@ -551,9 +551,9 @@ function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
 
 function WorkspaceRuntimeLoading({ message }: { message: string }) {
   return (
-    <div className="flex h-full items-center justify-center text-[var(--oc-text-subtle)]">
+    <div className="flex h-full items-center justify-center text-[var(--theme-text-subtle)]">
       <div className="text-center">
-        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--oc-text-faint)] border-t-[var(--oc-interactive)]" />
+        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--theme-text-faint)] border-t-[var(--theme-interactive)]" />
         <p className="text-sm">{message}</p>
       </div>
     </div>

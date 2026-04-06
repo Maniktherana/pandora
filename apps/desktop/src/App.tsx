@@ -125,7 +125,7 @@ export default function App() {
             }}
             className="group absolute inset-y-0 right-0 z-20 w-px cursor-col-resize bg-transparent"
           >
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-[var(--oc-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-[var(--theme-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
           </div>
         </div>
       )}
@@ -165,7 +165,7 @@ export default function App() {
                   <PanelResizeHandle
                     hitAreaMargins={{ coarse: 0, fine: 0 }}
                     className={cn(
-                      "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-[var(--oc-text-faint)] transition-colors hover:bg-[var(--oc-interactive)]",
+                      "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       fileTreeOpen && selectedWs?.status === "ready"
                         ? "cursor-col-resize"
                         : "hidden"
@@ -203,7 +203,7 @@ export default function App() {
                   <PanelResizeHandle
                     hitAreaMargins={{ coarse: 0, fine: 0 }}
                     className={cn(
-                      "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-[var(--oc-text-faint)] transition-colors hover:bg-[var(--oc-interactive)]",
+                      "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       bottomPanelOpen ? "cursor-row-resize" : "hidden"
                     )}
                   />

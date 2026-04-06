@@ -51,7 +51,7 @@ export const SCM_TONE_HEX = {
 } as const;
 
 export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
-  if (dimmed || tone === "ignored") return "text-[var(--oc-text-faint)]";
+  if (dimmed || tone === "ignored") return "text-[var(--theme-text-faint)]";
   switch (tone) {
     case "added":
       return "text-[#D0FDC6]";
@@ -60,11 +60,11 @@ export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
     case "deleted":
       return "text-[#D9432A]";
     case "renamed":
-      return "text-[var(--oc-interactive)]";
+      return "text-[var(--theme-interactive)]";
     case "conflict":
-      return "text-[var(--oc-info)]";
+      return "text-[var(--theme-info)]";
     default:
-      return "text-[var(--oc-text-muted)]";
+      return "text-[var(--theme-text-muted)]";
   }
 }
 

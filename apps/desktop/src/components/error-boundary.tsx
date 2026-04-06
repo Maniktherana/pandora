@@ -28,7 +28,7 @@ export default class ErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         this.props.fallback ?? (
-          <div className="flex h-full items-center justify-center text-sm text-[var(--oc-text-subtle)]">
+          <div className="flex h-full items-center justify-center text-sm text-[var(--theme-text-subtle)]">
             <div className="text-center">
               <p>Something went wrong</p>
               <button

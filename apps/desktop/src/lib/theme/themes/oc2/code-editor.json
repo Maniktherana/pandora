@@ -1,0 +1,62 @@
+{
+  "typography": {
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", monospace",
+    "fontSize": 13,
+    "lineHeight": 24
+  },
+  "surface": {
+    "base": "#151515",
+    "chrome": "#121212",
+    "hover": "#1B1B1B",
+    "separator": "#242424"
+  },
+  "text": {
+    "primary": "#EDEDED",
+    "muted": "#A0A0A0",
+    "subtle": "#707070",
+    "faint": "#505050",
+    "lineNumber": "#5C5C5C"
+  },
+  "accent": {
+    "selection": "#0D172B",
+    "selectionInactive": "#2A2A2A"
+  },
+  "diff": {
+    "add": {
+      "base": "#B8DB87",
+      "fill": "rgb(184 219 135 / 0.12)",
+      "fillStrong": "rgb(184 219 135 / 0.20)"
+    },
+    "delete": {
+      "base": "#E26A75",
+      "fill": "rgb(226 106 117 / 0.12)",
+      "fillStrong": "rgb(226 106 117 / 0.20)"
+    },
+    "modified": {
+      "base": "#F5A742",
+      "fill": "rgb(245 167 66 / 0.14)"
+    }
+  },
+  "gutter": {
+    "bar": {
+      "add": "#B8DB87",
+      "delete": "#E26A75",
+      "modified": "#F5A742"
+    }
+  },
+  "syntax": {
+    "comment": "#8F8F8F",
+    "keyword": "#EDB2F1",
+    "string": "#00CEB9",
+    "primitive": "#8CB0FF",
+    "property": "#FAB283",
+    "type": "#FCD53A",
+    "constant": "#93E9F6",
+    "operator": "#56B6C2",
+    "punctuation": "#EDEDED",
+    "variable": "#EDEDED"
+  },
+  "cursor": "#FAB283",
+  "scrollbar": "#505050",
+  "scrollbarHover": "#707070"
+}

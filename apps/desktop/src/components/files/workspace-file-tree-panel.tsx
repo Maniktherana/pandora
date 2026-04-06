@@ -128,10 +128,10 @@ function FileTreeRow({
   );
 
   const rowClassName = cn(
-    "flex min-w-0 w-full select-none items-center gap-1.5 rounded-sm py-0.5 pr-1 text-left text-xs hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+    "flex min-w-0 w-full select-none items-center gap-1.5 rounded-sm py-0.5 pr-1 text-left text-xs hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
     scmToneTextClass(decoration.tone, decoration.dimmed),
     decoration.dimmed && "opacity-55",
-    active && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]",
+    active && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
     className
   );
 
@@ -223,7 +223,7 @@ function DirectoryNode({
                 variant="ghost"
                 size="sm"
                 className={cn(
-              "group h-auto min-h-0 w-full select-none justify-start gap-1.5 rounded-sm py-0.5 pr-1 pl-0 font-normal hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]",
+              "group h-auto min-h-0 w-full select-none justify-start gap-1.5 rounded-sm py-0.5 pr-1 pl-0 font-normal hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
               scmToneTextClass(decoration.tone, decoration.dimmed),
               decoration.dimmed && "opacity-55"
             )}
@@ -243,7 +243,7 @@ function DirectoryNode({
       <CollapsibleContent>
         <div className="flex flex-col gap-0.5 pb-0.5">
           {loadError && (
-            <div className="px-2 py-1 text-[11px] text-[var(--oc-error)]" style={{ paddingLeft: 18 + depth * 12 }}>
+            <div className="px-2 py-1 text-[11px] text-[var(--theme-error)]" style={{ paddingLeft: 18 + depth * 12 }}>
               {loadError}
             </div>
           )}
@@ -438,11 +438,11 @@ export default function WorkspaceFileTreePanel({
   }, [workspaceRoot, refreshTick]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col border-l border-[var(--oc-border)] bg-[#151515] select-none">
+    <div className="flex h-full min-w-0 flex-col border-l border-[var(--theme-border)] bg-[#151515] select-none">
       {diffMenu &&
         createPortal(
           <div
-            className="fixed z-[200] min-w-[200px] overflow-hidden rounded-md border border-[var(--oc-border)] bg-[var(--oc-panel-elevated)] py-1 text-xs shadow-lg"
+            className="fixed z-[200] min-w-[200px] overflow-hidden rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel-elevated)] py-1 text-xs shadow-lg"
             style={{
               left: Math.max(8, Math.min(diffMenu.x, window.innerWidth - 228)),
               top: Math.max(8, Math.min(diffMenu.y, window.innerHeight - 100)),
@@ -452,7 +452,7 @@ export default function WorkspaceFileTreePanel({
           >
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-[var(--oc-text)] hover:bg-[var(--oc-panel-hover)]"
+              className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
               onClick={() => {
                 layoutCommands.addDiffTabForPath(diffMenu.relPath, "staged");
                 setDiffMenu(null);
@@ -464,7 +464,7 @@ export default function WorkspaceFileTreePanel({
           document.body
         )}
 
-      <div className="flex shrink-0 gap-0 border-b border-[var(--oc-border)] p-1">
+      <div className="flex shrink-0 gap-0 border-b border-[var(--theme-border)] p-1">
         <Button
           type="button"
           variant="ghost"
@@ -472,8 +472,8 @@ export default function WorkspaceFileTreePanel({
           className={cn(
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "files"
-              ? "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
-              : "text-[var(--oc-text-subtle)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
+              ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
           )}
           onClick={() => setLeftMode("files")}
         >
@@ -486,8 +486,8 @@ export default function WorkspaceFileTreePanel({
           className={cn(
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "changes"
-              ? "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
-              : "text-[var(--oc-text-subtle)] hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
+              ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
           )}
           onClick={() => setLeftMode("changes")}
         >
@@ -500,8 +500,8 @@ export default function WorkspaceFileTreePanel({
       ) : (
         <FileTreeExpansionContext.Provider value={expansionValue}>
           <div className="min-h-0 flex-1 overflow-auto py-1">
-            {rootEntries === null && <div className="px-2 py-2 text-xs text-[var(--oc-text-subtle)]">Loading…</div>}
-            {rootError && <div className="px-2 py-2 text-xs text-[var(--oc-error)]">{rootError}</div>}
+            {rootEntries === null && <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading…</div>}
+            {rootError && <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>}
             {rootEntries?.map((entry) =>
               entry.isDirectory ? (
                 <DirectoryNode

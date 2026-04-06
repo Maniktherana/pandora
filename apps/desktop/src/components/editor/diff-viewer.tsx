@@ -11,7 +11,7 @@ import {
   getLargeDiffOptions,
   getPierreSurfaceStyle,
 } from "@/lib/editor/pierre-pandora";
-import { oc2CodeSurfaceTokens } from "@/lib/theme/oc2";
+import { defaultTheme } from "@/lib/theme/themes";
 import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -137,7 +137,7 @@ export default function DiffViewer({
     return (
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{ backgroundColor: oc2CodeSurfaceTokens.surface.base }}
+        style={{ backgroundColor: defaultTheme.codeEditor.surface.base }}
         aria-hidden
       />
     );
@@ -148,23 +148,23 @@ export default function DiffViewer({
       className="flex h-full min-h-0 flex-col"
       style={{
         ...getPierreSurfaceStyle(),
-        backgroundColor: oc2CodeSurfaceTokens.surface.base,
+        backgroundColor: defaultTheme.codeEditor.surface.base,
       }}
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--oc-code-surface-separator)] bg-[var(--oc-code-surface-chrome)] px-1.5 py-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
         <span
-          className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--oc-text-subtle)]"
+          className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--theme-text-subtle)]"
           title={relativePath}
         >
           {relativePath}
         </span>
         {staged ? (
-          <span className="shrink-0 rounded bg-[var(--oc-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--oc-text-muted)]">
+          <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-text-muted)]">
             Staged
           </span>
         ) : null}
         {isLarge && (
-          <span className="shrink-0 rounded bg-[var(--oc-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--oc-warning)]">
+          <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-warning)]">
             Large diff
           </span>
         )}
@@ -173,8 +173,8 @@ export default function DiffViewer({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
-            sideBySide && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
+            sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
           )}
           title={sideBySide ? "Split diff (on)" : "Split diff"}
           aria-label={sideBySide ? "Split diff (on)" : "Split diff"}
@@ -188,8 +188,8 @@ export default function DiffViewer({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
-            !sideBySide && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
+            !sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
           )}
           title={!sideBySide ? "Unified diff (on)" : "Unified diff"}
           aria-label={!sideBySide ? "Unified diff (on)" : "Unified diff"}
@@ -203,8 +203,8 @@ export default function DiffViewer({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]",
-            ignoreTrimWhitespace && "bg-[var(--oc-panel-elevated)] text-[var(--oc-text)]"
+            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
+            ignoreTrimWhitespace && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
           )}
           title={
             ignoreTrimWhitespace
@@ -225,7 +225,7 @@ export default function DiffViewer({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 w-7 shrink-0 p-0 text-[var(--oc-text-muted)] hover:text-[var(--oc-text)]"
+          className="h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
           title="Refresh"
           aria-label="Refresh"
           onClick={() => void load()}
@@ -237,16 +237,16 @@ export default function DiffViewer({
 
       <div className="min-h-0 flex-1 overflow-auto">
         {displayError && (
-          <div className="flex items-start gap-2 p-3 text-sm text-[var(--oc-error)]">
+          <div className="flex items-start gap-2 p-3 text-sm text-[var(--theme-error)]">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
             <span>{displayError}</span>
           </div>
         )}
         {!displayError && loading && (
-          <div className="p-3 text-sm text-[var(--oc-text-subtle)]">Loading diff…</div>
+          <div className="p-3 text-sm text-[var(--theme-text-subtle)]">Loading diff…</div>
         )}
         {!displayError && !loading && noDiff && (
-          <div className="p-3 text-sm text-[var(--oc-text-subtle)]">No changes to show for this file.</div>
+          <div className="p-3 text-sm text-[var(--theme-text-subtle)]">No changes to show for this file.</div>
         )}
         {!displayError && !loading && diffMetadata && (
           <PierreFileDiff

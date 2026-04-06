@@ -1,8 +1,13 @@
 import type { BeforeMount, DiffBeforeMount } from "@monaco-editor/react";
-import { getOc2MonacoTheme, oc2Theme } from "@/lib/theme/oc2";
+import { toMonacoTheme } from "@/lib/theme/theme";
+import { defaultTheme } from "@/lib/theme/themes";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
-export const PANDORA_EDITOR_BG = terminalTheme.background ?? oc2Theme.colors.background;
+export const MONACO_THEME_ID = "pandora-theme";
+export const PANDORA_EDITOR_BG = terminalTheme.background ?? defaultTheme.ui.background;
+export const PANDORA_EDITOR_FONT_FAMILY = defaultTheme.codeEditor.typography.fontFamily;
+export const PANDORA_EDITOR_FONT_SIZE = defaultTheme.codeEditor.typography.fontSize;
+export const PANDORA_EDITOR_LINE_HEIGHT = defaultTheme.codeEditor.typography.lineHeight;
 
 const noDiag = {
   noSemanticValidation: true,
@@ -28,6 +33,6 @@ export const pandoraMonacoBeforeMount: BeforeMount & DiffBeforeMount = (monaco) 
     d.setModeConfiguration({ ...d.modeConfiguration, diagnostics: false });
   }
 
-  monaco.editor.defineTheme("pandora-oc2", getOc2MonacoTheme());
-  monaco.editor.setTheme("pandora-oc2");
+  monaco.editor.defineTheme(MONACO_THEME_ID, toMonacoTheme(defaultTheme));
+  monaco.editor.setTheme(MONACO_THEME_ID);
 };

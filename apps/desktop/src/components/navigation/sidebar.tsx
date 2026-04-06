@@ -43,11 +43,11 @@ const WORKSPACE_KIND_TITLE: Record<WorkspaceKind, string> = {
 
 function StatusDot({ status }: { status: WorkspaceStatus }) {
   const colors: Record<WorkspaceStatus, string> = {
-    ready: "bg-[var(--oc-success)]",
-    creating: "bg-[var(--oc-warning)] animate-pulse",
-    failed: "bg-[var(--oc-error)]",
-    deleting: "bg-[var(--oc-text-faint)]",
-    archived: "bg-[var(--oc-text-faint)]",
+    ready: "bg-[var(--theme-success)]",
+    creating: "bg-[var(--theme-warning)] animate-pulse",
+    failed: "bg-[var(--theme-error)]",
+    deleting: "bg-[var(--theme-text-faint)]",
+    archived: "bg-[var(--theme-text-faint)]",
   };
   return <div className={cn("w-2 h-2 rounded-full shrink-0", colors[status])} />;
 }
@@ -74,14 +74,14 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
         className={cn(
           "flex w-full select-none items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
           isActive
-            ? "bg-[var(--oc-panel-interactive)] border border-[var(--oc-interactive)]/35"
+            ? "bg-[var(--theme-panel-interactive)] border border-[var(--theme-interactive)]/35"
             : isSelected
-            ? "bg-[var(--oc-panel-hover)] border border-[var(--oc-border)]"
-            : "hover:bg-[var(--oc-panel-hover)] border border-transparent"
+            ? "bg-[var(--theme-panel-hover)] border border-[var(--theme-border)]"
+            : "hover:bg-[var(--theme-panel-hover)] border border-transparent"
         )}
       >
         <StatusDot status={workspace.status} />
-        <span className="text-[13px] text-[var(--oc-text)] truncate min-w-0 flex-1">{workspace.name}</span>
+        <span className="text-[13px] text-[var(--theme-text)] truncate min-w-0 flex-1">{workspace.name}</span>
         <span
           className={cn(
             "shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded",
@@ -116,20 +116,20 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
                 e.stopPropagation();
                 workspaceCommands.retryWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
+              className="p-0.5 rounded hover:bg-[var(--theme-panel-hover)]"
               title="Retry"
             >
-              <RotateCcw className="w-3 h-3 text-[var(--oc-text-muted)]" />
+              <RotateCcw className="w-3 h-3 text-[var(--theme-text-muted)]" />
             </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 workspaceCommands.removeWorkspace(workspace.id);
               }}
-              className="p-0.5 rounded hover:bg-[var(--oc-panel-hover)]"
+              className="p-0.5 rounded hover:bg-[var(--theme-panel-hover)]"
               title="Remove"
             >
-              <Trash2 className="w-3 h-3 text-[var(--oc-text-muted)]" />
+              <Trash2 className="w-3 h-3 text-[var(--theme-text-muted)]" />
             </button>
           </div>
         )}
@@ -165,7 +165,7 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
       <div
         className={cn(
           "group flex select-none cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5",
-          isSelected ? "bg-[var(--oc-panel-hover)]" : "hover:bg-[var(--oc-panel-hover)]"
+          isSelected ? "bg-[var(--theme-panel-hover)]" : "hover:bg-[var(--theme-panel-hover)]"
         )}
         onClick={() => {
           workspaceCommands.selectProject(project.id);
@@ -173,16 +173,16 @@ function ProjectRow({ project }: { project: ProjectRecord }) {
         }}
       >
         {project.isExpanded ? (
-          <ChevronDown className="w-3.5 h-3.5 text-[var(--oc-text-subtle)] shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-subtle)] shrink-0" />
         ) : (
-          <ChevronRight className="w-3.5 h-3.5 text-[var(--oc-text-subtle)] shrink-0" />
+          <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-subtle)] shrink-0" />
         )}
         <div
-          className="w-5 h-5 rounded bg-[var(--oc-panel-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--oc-text)] shrink-0"
+          className="w-5 h-5 rounded bg-[var(--theme-panel-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--theme-text)] shrink-0"
         >
           {project.displayName.charAt(0).toUpperCase()}
         </div>
-        <span className="text-sm font-medium text-[var(--oc-text)] truncate flex-1">
+        <span className="text-sm font-medium text-[var(--theme-text)] truncate flex-1">
           {project.displayName}
         </span>
         <div
@@ -291,25 +291,25 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
       {/* Header — pt-11 clears macOS traffic lights in overlay titlebar */}
       <div className="flex items-center gap-2 px-3 pt-11 pb-2" data-tauri-drag-region>
         <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--oc-text-subtle)]" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--theme-text-subtle)]" />
           <input
             type="text"
             placeholder="Search..."
             value={searchText}
             onChange={(e) => workspaceCommands.setSearchText(e.target.value)}
-            className="w-full rounded-md border border-[var(--oc-border)] bg-transparent pl-7 pr-2 py-1 text-xs text-[var(--oc-text)] placeholder:text-[var(--oc-text-subtle)] focus:border-[var(--oc-interactive)] focus:outline-none"
+            className="w-full rounded-md border border-[var(--theme-border)] bg-transparent pl-7 pr-2 py-1 text-xs text-[var(--theme-text)] placeholder:text-[var(--theme-text-subtle)] focus:border-[var(--theme-interactive)] focus:outline-none"
           />
         </div>
         <button
           onClick={() => void handleAddProject()}
-          className="p-1.5 rounded-md text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
+          className="p-1.5 rounded-md text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
           title="Add Project"
         >
           <FolderPlus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={onCollapse}
-          className="p-1.5 rounded-md text-[var(--oc-text-muted)] transition-colors hover:bg-[var(--oc-panel-hover)] hover:text-[var(--oc-text)]"
+          className="p-1.5 rounded-md text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
           title="Hide Sidebar"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
@@ -323,7 +323,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
         ))}
 
         {filteredProjects.length === 0 && (
-          <div className="mt-8 px-4 text-center text-xs text-[var(--oc-text-faint)]">
+          <div className="mt-8 px-4 text-center text-xs text-[var(--theme-text-faint)]">
             {searchText ? (
               "No matching projects"
             ) : (
@@ -331,7 +331,7 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
                 <p>No projects yet</p>
                 <button
                   onClick={() => void handleAddProject()}
-                  className="text-[var(--oc-interactive)] transition-colors hover:opacity-80"
+                  className="text-[var(--theme-interactive)] transition-colors hover:opacity-80"
                 >
                   Add a project
                 </button>

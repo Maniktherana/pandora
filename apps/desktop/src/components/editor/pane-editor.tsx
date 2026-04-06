@@ -4,11 +4,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useEditorStore } from "@/stores/editor-store";
 import { languageFromRelativePath } from "@/lib/editor/editor-language";
-import { pandoraMonacoBeforeMount, PANDORA_EDITOR_BG } from "@/lib/editor/monaco-pandora";
+import {
+  MONACO_THEME_ID,
+  pandoraMonacoBeforeMount,
+  PANDORA_EDITOR_BG,
+  PANDORA_EDITOR_FONT_FAMILY,
+  PANDORA_EDITOR_FONT_SIZE,
+  PANDORA_EDITOR_LINE_HEIGHT,
+} from "@/lib/editor/monaco-pandora";
 
 const editorOptions = {
   minimap: { enabled: false },
-  fontSize: 13,
+  fontFamily: PANDORA_EDITOR_FONT_FAMILY,
+  fontSize: PANDORA_EDITOR_FONT_SIZE,
+  lineHeight: PANDORA_EDITOR_LINE_HEIGHT,
   wordWrap: "on" as const,
   scrollBeyondLastLine: true,
   automaticLayout: true,
@@ -66,7 +75,7 @@ export default function PaneEditor({
 
   const handleMount = useCallback<OnMount>(
     (editor, monaco) => {
-      monaco.editor.setTheme("pandora-oc2");
+      monaco.editor.setTheme(MONACO_THEME_ID);
 
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void saveFile(workspaceId, workspaceRoot, relativePath).catch((e) =>
@@ -113,7 +122,7 @@ export default function PaneEditor({
         path={relativePath}
         language={language}
         value={buffer}
-        theme="pandora-oc2"
+        theme={MONACO_THEME_ID}
         loading={editorLoading}
         beforeMount={pandoraMonacoBeforeMount}
         onChange={onChange}
