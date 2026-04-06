@@ -10,7 +10,8 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { useAppView, useWorkspaceCommands } from "@/hooks/use-app-view";
+import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type {
   ProjectRecord,
   WorkspaceKind,
@@ -52,9 +53,9 @@ function StatusDot({ status }: { status: WorkspaceStatus }) {
 }
 
 function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
-  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
-  const navigationArea = useAppView((view) => view.navigationArea);
-  const workspaceCommands = useWorkspaceCommands();
+  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const navigationArea = useDesktopView((view) => view.navigationArea);
+  const workspaceCommands = useWorkspaceActions();
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -145,9 +146,9 @@ function WorkspaceRow({ workspace }: { workspace: WorkspaceRecord }) {
 const MemoWorkspaceRow = memo(WorkspaceRow);
 
 function ProjectRow({ project }: { project: ProjectRecord }) {
-  const selectedProjectID = useAppView((view) => view.selectedProjectID);
-  const allWorkspaces = useAppView((view) => view.workspaces);
-  const workspaceCommands = useWorkspaceCommands();
+  const selectedProjectID = useDesktopView((view) => view.selectedProjectID);
+  const allWorkspaces = useDesktopView((view) => view.workspaces);
+  const workspaceCommands = useWorkspaceActions();
   const workspaces = useMemo(
     () =>
       allWorkspaces.filter(
@@ -261,9 +262,9 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ onCollapse }: SidebarProps) {
-  const projects = useAppView((view) => view.projects);
-  const searchText = useAppView((view) => view.searchText);
-  const workspaceCommands = useWorkspaceCommands();
+  const projects = useDesktopView((view) => view.projects);
+  const searchText = useDesktopView((view) => view.searchText);
+  const workspaceCommands = useWorkspaceActions();
   const filteredProjects = useMemo(
     () =>
       projects.filter((project) =>

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, X } from "lucide-react";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
-import { useLayoutCommands, useWorkspaceView } from "@/hooks/use-app-view";
+import { useEditorActions } from "@/hooks/use-editor-actions";
+import { useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
+import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useEditorStore } from "@/stores/editor-store";
-import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
 import { tabKey } from "@/lib/layout/layout-tree";
 import type {
   PaneTab,
@@ -14,7 +16,6 @@ import type {
 } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import { scmStatus, scmToneTextClass, statusTone, type ScmStatusEntry } from "@/lib/workspace/scm";
 import { useTabDrag } from "./tab-drag-layer";
 
@@ -75,6 +76,7 @@ function EditorTabCloseControl({
   isActive: boolean;
 }) {
   const isDirty = useEditorStore((s) => s.isFileDirty(workspaceId, path));
+  const { closeEditorTab } = useEditorActions();
 
   return (
     <div
@@ -84,7 +86,7 @@ function EditorTabCloseControl({
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation();
-        void tryCloseEditorTab({
+        void closeEditorTab({
           workspaceId,
           workspaceRoot,
           paneID,
@@ -118,7 +120,8 @@ export default function PaneTabBar({
   isFocused,
 }: TabBarProps) {
   const { startDrag, dragState } = useTabDrag();
-  const layoutCommands = useLayoutCommands();
+  const layoutCommands = useLayoutActions();
+  const terminalCommands = useTerminalActions();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
   const slotsMap = useMemo(
     () =>
@@ -196,12 +199,9 @@ export default function PaneTabBar({
     (index: number) => {
       const tab = tabs[index];
       if (!tab || tab.kind !== "terminal") return;
-      getTerminalDaemonClient()?.send(workspaceId, {
-        type: "remove_slot",
-        slotID: tab.slotId,
-      });
+      terminalCommands.closeTerminalSlot(workspaceId, tab.slotId);
     },
-    [tabs, workspaceId]
+    [tabs, terminalCommands, workspaceId]
   );
 
   useEffect(() => {

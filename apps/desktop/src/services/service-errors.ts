@@ -1,6 +1,6 @@
 import { Data } from "effect";
 
-export class WorkspaceLoadError extends Data.TaggedError("WorkspaceLoadError")<{
+export class DesktopStateLoadError extends Data.TaggedError("DesktopStateLoadError")<{
   cause: unknown;
 }> {}
 
@@ -22,4 +22,9 @@ export class NativeSurfaceError extends Data.TaggedError("NativeSurfaceError")<{
 export class UiPreferenceError extends Data.TaggedError("UiPreferenceError")<{
   cause: unknown;
   key: string;
+}> {}
+
+export class TerminalCommandError extends Data.TaggedError("TerminalCommandError")<{
+  cause: unknown;
+  runtimeId?: string;
 }> {}

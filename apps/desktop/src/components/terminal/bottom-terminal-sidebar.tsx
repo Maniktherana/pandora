@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { Pencil, X } from "lucide-react";
 import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
-import { useProjectTerminalCommands } from "@/hooks/use-app-view";
+import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import type {
   SessionState,
   SlotState,
@@ -11,7 +11,6 @@ import type {
 } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 
 const DRAG_THRESHOLD = 5;
 
@@ -50,7 +49,7 @@ export default function BottomTerminalSidebar({
   const panel = runtime.terminalPanel;
   const slots = runtime.slots;
   const displayMap = runtime.terminalDisplayBySlotId ?? {};
-  const projectTerminalCommands = useProjectTerminalCommands();
+  const projectTerminalCommands = useProjectTerminalActions();
   const sessionsMap = useMemo(() => {
     const map = new Map<string, SessionState>();
     for (const session of runtime.sessions) {
@@ -147,20 +146,9 @@ export default function BottomTerminalSidebar({
       const current = terminalDisplayForSlot(slot, sessionsMap.get(slotId), displayMap[slotId]).label;
       const next = window.prompt("Rename terminal", current)?.trim();
       if (!next || next === current) return;
-      const client = getTerminalDaemonClient();
-      client?.send(workspaceId, {
-        type: "update_slot",
-        slot: { id: slotId, name: next },
-      });
-      const sessionDefId = slot?.sessionDefIDs[0];
-      if (sessionDefId) {
-        client?.send(workspaceId, {
-          type: "update_session_def",
-          session: { id: sessionDefId, name: next },
-        });
-      }
+      projectTerminalCommands.renameTerminal(workspaceId, slotId, next);
     },
-    [displayMap, sessionsMap, slotMap, workspaceId]
+    [displayMap, projectTerminalCommands, sessionsMap, slotMap, workspaceId]
   );
 
   if (!panel || panel.groups.length === 0) {

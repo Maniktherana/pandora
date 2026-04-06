@@ -27,14 +27,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Effect } from "effect";
-import {
-  useAppView,
-  useLayoutCommands,
-  useProjectTerminalCommands,
-} from "@/hooks/use-app-view";
-import { useAppRuntime } from "@/hooks/use-app-runtime";
-import { useAppViewStore } from "@/stores/app-view-store";
-import { NativeSurfaceManager } from "@/lib/effect/services/native-surface-manager";
+import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
+import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
+import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
+import { useDesktopViewStore } from "@/state/desktop-view-store";
+import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { findLeaf } from "@/lib/layout/layout-migrate";
 import { tabsEqual } from "@/lib/layout/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
@@ -348,9 +346,9 @@ function TabDragOverlay({
   const [cursor, setCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [target, setTarget] = useState<DropTarget | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
-  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
-  const layoutCommands = useLayoutCommands();
-  const projectTerminalCommands = useProjectTerminalCommands();
+  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const layoutCommands = useLayoutActions();
+  const projectTerminalCommands = useProjectTerminalActions();
 
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
@@ -411,10 +409,12 @@ function TabDragOverlay({
     }
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
-      const appView = useAppViewStore.getState().appView;
-      const rid = appView.layoutTargetRuntimeId ?? appView.selectedWorkspaceID;
-      const runtime = rid ? appView.runtimes[rid] : null;
-      const terminalPanel = drag.runtimeId ? appView.runtimes[drag.runtimeId]?.terminalPanel : null;
+      const desktopView = useDesktopViewStore.getState().desktopView;
+      const rid = desktopView.layoutTargetRuntimeId ?? desktopView.selectedWorkspaceID;
+      const runtime = rid ? desktopView.runtimes[rid] : null;
+      const terminalPanel = drag.runtimeId
+        ? desktopView.runtimes[drag.runtimeId]?.terminalPanel
+        : null;
 
       if (drag.kind === "bottom-terminal-group") {
         if (tgt.kind === "bottom-terminal-pane" && drag.runtimeId === tgt.runtimeId) {
@@ -712,18 +712,18 @@ function TabDragOverlay({
 
 export function TabDragProvider({ children }: { children: ReactNode }) {
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const runtime = useAppRuntime();
+  const runtime = useDesktopRuntime();
 
   useEffect(() => {
     if (!dragState) return;
     void runtime.runPromise(
-      Effect.flatMap(NativeSurfaceManager, (manager) => manager.beginWebOverlay()).pipe(
+      Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay()).pipe(
         Effect.catchAll(() => Effect.void)
       )
     );
     return () => {
       void runtime.runPromise(
-        Effect.flatMap(NativeSurfaceManager, (manager) => manager.endWebOverlay()).pipe(
+        Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay()).pipe(
           Effect.catchAll(() => Effect.void)
         )
       );

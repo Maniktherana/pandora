@@ -153,6 +153,13 @@ export class DaemonServer {
       logger.debug({ tag: "MSG", type: message.type }, "client message");
     }
     switch (message.type) {
+      case "request_snapshot":
+        writeMessage(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
+        writeMessage(socket, {
+          type: "session_snapshot",
+          sessions: this.processManager.listSessionStates(),
+        });
+        break;
       case "create_slot": {
         const slot = createSlotDefinition(this.db, {
           id: message.slot.id,

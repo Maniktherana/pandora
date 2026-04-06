@@ -14,25 +14,20 @@ import DiffViewer from "@/components/editor/diff-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
-import {
-  useAppView,
-  useLayoutCommands,
-  useWorkspaceCommands,
-  useWorkspaceView,
-} from "@/hooks/use-app-view";
+import { useDesktopView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
+import { useTerminalActions } from "@/hooks/use-terminal-actions";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { tabKey } from "@/lib/layout/layout-tree";
 import type {
   LayoutNode,
   LayoutLeaf,
   SessionState,
-  SlotState,
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
-import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
-import { seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 
 type TerminalAnchorInfo = {
   el: HTMLElement;
@@ -50,14 +45,14 @@ type NativeTerminalRegistration = {
 const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
 
 function PaneTerminalAnchorSlot({
-  sessionForSlot,
+  sessionId,
   isActiveTab,
   isFocused,
   workspaceId,
   leafId,
   layoutTargetOnFocus,
 }: {
-  sessionForSlot: SessionState;
+  sessionId: string;
   isActiveTab: boolean;
   isFocused: boolean;
   workspaceId: string;
@@ -66,8 +61,8 @@ function PaneTerminalAnchorSlot({
 }) {
   const terminalRegistration = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const layoutCommands = useLayoutCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const layoutCommands = useLayoutActions();
+  const workspaceCommands = useWorkspaceActions();
 
   const handleFocus = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
@@ -79,26 +74,43 @@ function PaneTerminalAnchorSlot({
     if (!terminalRegistration) return;
     const el = anchorRef.current;
     if (!el) return;
-    terminalRegistration.register(sessionForSlot.id, {
+    const workspaceVisible = terminalRegistration.workspaceVisible;
+    console.debug("[terminal-surface]", "anchor register", {
+      workspaceId,
+      sessionId,
+      visible: workspaceVisible && isActiveTab,
+      focused: workspaceVisible && isFocused && isActiveTab,
+    });
+    terminalRegistration.register(sessionId, {
       el,
       workspaceId,
-      visible: terminalRegistration.workspaceVisible && isActiveTab,
-      focused: terminalRegistration.workspaceVisible && isFocused && isActiveTab,
+      visible: workspaceVisible && isActiveTab,
+      focused: workspaceVisible && isFocused && isActiveTab,
       onFocus: handleFocus,
     });
   }, [
     terminalRegistration,
-    sessionForSlot.id,
+    sessionId,
     workspaceId,
     isActiveTab,
     isFocused,
     handleFocus,
+    terminalRegistration?.workspaceVisible,
   ]);
 
   useLayoutEffect(() => {
     if (!terminalRegistration) return;
-    return () => terminalRegistration.register(sessionForSlot.id, null);
-  }, [terminalRegistration, sessionForSlot.id]);
+    return () => {
+      const workspaceVisible = terminalRegistration.workspaceVisible;
+      console.debug("[terminal-surface]", "anchor unregister", {
+        workspaceId,
+        sessionId,
+        visible: workspaceVisible && isActiveTab,
+        focused: workspaceVisible && isFocused && isActiveTab,
+      });
+      terminalRegistration.register(sessionId, null);
+    };
+  }, [terminalRegistration, sessionId, workspaceId, isActiveTab, isFocused]);
 
   return (
     <div
@@ -133,11 +145,12 @@ function PaneView({
   isResizing,
 }: PaneViewProps) {
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
-  const layoutCommands = useLayoutCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const layoutCommands = useLayoutActions();
+  const terminalCommands = useTerminalActions();
+  const workspaceCommands = useWorkspaceActions();
 
   const slotsMap = useMemo(() => {
-    const map: Record<string, SlotState> = {};
+    const map: Record<string, { id: string; sessionIDs: string[] }> = {};
     for (const slot of runtime?.slots ?? []) {
       map[slot.id] = slot;
     }
@@ -151,10 +164,6 @@ function PaneView({
     }
     return map;
   }, [runtime?.sessions]);
-  const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
-  const activeSlotId =
-    activeTab?.kind === "terminal" ? activeTab.slotId : null;
-  const slot = activeSlotId ? slotsMap[activeSlotId] : null;
 
   const terminalSlots = leaf.tabs
     .map((t, i) => (t.kind === "terminal" ? { slotId: t.slotId, idx: i } : null))
@@ -230,14 +239,16 @@ function PaneView({
               </div>
             );
           }
-          const sessionForSlot = Object.values(sessionsMap).find(
-            (s) => s.slotID === tab.slotId && s.status === "running"
-          );
-          if (!sessionForSlot) return null;
+          const slot = slotsMap[tab.slotId];
+          const sessionForSlot =
+            Object.values(sessionsMap).find((s) => s.slotID === tab.slotId && s.status === "running") ??
+            (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
+          const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
+          if (!sessionId) return null;
           return (
             <PaneTerminalAnchorSlot
               key={tabKey(tab)}
-              sessionForSlot={sessionForSlot}
+              sessionId={sessionId}
               isActiveTab={isActiveTab}
               isFocused={isFocused}
               workspaceId={workspaceId}
@@ -252,8 +263,7 @@ function PaneView({
             <p>No open tabs</p>
             <button
               onClick={() => {
-                const client = getTerminalDaemonClient();
-                if (client) seedWorkspaceTerminal(client, workspaceId);
+                terminalCommands.createWorkspaceTerminal(workspaceId);
               }}
               className="mt-2 rounded-md bg-[var(--oc-panel-elevated)] px-3 py-1.5 text-sm text-[var(--oc-text)] transition-colors hover:bg-[var(--oc-panel-hover)]"
             >
@@ -265,14 +275,7 @@ function PaneView({
           </div>
         )}
 
-        {!onlyEditors &&
-          !anyTerminalRunning &&
-          terminalSlots.length > 0 &&
-          slot?.aggregateStatus !== "stopped" && (
-          <div className="flex items-center justify-center h-full text-[var(--oc-text-faint)] text-sm">
-            {slot ? <span>Connecting...</span> : <span>No terminal</span>}
-          </div>
-        )}
+        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && null}
       </div>
     </div>
   );
@@ -353,28 +356,23 @@ function LayoutRenderer({
 const MemoLayoutRenderer = memo(LayoutRenderer);
 
 function HoistedNativeTerminals({
-  runtime,
   anchors,
 }: {
-  runtime: WorkspaceRuntimeState;
   anchors: Record<string, TerminalAnchorInfo>;
 }) {
-  const runningSessions = useMemo(
-    () => runtime.sessions.filter((s) => s.status === "running"),
-    [runtime.sessions]
-  );
+  const sessionIds = useMemo(() => Object.keys(anchors), [anchors]);
 
   return (
     <>
-      {runningSessions.map((s) => {
-        const a = anchors[s.id];
+      {sessionIds.map((sessionId) => {
+        const a = anchors[sessionId];
         if (!a) return null;
         return (
           <TerminalSurface
-            key={s.id}
+            key={sessionId}
             anchorElement={a.el}
-            sessionID={s.id}
-            surfaceId={s.id}
+            sessionID={sessionId}
+            surfaceId={sessionId}
             workspaceId={a.workspaceId}
             visible={a.visible}
             focused={a.focused}
@@ -446,7 +444,7 @@ export function WorkspaceRuntimeView({
             layoutTargetOnFocus={layoutTargetOnFocus}
             hideTabBar={false}
           />
-          <MemoHoistedNativeTerminals runtime={runtime} anchors={anchors} />
+          <MemoHoistedNativeTerminals anchors={anchors} />
         </div>
       </div>
     </NativeTerminalRegContext.Provider>
@@ -454,9 +452,9 @@ export function WorkspaceRuntimeView({
 }
 
 function EmptyWorkspaceState() {
-  const workspace = useAppView((view) => view.selectedWorkspace);
-  const project = useAppView((view) => view.selectedProject);
-  const workspaceCommands = useWorkspaceCommands();
+  const workspace = useDesktopView((view) => view.selectedWorkspace);
+  const project = useDesktopView((view) => view.selectedProject);
+  const workspaceCommands = useWorkspaceActions();
 
   if (!workspace) {
     if (!project) {
@@ -528,11 +526,10 @@ function EmptyWorkspaceState() {
 }
 
 function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
+  const terminalCommands = useTerminalActions();
   const handleNewTerminal = useCallback(() => {
-    const client = getTerminalDaemonClient();
-    if (!client) return;
-    seedWorkspaceTerminal(client, workspaceId);
-  }, [workspaceId]);
+    terminalCommands.createWorkspaceTerminal(workspaceId);
+  }, [terminalCommands, workspaceId]);
 
   return (
     <div className="flex h-full items-center justify-center">
@@ -564,12 +561,12 @@ function WorkspaceRuntimeLoading({ message }: { message: string }) {
 }
 
 export default function WorkspaceView() {
-  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
-  const selectedWs = useAppView((view) => view.selectedWorkspace);
-  const runtime = useAppView((view) =>
+  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
+  const runtime = useDesktopView((view) =>
     view.selectedWorkspaceID ? view.runtimes[view.selectedWorkspaceID] ?? null : null
   );
-  const workspaceCommands = useWorkspaceCommands();
+  const workspaceCommands = useWorkspaceActions();
 
   if (!selectedWs || selectedWs.status !== "ready") {
     return <EmptyWorkspaceState />;

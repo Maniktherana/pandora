@@ -3,9 +3,10 @@ import type {
   WorkspaceRecord,
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
-import type { NavigationArea, WorkspaceStoreState } from "@/stores/workspace-store";
 
-export interface UiPreferencesViewModel {
+export type NavigationArea = "sidebar" | "workspace";
+
+export interface UiPreferencesView {
   readonly sidebarVisible: boolean;
   readonly sidebarHydrated: boolean;
   readonly fileTreeOpen: boolean;
@@ -13,7 +14,7 @@ export interface UiPreferencesViewModel {
   readonly fileTreeWorkspaceId: string | null;
 }
 
-export interface AppViewModel {
+export interface DesktopView {
   readonly projects: readonly ProjectRecord[];
   readonly workspaces: readonly WorkspaceRecord[];
   readonly selectedProjectID: string | null;
@@ -28,19 +29,30 @@ export interface AppViewModel {
   readonly layoutTargetRuntimeId: string | null;
 }
 
-export interface WorkspaceViewModel {
+export interface WorkspaceView {
   readonly workspaceId: string;
   readonly workspace: WorkspaceRecord | null;
   readonly runtime: WorkspaceRuntimeState | null;
   readonly isSelected: boolean;
 }
 
-export interface ProjectTerminalViewModel {
+export interface ProjectTerminalView {
   readonly runtimeId: string;
   readonly runtime: WorkspaceRuntimeState | null;
 }
 
-export const emptyUiPreferencesViewModel: UiPreferencesViewModel = {
+export interface DesktopViewStateSnapshot {
+  readonly projects: readonly ProjectRecord[];
+  readonly workspaces: readonly WorkspaceRecord[];
+  readonly selectedProjectID: string | null;
+  readonly selectedWorkspaceID: string | null;
+  readonly runtimes: Readonly<Record<string, WorkspaceRuntimeState>>;
+  readonly navigationArea: NavigationArea;
+  readonly searchText: string;
+  readonly layoutTargetRuntimeId: string | null;
+}
+
+export const emptyUiPreferencesView: UiPreferencesView = {
   sidebarVisible: true,
   sidebarHydrated: false,
   fileTreeOpen: false,
@@ -48,7 +60,7 @@ export const emptyUiPreferencesViewModel: UiPreferencesViewModel = {
   fileTreeWorkspaceId: null,
 };
 
-export const emptyAppViewModel: AppViewModel = {
+export const emptyDesktopView: DesktopView = {
   projects: [],
   workspaces: [],
   selectedProjectID: null,
@@ -63,10 +75,13 @@ export const emptyAppViewModel: AppViewModel = {
   layoutTargetRuntimeId: null,
 };
 
-export function buildAppViewModel(state: WorkspaceStoreState): AppViewModel {
-  const selectedProject = state.selectedProject();
-  const selectedWorkspace = state.selectedWorkspace();
-  const activeRuntime = state.activeRuntime();
+export function buildDesktopView(state: DesktopViewStateSnapshot): DesktopView {
+  const selectedProject =
+    state.projects.find((project) => project.id === state.selectedProjectID) ?? null;
+  const selectedWorkspace =
+    state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceID) ?? null;
+  const activeRuntime =
+    state.selectedWorkspaceID ? state.runtimes[state.selectedWorkspaceID] ?? null : null;
 
   return {
     projects: state.projects,
@@ -84,24 +99,24 @@ export function buildAppViewModel(state: WorkspaceStoreState): AppViewModel {
   };
 }
 
-export function buildWorkspaceViewModel(
-  appView: AppViewModel,
+export function buildWorkspaceView(
+  desktopView: DesktopView,
   workspaceId: string
-): WorkspaceViewModel {
+): WorkspaceView {
   return {
     workspaceId,
-    workspace: appView.workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
-    runtime: appView.runtimes[workspaceId] ?? null,
-    isSelected: appView.selectedWorkspaceID === workspaceId,
+    workspace: desktopView.workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
+    runtime: desktopView.runtimes[workspaceId] ?? null,
+    isSelected: desktopView.selectedWorkspaceID === workspaceId,
   };
 }
 
-export function buildProjectTerminalViewModel(
-  appView: AppViewModel,
+export function buildProjectTerminalView(
+  desktopView: DesktopView,
   runtimeId: string
-): ProjectTerminalViewModel {
+): ProjectTerminalView {
   return {
     runtimeId,
-    runtime: appView.runtimes[runtimeId] ?? null,
+    runtime: desktopView.runtimes[runtimeId] ?? null,
   };
 }

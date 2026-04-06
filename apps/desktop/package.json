@@ -10,8 +10,10 @@
     "tauri": "cargo tauri",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
+    "test": "bun test",
     "lint": "oxlint -c oxlint.json src/",
-    "fmt": "oxlint -c oxlint.json --fix src/"
+    "fmt": "oxlint -c oxlint.json --fix src/",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

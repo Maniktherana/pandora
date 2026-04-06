@@ -130,6 +130,10 @@ export class DaemonClient {
     void this.send(workspaceId, { type: "open_session_instance", sessionDefID });
   }
 
+  requestSnapshot(workspaceId: string) {
+    void this.send(workspaceId, { type: "request_snapshot" });
+  }
+
   private handleMessage(workspaceId: string, message: DaemonMessage) {
     switch (message.type) {
       case "slot_snapshot":

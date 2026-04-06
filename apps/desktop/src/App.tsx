@@ -10,33 +10,28 @@ import ErrorBoundary from "@/components/error-boundary";
 import AppToolbar from "@/components/layout/app-toolbar";
 import AppStatusBar from "@/components/layout/app-status-bar";
 import { cn } from "@/lib/shared/utils";
-import useDaemonClient from "@/hooks/use-daemon-client";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
-import {
-  useAppView,
-  useTerminalCommands,
-  useUiPreferencesCommands,
-  useUiPreferencesView,
-  useWorkspaceCommands,
-} from "@/hooks/use-app-view";
-import { useBootAppRuntime } from "@/hooks/use-app-runtime";
+import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useTerminalActions } from "@/hooks/use-terminal-actions";
+import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
-  useBootAppRuntime();
-  useDaemonClient();
+  useBootstrapDesktop();
 
   const {
     selectedWorkspace: selectedWs,
     activeRuntime: runtime,
-  } = useAppView();
+  } = useDesktopView();
   const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
-  const terminalCommands = useTerminalCommands();
-  const uiPreferencesCommands = useUiPreferencesCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const terminalCommands = useTerminalActions();
+  const uiPreferencesCommands = useUiPreferencesActions();
+  const workspaceCommands = useWorkspaceActions();
 
   const handleNewWorkspaceTerminal = useCallback(() => {
     terminalCommands.newTerminal();

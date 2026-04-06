@@ -2,18 +2,12 @@ import { useCallback, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Plus, SplitSquareHorizontal } from "lucide-react";
 import BottomTerminalPanelView from "@/components/terminal/bottom-terminal-panel-view";
-import {
-  useAppView,
-  useProjectTerminalCommands,
-  useProjectTerminalView,
-  useWorkspaceCommands,
-  useWorkspaceView,
-} from "@/hooks/use-app-view";
+import { useDesktopView, useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { cn } from "@/lib/shared/utils";
 import type { SessionState } from "@/lib/shared/types";
-import { seedProjectTerminal } from "@/lib/terminal/terminal-seed";
-import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 
 type BottomTab = "terminal" | "ports";
 
@@ -213,29 +207,26 @@ function PortsTabContent({
 
 export default function BottomPanel() {
   const [tab, setTab] = useState<BottomTab>("terminal");
-  const project = useAppView((view) => view.selectedProject);
-  const selectedWs = useAppView((view) => view.selectedWorkspace);
-  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
+  const project = useDesktopView((view) => view.selectedProject);
+  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
+  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const workspaceRuntime = useWorkspaceView(selectedWorkspaceID ?? "", (view) => view.runtime);
   const projectKey = project ? projectRuntimeKey(project.id) : "";
   const projectRuntime = useProjectTerminalView(projectKey, (view) => view.runtime);
-  const projectTerminalCommands = useProjectTerminalCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const projectTerminalCommands = useProjectTerminalActions();
+  const terminalCommands = useTerminalActions();
+  const workspaceCommands = useWorkspaceActions();
 
   const addProjectTerminal = useCallback(() => {
-    const client = getTerminalDaemonClient();
-    if (!client || !projectKey) return;
-    const seeded = seedProjectTerminal(client, projectKey);
-    projectTerminalCommands.addProjectTerminalGroup(projectKey, seeded.slotID);
+    if (!projectKey) return;
+    projectTerminalCommands.createProjectTerminal(projectKey);
   }, [projectKey, projectTerminalCommands]);
 
   const splitActiveGroup = useCallback(() => {
-    const client = getTerminalDaemonClient();
     const activeGroup =
       projectRuntime?.terminalPanel?.groups[projectRuntime.terminalPanel.activeGroupIndex] ?? null;
-    if (!client || !projectKey || !activeGroup) return;
-    const seeded = seedProjectTerminal(client, projectKey);
-    projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id, seeded.slotID);
+    if (!projectKey || !activeGroup) return;
+    projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id);
   }, [projectKey, projectRuntime?.terminalPanel, projectTerminalCommands]);
 
   if (!project || selectedWs?.status !== "ready") {
@@ -267,7 +258,7 @@ export default function BottomPanel() {
               if (id === "terminal") {
                 projectTerminalCommands.setProjectTerminalPanelVisible(projectKey, true);
                 if ((projectRuntime.terminalPanel?.groups.length ?? 0) === 0) {
-                  addProjectTerminal();
+                  terminalCommands.toggleBottomPanel(false);
                 }
               }
             }}

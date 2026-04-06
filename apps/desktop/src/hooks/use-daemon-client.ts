@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import { useEffect } from "react";
-import { useAppRuntime } from "@/hooks/use-app-runtime";
-import { DaemonGateway } from "@/lib/effect/services/daemon-gateway";
+import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
+import { DaemonGateway } from "@/services/daemon/daemon-gateway";
 
 export default function useDaemonClient() {
-  const runtime = useAppRuntime();
+  const runtime = useDesktopRuntime();
 
   useEffect(() => {
     void runtime.runPromise(

@@ -1,13 +1,12 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 
 interface EditorStoreState {
   bufferByWorkspace: Record<string, Record<string, string>>;
   savedContentByWorkspace: Record<string, Record<string, string>>;
 
-  /** Load disk content if missing, then add/focus editor tab in the layout. */
-  openFile: (workspaceId: string, workspaceRoot: string, relativePath: string) => Promise<void>;
+  /** Load disk content if missing so the editor can be opened by the workspace service. */
+  ensureFileLoaded: (workspaceId: string, workspaceRoot: string, relativePath: string) => Promise<boolean>;
   setBuffer: (workspaceId: string, relativePath: string, value: string) => void;
   forgetFile: (workspaceId: string, relativePath: string) => void;
   /** Set buffer + saved from disk (e.g. after layout restore). */
@@ -20,7 +19,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   bufferByWorkspace: {},
   savedContentByWorkspace: {},
 
-  openFile: async (workspaceId, workspaceRoot, relativePath) => {
+  ensureFileLoaded: async (workspaceId, workspaceRoot, relativePath) => {
     const existing = get().bufferByWorkspace[workspaceId]?.[relativePath];
     if (existing === undefined) {
       try {
@@ -46,10 +45,10 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
         }));
       } catch (e) {
         console.error("Failed to open file:", e);
-        return;
+        return false;
       }
     }
-    useWorkspaceStore.getState().addEditorTabForPath(relativePath);
+    return true;
   },
 
   setBuffer: (workspaceId, relativePath, value) => {

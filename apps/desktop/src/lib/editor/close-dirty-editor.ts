@@ -1,6 +1,5 @@
 import { message } from "@tauri-apps/plugin-dialog";
 import { useEditorStore } from "@/stores/editor-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const LABEL_SAVE = "Save";
 const LABEL_DISCARD = "Don't Save";
@@ -30,13 +29,14 @@ export async function tryCloseEditorTab(params: {
   tabIndex: number;
   relativePath: string;
   displayName: string;
+  closeTab: (paneID: string, tabIndex: number) => Promise<void> | void;
 }): Promise<void> {
-  const { workspaceId, workspaceRoot, paneID, tabIndex, relativePath, displayName } = params;
+  const { workspaceId, workspaceRoot, paneID, tabIndex, relativePath, displayName, closeTab } = params;
   const editor = useEditorStore.getState();
 
   if (!editor.isFileDirty(workspaceId, relativePath)) {
     editor.forgetFile(workspaceId, relativePath);
-    useWorkspaceStore.getState().removePaneTabByIndex(paneID, tabIndex);
+    await closeTab(paneID, tabIndex);
     return;
   }
 
@@ -49,5 +49,5 @@ export async function tryCloseEditorTab(params: {
   }
 
   editor.forgetFile(workspaceId, relativePath);
-  useWorkspaceStore.getState().removePaneTabByIndex(paneID, tabIndex);
+  await closeTab(paneID, tabIndex);
 }

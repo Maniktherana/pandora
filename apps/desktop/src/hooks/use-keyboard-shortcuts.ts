@@ -1,6 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
-import { useAppView, useLayoutCommands, useWorkspaceCommands } from "@/hooks/use-app-view";
+import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 
 interface UseKeyboardShortcutsParams {
   onNewTerminal: () => void;
@@ -15,11 +17,12 @@ export default function useKeyboardShortcuts({
   onToggleSidebar,
   onToggleBottomPanel,
 }: UseKeyboardShortcutsParams) {
-  const navigationArea = useAppView((view) => view.navigationArea);
-  const selectedWorkspaceID = useAppView((view) => view.selectedWorkspaceID);
-  const workspaces = useAppView((view) => view.workspaces);
-  const { activateSidebarSelection, navigateSidebar, updateWorkspacePrState } = useWorkspaceCommands();
-  const { cycleTab } = useLayoutCommands();
+  const navigationArea = useDesktopView((view) => view.navigationArea);
+  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const workspaces = useDesktopView((view) => view.workspaces);
+  const { activateSidebarSelection, navigateSidebar, updateWorkspacePrState } =
+    useWorkspaceActions();
+  const { cycleTab } = useLayoutActions();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

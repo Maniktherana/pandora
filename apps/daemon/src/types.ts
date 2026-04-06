@@ -92,6 +92,7 @@ export type ClientMessage =
   | { type: "open_session_instance"; sessionDefID: string }
   | { type: "close_session_instance"; sessionID: string }
   | { type: "input"; sessionID: string; data: string }
+  | { type: "request_snapshot" }
   | { type: "resize"; sessionID: string; cols: number; rows: number };
 
 export type DaemonMessage =

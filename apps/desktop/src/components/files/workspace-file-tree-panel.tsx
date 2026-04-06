@@ -14,7 +14,9 @@ import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
-import { useLayoutCommands, useWorkspaceView } from "@/hooks/use-app-view";
+import { useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useEditorActions } from "@/hooks/use-editor-actions";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { cn } from "@/lib/shared/utils";
 import {
   decorationForScmEntry,
@@ -25,7 +27,6 @@ import {
 } from "@/lib/workspace/scm";
 import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
 import { findLeaf } from "@/lib/layout/layout-tree";
-import { useEditorStore } from "@/stores/editor-store";
 
 type DirEntry = { name: string; isDirectory: boolean; isIgnored?: boolean };
 type LeftPanelMode = "files" | "changes";
@@ -182,7 +183,7 @@ function DirectoryNode({
   activePath: string | null;
   refreshTick: number;
 }) {
-  const openFile = useEditorStore((s) => s.openFile);
+  const { openFile } = useEditorActions();
   const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
   const open = isPathExpanded(relPath);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
@@ -293,8 +294,8 @@ export default function WorkspaceFileTreePanel({
   const [rootError, setRootError] = useState<string | null>(null);
   const [diffMenu, setDiffMenu] = useState<{ x: number; y: number; relPath: string } | null>(null);
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
-  const openFile = useEditorStore((s) => s.openFile);
-  const layoutCommands = useLayoutCommands();
+  const { openFile } = useEditorActions();
+  const layoutCommands = useLayoutActions();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
 
   const activePath = useMemo(() => {

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, SubscriptionRef } from "effect";
+import { Context, Effect, Layer, Ref } from "effect";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadPersistedFileTreeOpenMap,
@@ -6,13 +6,12 @@ import {
   persistFileTreeOpenForWorkspace,
   persistSidebarVisible,
 } from "@/lib/workspace/ui-persistence";
-import type { UiPreferencesViewModel } from "../view-model";
-import { emptyUiPreferencesViewModel } from "../view-model";
-import { useAppViewStore } from "@/stores/app-view-store";
-import { UiPreferenceError } from "../errors";
+import type { UiPreferencesView } from "@/state/desktop-view-projections";
+import { emptyUiPreferencesView } from "@/state/desktop-view-projections";
+import { useDesktopViewStore } from "@/state/desktop-view-store";
+import { UiPreferenceError } from "@/services/service-errors";
 
-export interface UiPreferencesService {
-  readonly view: SubscriptionRef.SubscriptionRef<UiPreferencesViewModel>;
+export interface UiPreferencesServiceApi {
   readonly hydrate: () => Effect.Effect<void, UiPreferenceError>;
   readonly setSidebarVisible: (visible: boolean) => Effect.Effect<void, UiPreferenceError>;
   readonly setFileTreeOpenForWorkspace: (
@@ -29,35 +28,33 @@ export interface UiPreferencesService {
   ) => Effect.Effect<void, UiPreferenceError>;
 }
 
-export class UiPreferences extends Context.Tag("pandora/UiPreferences")<
-  UiPreferences,
-  UiPreferencesService
+export class UiPreferencesService extends Context.Tag("pandora/UiPreferencesService")<
+  UiPreferencesService,
+  UiPreferencesServiceApi
 >() {}
 
-function publishUiPreferences(
-  view: SubscriptionRef.SubscriptionRef<UiPreferencesViewModel>,
-  next: UiPreferencesViewModel
-) {
-  useAppViewStore.getState().setUiPreferences(next);
-  return SubscriptionRef.set(view, next);
+function publishUiPreferences(next: UiPreferencesView) {
+  useDesktopViewStore.getState().setUiPreferences(next);
 }
 
-export const UiPreferencesLive = Layer.effect(
-  UiPreferences,
+export const UiPreferencesServiceLive = Layer.effect(
+  UiPreferencesService,
   Effect.gen(function* () {
-    const view = yield* SubscriptionRef.make(emptyUiPreferencesViewModel);
+    const currentViewRef = yield* Ref.make(emptyUiPreferencesView);
     const fileTreeOpenByWorkspace = new Map<string, boolean>();
-    useAppViewStore.getState().setUiPreferences(emptyUiPreferencesViewModel);
+    publishUiPreferences(emptyUiPreferencesView);
 
-    const updateView = (updater: (current: UiPreferencesViewModel) => UiPreferencesViewModel) =>
+    const updateView = (updater: (current: UiPreferencesView) => UiPreferencesView) =>
       Effect.gen(function* () {
-        const current = yield* SubscriptionRef.get(view);
+        const current = yield* Ref.get(currentViewRef);
         const next = updater(current);
-        yield* publishUiPreferences(view, next);
+        yield* Ref.set(currentViewRef, next);
+        yield* Effect.sync(() => {
+          publishUiPreferences(next);
+        });
       });
 
     return {
-      view,
       hydrate: () =>
         Effect.tryPromise({
           try: async () => {
@@ -69,13 +66,13 @@ export const UiPreferencesLive = Layer.effect(
             for (const [workspaceId, open] of Object.entries(fileTreeOpenMap)) {
               fileTreeOpenByWorkspace.set(workspaceId, open);
             }
-            const next: UiPreferencesViewModel = {
-              ...emptyUiPreferencesViewModel,
+            const next: UiPreferencesView = {
+              ...emptyUiPreferencesView,
               sidebarVisible,
               sidebarHydrated: true,
             };
-            useAppViewStore.getState().setUiPreferences(next);
-            await Effect.runPromise(SubscriptionRef.set(view, next));
+            publishUiPreferences(next);
+            await Effect.runPromise(Ref.set(currentViewRef, next));
           },
           catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
         }),
@@ -112,9 +109,11 @@ export const UiPreferencesLive = Layer.effect(
       syncSelectedWorkspace: (workspaceId, ready) =>
         Effect.tryPromise({
           try: async () => {
+            const current = useDesktopViewStore.getState().uiPreferences;
+
             if (!workspaceId || !ready) {
               await Effect.runPromise(
-                updateView((current) => ({
+                updateView(() => ({
                   ...current,
                   fileTreeOpen: false,
                   fileTreeHydrated: true,
@@ -127,7 +126,7 @@ export const UiPreferencesLive = Layer.effect(
             const open = fileTreeOpenByWorkspace.get(workspaceId) ?? false;
             await Effect.runPromise(
               updateView(() => ({
-                sidebarVisible: useAppViewStore.getState().uiPreferences.sidebarVisible,
+                sidebarVisible: current.sidebarVisible,
                 sidebarHydrated: true,
                 fileTreeOpen: open,
                 fileTreeHydrated: true,
@@ -135,7 +134,8 @@ export const UiPreferencesLive = Layer.effect(
               }))
             );
           },
-          catch: (cause) => new UiPreferenceError({ cause, key: `selectedWorkspace:${workspaceId ?? "none"}` }),
+          catch: (cause) =>
+            new UiPreferenceError({ cause, key: `selectedWorkspace:${workspaceId ?? "none"}` }),
         }),
       saveSelection: (projectId, workspaceId) =>
         Effect.tryPromise({
@@ -146,6 +146,6 @@ export const UiPreferencesLive = Layer.effect(
             }),
           catch: (cause) => new UiPreferenceError({ cause, key: "selection" }),
         }),
-    } satisfies UiPreferencesService;
+    } satisfies UiPreferencesServiceApi;
   })
 );

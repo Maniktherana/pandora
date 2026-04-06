@@ -17,13 +17,11 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
-import {
-  useAppView,
-  useLayoutCommands,
-  useProjectTerminalView,
-  useWorkspaceCommands,
-  useWorkspaceView,
-} from "@/hooks/use-app-view";
+import { useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useEditorActions } from "@/hooks/use-editor-actions";
+import { useLayoutActions } from "@/hooks/use-layout-actions";
+import { useTerminalActions } from "@/hooks/use-terminal-actions";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import {
@@ -45,10 +43,8 @@ import {
   gatherPrContext,
   archiveWorkspace as archiveWorkspaceCmd,
 } from "@/lib/workspace/pr";
-import { getTerminalDaemonClient } from "@/lib/terminal/terminal-runtime";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import { useEditorStore } from "@/stores/editor-store";
-import { findLeaf, getAllLeaves } from "@/lib/layout/layout-tree";
+import { getAllLeaves } from "@/lib/layout/layout-tree";
 
 function hasStaged(e: ScmStatusEntry): boolean {
   return e.stagedKind != null && e.stagedKind !== "";
@@ -89,9 +85,10 @@ export default function WorkspaceChangesPanel({
   const [stagedOpen, setStagedOpen] = useState(true);
   const [changesOpen, setChangesOpen] = useState(true);
 
-  const openFile = useEditorStore((s) => s.openFile);
-  const layoutCommands = useLayoutCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const { openFile } = useEditorActions();
+  const layoutCommands = useLayoutActions();
+  const terminalCommands = useTerminalActions();
+  const workspaceCommands = useWorkspaceActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
   const workspaceRuntime = useWorkspaceView(workspaceId, (view) => view.runtime);
   const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
@@ -188,18 +185,7 @@ export default function WorkspaceChangesPanel({
       }
 
       const instruction = composePrInstruction(ctx, hasUncommittedChanges);
-      const client = getTerminalDaemonClient();
-      if (!client) {
-        setPrError("Terminal daemon not connected.");
-        setPrSending(false);
-        return;
-      }
-
-      // Paste the full instruction directly into the agent terminal
-      const prompt = instruction;
-      const bytes = new TextEncoder().encode(prompt + "\n");
-      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
-      client.input(target.runtimeId, target.sessionId, btoa(binary));
+      await terminalCommands.sendInput(target.runtimeId, target.sessionId, `${instruction}\n`);
       workspaceCommands.setPrAwaiting(workspaceId, true);
 
       // Focus the agent terminal pane
@@ -220,7 +206,15 @@ export default function WorkspaceChangesPanel({
     } finally {
       setPrSending(false);
     }
-  }, [entries, layoutCommands, projectRuntime, workspaceCommands, workspaceId, workspaceRuntime]);
+  }, [
+    entries,
+    layoutCommands,
+    projectRuntime,
+    terminalCommands,
+    workspaceCommands,
+    workspaceId,
+    workspaceRuntime,
+  ]);
 
   const handleArchive = useCallback(async () => {
     if (!window.confirm("Archive this workspace? The worktree will be removed.")) return;

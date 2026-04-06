@@ -11,7 +11,8 @@ import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar";
 import TerminalSurface from "@/components/terminal/terminal-surface";
-import { useProjectTerminalCommands, useWorkspaceCommands } from "@/hooks/use-app-view";
+import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
+import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
@@ -28,13 +29,13 @@ const NativeTerminalRegContext = createContext<
 >(null);
 
 function ProjectTerminalAnchorSlot({
-  session,
+  sessionId,
   slotId,
   workspaceId,
   isVisible,
   isFocused,
 }: {
-  session: SessionState;
+  sessionId: string;
   slotId: string;
   workspaceId: string;
   isVisible: boolean;
@@ -42,8 +43,8 @@ function ProjectTerminalAnchorSlot({
 }) {
   const registerTerminalAnchor = useContext(NativeTerminalRegContext);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const projectTerminalCommands = useProjectTerminalCommands();
-  const workspaceCommands = useWorkspaceCommands();
+  const projectTerminalCommands = useProjectTerminalActions();
+  const workspaceCommands = useWorkspaceActions();
 
   const handleFocus = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(workspaceId);
@@ -60,18 +61,32 @@ function ProjectTerminalAnchorSlot({
     if (!registerTerminalAnchor) return;
     const el = anchorRef.current;
     if (!el) return;
-    registerTerminalAnchor(session.id, {
+    console.debug("[terminal-surface]", "anchor register", {
+      workspaceId,
+      sessionId,
+      visible: isVisible,
+      focused: isVisible && isFocused,
+    });
+    registerTerminalAnchor(sessionId, {
       el,
       visible: isVisible,
       focused: isVisible && isFocused,
       onFocus: handleFocus,
     });
-  }, [handleFocus, isFocused, isVisible, registerTerminalAnchor, session.id]);
+  }, [handleFocus, isFocused, isVisible, registerTerminalAnchor, sessionId]);
 
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
-    return () => registerTerminalAnchor(session.id, null);
-  }, [registerTerminalAnchor, session.id]);
+    return () => {
+      console.debug("[terminal-surface]", "anchor unregister", {
+        workspaceId,
+        sessionId,
+        visible: isVisible,
+        focused: isVisible && isFocused,
+      });
+      registerTerminalAnchor(sessionId, null);
+    };
+  }, [registerTerminalAnchor, sessionId, workspaceId, isVisible, isFocused]);
 
   return (
     <div
@@ -90,18 +105,18 @@ function TerminalPane({
   workspaceId,
   groupId,
   slot,
-  session,
+  sessionId,
   visible,
   active,
 }: {
   workspaceId: string;
   groupId: string;
   slot: SlotState | undefined;
-  session: SessionState | undefined;
+  sessionId: string | null;
   visible: boolean;
   active: boolean;
 }) {
-  const projectTerminalCommands = useProjectTerminalCommands();
+  const projectTerminalCommands = useProjectTerminalActions();
 
   return (
     <div
@@ -117,49 +132,39 @@ function TerminalPane({
         if (visible) projectTerminalCommands.focusProjectTerminal(workspaceId, slot?.id ?? null);
       }}
     >
-      {session?.status === "running" && slot ? (
+      {sessionId && slot ? (
         <ProjectTerminalAnchorSlot
-          session={session}
+          sessionId={sessionId}
           slotId={slot.id}
           workspaceId={workspaceId}
           isVisible={visible}
           isFocused={visible && active}
         />
-      ) : slot?.aggregateStatus !== "stopped" ? (
-        <div className="flex h-full items-center justify-center px-4 text-center text-sm text-neutral-500">
-          Connecting...
-        </div>
-      ) : null
-      }
+      ) : null}
     </div>
   );
 }
 
 function HoistedNativeTerminals({
   workspaceId,
-  runtime,
   anchors,
 }: {
   workspaceId: string;
-  runtime: WorkspaceRuntimeState;
   anchors: Record<string, TerminalAnchorInfo>;
 }) {
-  const runningSessions = useMemo(
-    () => runtime.sessions.filter((session) => session.status === "running"),
-    [runtime.sessions]
-  );
+  const sessionIds = useMemo(() => Object.keys(anchors), [anchors]);
 
   return (
     <>
-      {runningSessions.map((session) => {
-        const anchor = anchors[session.id];
+      {sessionIds.map((sessionId) => {
+        const anchor = anchors[sessionId];
         if (!anchor) return null;
         return (
           <TerminalSurface
-            key={session.id}
+            key={sessionId}
             anchorElement={anchor.el}
-            sessionID={session.id}
-            surfaceId={session.id}
+            sessionID={sessionId}
+            surfaceId={sessionId}
             workspaceId={workspaceId}
             visible={anchor.visible}
             focused={anchor.focused}
@@ -244,7 +249,11 @@ export default function BottomTerminalPanelView({
                       workspaceId={workspaceId}
                       groupId={group.id}
                       slot={slotMap.get(group.children[0])}
-                      session={sessionMap.get(group.children[0])}
+                      sessionId={
+                        sessionMap.get(group.children[0])?.id ??
+                        slotMap.get(group.children[0])?.sessionIDs[0] ??
+                        null
+                      }
                       visible={groupVisible}
                       active={groupVisible}
                     />
@@ -263,7 +272,11 @@ export default function BottomTerminalPanelView({
                               workspaceId={workspaceId}
                               groupId={group.id}
                               slot={slotMap.get(slotId)}
-                              session={sessionMap.get(slotId)}
+                              sessionId={
+                                sessionMap.get(slotId)?.id ??
+                                slotMap.get(slotId)?.sessionIDs[0] ??
+                                null
+                              }
                               visible={groupVisible}
                               active={groupVisible && panel.activeSlotId === slotId}
                             />
@@ -276,7 +289,7 @@ export default function BottomTerminalPanelView({
               );
             })
           )}
-          <HoistedNativeTerminals workspaceId={workspaceId} runtime={runtime} anchors={anchors} />
+          <HoistedNativeTerminals workspaceId={workspaceId} anchors={anchors} />
         </div>
         <BottomTerminalSidebar runtime={runtime} workspaceId={workspaceId} />
       </div>
