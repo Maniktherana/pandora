@@ -26,6 +26,7 @@ interface ManagedSurfaceEntry extends ManagedSurfaceRegistration {
   resizeObserver: ResizeObserver | null;
   created: boolean;
   lastSignature: string | null;
+  lastRect: SurfaceRect | null;
   rafId: number | null;
   syncInFlight: boolean;
   resyncRequested: boolean;
@@ -42,7 +43,10 @@ export interface TerminalSurfaceServiceApi {
   readonly upsertSurface: (
     input: ManagedSurfaceRegistration
   ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly parkSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
+  readonly removeWorkspaceSurfaces: (workspaceId: string) => Effect.Effect<void, NativeSurfaceError>;
+  readonly removeAllSurfaces: () => Effect.Effect<void, NativeSurfaceError>;
   readonly beginWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
   readonly endWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
 }
@@ -189,6 +193,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
 
       if (entry.lastSignature === payload.signature) return;
       entry.lastSignature = payload.signature;
+      entry.lastRect = payload.rect;
 
       try {
         await invoke("terminal_surface_update", {
@@ -261,6 +266,52 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       entry.resizeObserver = observer;
     };
 
+    const destroySurfaceEntry = async (surfaceId: string) => {
+      const entry = entries.get(surfaceId);
+      if (!entry) return;
+      clearScheduledSync(entry);
+      entry.resizeObserver?.disconnect();
+      entries.delete(surfaceId);
+      if (!entry.created) return;
+      await invoke("terminal_surface_destroy", { surfaceId });
+    };
+
+    const parkSurfaceEntry = async (surfaceId: string) => {
+      const entry = entries.get(surfaceId);
+      if (!entry) return;
+      clearScheduledSync(entry);
+      entry.resizeObserver?.disconnect();
+      entry.resizeObserver = null;
+      entry.anchorElement = null;
+      entry.visible = false;
+      entry.focused = false;
+      entry.onFocus = undefined;
+      entry.lastSignature = null;
+      if (!entry.created || !entry.lastRect) return;
+      await invoke("terminal_surface_update", {
+        surfaceId,
+        rect: entry.lastRect,
+        visible: false,
+        focused: false,
+      });
+    };
+
+    const destroyWorkspaceSurfaces = async (workspaceId: string) => {
+      const surfaceIds = Array.from(entries.values())
+        .filter((entry) => entry.workspaceId === workspaceId)
+        .map((entry) => entry.surfaceId);
+      for (const surfaceId of surfaceIds) {
+        await destroySurfaceEntry(surfaceId);
+      }
+    };
+
+    const destroyAllSurfaces = async () => {
+      const surfaceIds = Array.from(entries.keys());
+      for (const surfaceId of surfaceIds) {
+        await destroySurfaceEntry(surfaceId);
+      }
+    };
+
     void listen<string>("native-terminal-focus", (event) => {
       const payload = event.payload;
       for (const entry of entries.values()) {
@@ -281,6 +332,13 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     void win.onScaleChanged(syncAll).catch(() => {});
     void win.onResized(syncAll).catch(() => {});
     void win.onMoved(syncAll).catch(() => {});
+    void win
+      .onCloseRequested(() => {
+        void destroyAllSurfaces().catch((error) => {
+          console.error("Failed to destroy terminal surfaces on app close:", error);
+        });
+      })
+      .catch(() => {});
 
     return {
       isNativeSupported: () =>
@@ -303,6 +361,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
                 resizeObserver: null,
                 created: false,
                 lastSignature: null,
+                lastRect: null,
                 rafId: null,
                 syncInFlight: false,
                 resyncRequested: false,
@@ -329,25 +388,31 @@ export const TerminalSurfaceServiceLive = Layer.effect(
               entry.onFocus = input.onFocus;
               if (anchorChanged) {
                 replaceObserver(entry, input.anchorElement);
-                entry.pendingCreate = true;
               }
             }
             scheduleSync(input.surfaceId);
           },
           catch: (cause) => nativeSurfaceError(cause, input.surfaceId),
         }),
+      parkSurface: (surfaceId) =>
+        Effect.tryPromise({
+          try: () => parkSurfaceEntry(surfaceId),
+          catch: (cause) => nativeSurfaceError(cause, surfaceId),
+        }),
       removeSurface: (surfaceId) =>
         Effect.tryPromise({
-          try: async () => {
-            const entry = entries.get(surfaceId);
-            if (!entry) return;
-            clearScheduledSync(entry);
-            entry.resizeObserver?.disconnect();
-            entries.delete(surfaceId);
-            if (!entry.created) return;
-            await invoke("terminal_surface_destroy", { surfaceId });
-          },
+          try: () => destroySurfaceEntry(surfaceId),
           catch: (cause) => nativeSurfaceError(cause, surfaceId),
+        }),
+      removeWorkspaceSurfaces: (workspaceId) =>
+        Effect.tryPromise({
+          try: () => destroyWorkspaceSurfaces(workspaceId),
+          catch: (cause) => nativeSurfaceError(cause, workspaceId),
+        }),
+      removeAllSurfaces: () =>
+        Effect.tryPromise({
+          try: () => destroyAllSurfaces(),
+          catch: (cause) => nativeSurfaceError(cause, "all-surfaces"),
         }),
       beginWebOverlay: () =>
         Effect.tryPromise({

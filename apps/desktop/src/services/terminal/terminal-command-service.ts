@@ -6,6 +6,7 @@ import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-
 import { DaemonGateway } from "@/services/daemon/daemon-gateway";
 import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalCommandError } from "@/services/service-errors";
+import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export interface TerminalCommandServiceApi {
   readonly newTerminal: () => Effect.Effect<void, TerminalCommandError>;
@@ -59,6 +60,7 @@ export const TerminalCommandServiceLive = Layer.effect(
   Effect.gen(function* () {
     const daemonGateway = yield* DaemonGateway;
     const workspaceService = yield* DesktopWorkspaceService;
+    const terminalSurfaceService = yield* TerminalSurfaceService;
 
     const getClient = (runtimeId?: string) =>
       Effect.flatMap(daemonGateway.getClient(), (client) =>
@@ -82,10 +84,28 @@ export const TerminalCommandServiceLive = Layer.effect(
 
     const closeTerminalSlot = (runtimeId: string, slotId: string) =>
       Effect.gen(function* () {
+        const runtime = yield* workspaceService.getRuntimeState(runtimeId);
+        const slot = yield* workspaceService.getSlotState(runtimeId, slotId);
+        const sessionIds = new Set<string>(slot?.sessionIDs ?? []);
+        for (const session of runtime?.sessions ?? []) {
+          if (session.slotID === slotId) {
+            sessionIds.add(session.id);
+          }
+        }
+
         const client = yield* getClient(runtimeId);
         yield* client.sendEffect(runtimeId, { type: "remove_slot", slotID: slotId }).pipe(
           Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId }))
         );
+        for (const sessionId of sessionIds) {
+          yield* terminalSurfaceService.removeSurface(sessionId).pipe(
+            Effect.catchAll((error) =>
+              Effect.sync(() => {
+                console.warn("Failed to remove terminal surface after slot close:", error);
+              })
+            )
+          );
+        }
         if (isProjectRuntimeKey(runtimeId)) {
           yield* workspaceService.closeProjectTerminal(runtimeId, slotId);
         }

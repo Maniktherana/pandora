@@ -60,7 +60,7 @@ export default function TerminalSurface({
     if (!sessionID) return;
     return () => {
       void runtime.runPromise(
-        Effect.flatMap(TerminalSurfaceService, (manager) => manager.removeSurface(surfaceId))
+        Effect.flatMap(TerminalSurfaceService, (manager) => manager.parkSurface(surfaceId))
       ).catch(() => {});
     };
   }, [runtime, sessionID, surfaceId]);

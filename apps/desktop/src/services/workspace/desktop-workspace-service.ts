@@ -72,6 +72,7 @@ import {
   type WorkspaceStartupState,
 } from "@/services/workspace/workspace-startup";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export interface WorkspaceSessionService {
   readonly workspaceId: string;
@@ -324,6 +325,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
   Effect.gen(function* () {
     const eventQueue = yield* DaemonEventQueue;
     const daemonGateway = yield* DaemonGateway;
+    const terminalSurfaceService = yield* TerminalSurfaceService;
     const desktopStateSnapshot: DesktopStateSnapshot = {
       projects: [],
       workspaces: [],
@@ -971,6 +973,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       archiveWorkspace: (workspaceId) =>
         Effect.gen(function* () {
+          yield* terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).pipe(
+            Effect.orElseSucceed(() => undefined)
+          );
           yield* updateDesktopState((state) => {
             const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
             if (workspace) {
@@ -1064,6 +1069,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         }),
       removeWorkspace: (workspaceId) =>
         Effect.gen(function* () {
+          yield* terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).pipe(
+            Effect.orElseSucceed(() => undefined)
+          );
           yield* Effect.sync(() => {
             interruptWorkspaceStartup(startupSet, workspaceId);
             delete desktopStateSnapshot.runtimes[workspaceId];

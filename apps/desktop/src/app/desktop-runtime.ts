@@ -9,11 +9,11 @@ import { TerminalCommandServiceLive } from "@/services/terminal/terminal-command
 const daemonGatewayLayer = Layer.provide(DaemonGatewayLive, DaemonEventQueueLive);
 const desktopWorkspaceLayer = Layer.provide(
   DesktopWorkspaceServiceLive,
-  Layer.mergeAll(DaemonEventQueueLive, daemonGatewayLayer)
+  Layer.mergeAll(DaemonEventQueueLive, daemonGatewayLayer, TerminalSurfaceServiceLive)
 );
 const terminalCommandLayer = Layer.provide(
   TerminalCommandServiceLive,
-  Layer.mergeAll(daemonGatewayLayer, desktopWorkspaceLayer)
+  Layer.mergeAll(daemonGatewayLayer, desktopWorkspaceLayer, TerminalSurfaceServiceLive)
 );
 
 const DesktopLayer = Layer.mergeAll(
