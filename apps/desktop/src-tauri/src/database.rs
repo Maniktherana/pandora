@@ -109,7 +109,7 @@ impl AppDatabase {
         let conn = self.conn.lock().unwrap();
         let mut stmt = match conn.prepare(
             "SELECT id, display_path, git_root_path, git_context_subpath, display_name, git_remote_owner, is_expanded, created_at, updated_at
-             FROM projects ORDER BY created_at ASC",
+             FROM projects ORDER BY created_at DESC",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
@@ -182,10 +182,10 @@ impl AppDatabase {
         let conn = self.conn.lock().unwrap();
         let sql = if project_id.is_some() {
             "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
-             FROM workspaces WHERE project_id = ?1 ORDER BY created_at ASC"
+             FROM workspaces WHERE project_id = ?1 ORDER BY created_at DESC"
         } else {
             "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
-             FROM workspaces ORDER BY created_at ASC"
+             FROM workspaces ORDER BY created_at DESC"
         };
 
         let mut stmt = match conn.prepare(sql) {
