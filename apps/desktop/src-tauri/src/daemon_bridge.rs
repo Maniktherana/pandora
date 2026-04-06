@@ -118,6 +118,40 @@ fn start_daemon_runtime(
     let daemon_dir_lock = state.daemon_dir.clone();
 
     tauri::async_runtime::spawn(async move {
+        let existing_runtime = {
+            let map = runtimes.lock().await;
+            map.get(&runtime_id).cloned()
+        };
+        if let Some(existing_runtime) = existing_runtime {
+            tlog!(
+                "DAEMON",
+                "runtime={} already active; replaying connection state + snapshot",
+                runtime_id
+            );
+
+            let connected = {
+                let rt = existing_runtime.lock().await;
+                rt.connected
+            };
+
+            let _ = app.emit(
+                "daemon-connection",
+                serde_json::json!({
+                    "workspaceId": runtime_id,
+                    "state": if connected { "connected" } else { "connecting" }
+                })
+                .to_string(),
+            );
+
+            if connected {
+                let mut rt = existing_runtime.lock().await;
+                if let Some(writer) = rt.writer.as_mut() {
+                    let _ = write_lp_message(writer, r#"{"type":"request_snapshot"}"#).await;
+                }
+            }
+            return;
+        }
+
         // Create runtime entry
         let runtime = Arc::new(Mutex::new(WorkspaceRuntime {
             writer: None,

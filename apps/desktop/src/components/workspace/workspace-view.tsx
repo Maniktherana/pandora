@@ -63,6 +63,8 @@ function PaneTerminalAnchorSlot({
   const anchorRef = useRef<HTMLDivElement>(null);
   const layoutCommands = useLayoutActions();
   const workspaceCommands = useWorkspaceActions();
+  const layoutTargetRuntimeId = useDesktopView((view) => view.layoutTargetRuntimeId);
+  const ownsNativeFocus = layoutTargetRuntimeId === layoutTargetOnFocus;
 
   const handleFocus = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
@@ -85,7 +87,7 @@ function PaneTerminalAnchorSlot({
       el,
       workspaceId,
       visible: workspaceVisible && isActiveTab,
-      focused: workspaceVisible && isFocused && isActiveTab,
+      focused: workspaceVisible && ownsNativeFocus && isFocused && isActiveTab,
       onFocus: handleFocus,
     });
   }, [
@@ -95,6 +97,7 @@ function PaneTerminalAnchorSlot({
     isActiveTab,
     isFocused,
     handleFocus,
+    ownsNativeFocus,
     terminalRegistration?.workspaceVisible,
   ]);
 

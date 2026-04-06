@@ -37,6 +37,20 @@ static uint32_t PandoraUnshiftedCodepoint(NSEvent *event) {
     return [chars characterAtIndex:0];
 }
 
+static const unsigned short kPandoraKeyCodeC = 8;
+static const unsigned short kPandoraKeyCodeV = 9;
+static const NSTimeInterval kPandoraSelectionAutoscrollInterval = 1.0 / 24.0;
+static const double kPandoraSelectionAutoscrollStep = 1.0;
+
+static BOOL PandoraMatchesCommandKey(NSEvent *event, unsigned short keyCode, unichar fallbackChar) {
+    if (event.keyCode == keyCode) {
+        return YES;
+    }
+    NSString *charsIgnoringModifiers = [event charactersIgnoringModifiers];
+    unichar firstChar = charsIgnoringModifiers.length > 0 ? [charsIgnoringModifiers characterAtIndex:0] : 0;
+    return firstChar == fallbackChar || firstChar == (fallbackChar - 32);
+}
+
 /// Embedded Ghostty host-managed surface is more sensitive than standalone Ghostty’s AppKit path;
 /// trackpad deltas are scaled down heavily so scrollback matches the real app.
 static const double kPandoraScrollScalePrecise = 0.13;
@@ -51,9 +65,17 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 @interface PandoraTerminalNativeView : NSView
 @property(nonatomic, assign) ghostty_surface_t surface;
 @property(nonatomic, copy, nullable) NSString *sessionID;
+@property(nonatomic, strong, nullable) NSTimer *selectionAutoscrollTimer;
+@property(nonatomic, assign) double selectionAutoscrollDeltaY;
+@property(nonatomic, assign) ghostty_input_mods_e selectionAutoscrollMods;
+@property(nonatomic, assign) NSPoint selectionAutoscrollPoint;
 @end
 
 @implementation PandoraTerminalNativeView
+
+- (void)dealloc {
+    [self pandoraStopSelectionAutoscroll];
+}
 
 /// Ghostty needs an explicit pixel grid + content scale (host-managed path). Pure native terminals
 /// get backing updates from AppKit automatically; we mirror that here so moving the window to
@@ -68,8 +90,8 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         scale = 1.0;
     }
     NSSize sz = self.bounds.size;
-    uint32_t w = (uint32_t)fmax(1.0, round(sz.width * scale));
-    uint32_t h = (uint32_t)fmax(1.0, round(sz.height * scale));
+    uint32_t w = (uint32_t)fmax(1.0, floor(sz.width * scale));
+    uint32_t h = (uint32_t)fmax(1.0, floor(sz.height * scale));
     ghostty_surface_set_content_scale(self.surface, scale, scale);
     ghostty_surface_set_size(self.surface, w, h);
     if (self.layer != nil) {
@@ -118,6 +140,60 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     return accepted;
 }
 
+- (void)pandoraStopSelectionAutoscroll {
+    if (self.selectionAutoscrollTimer != nil) {
+        [self.selectionAutoscrollTimer invalidate];
+        self.selectionAutoscrollTimer = nil;
+    }
+    self.selectionAutoscrollDeltaY = 0;
+}
+
+- (double)pandoraSelectionAutoscrollDeltaForPoint:(NSPoint)point {
+    if (point.y < 0) {
+        return kPandoraSelectionAutoscrollStep;
+    }
+    if (point.y > self.bounds.size.height) {
+        return -kPandoraSelectionAutoscrollStep;
+    }
+    return 0;
+}
+
+- (void)pandoraTickSelectionAutoscroll:(NSTimer *)timer {
+    (void)timer;
+    if (self.surface == NULL || self.selectionAutoscrollDeltaY == 0) {
+        [self pandoraStopSelectionAutoscroll];
+        return;
+    }
+
+    ghostty_surface_mouse_pos(
+        self.surface,
+        self.selectionAutoscrollPoint.x,
+        self.selectionAutoscrollPoint.y,
+        self.selectionAutoscrollMods
+    );
+    ghostty_surface_mouse_scroll(self.surface, 0, self.selectionAutoscrollDeltaY, self.selectionAutoscrollMods);
+}
+
+- (void)pandoraUpdateSelectionAutoscrollForPoint:(NSPoint)point mods:(ghostty_input_mods_e)mods {
+    self.selectionAutoscrollPoint = point;
+    self.selectionAutoscrollMods = mods;
+
+    double delta = [self pandoraSelectionAutoscrollDeltaForPoint:point];
+    if (delta == 0) {
+        [self pandoraStopSelectionAutoscroll];
+        return;
+    }
+
+    self.selectionAutoscrollDeltaY = delta;
+    if (self.selectionAutoscrollTimer == nil) {
+        self.selectionAutoscrollTimer = [NSTimer scheduledTimerWithTimeInterval:kPandoraSelectionAutoscrollInterval
+                                                                         target:self
+                                                                       selector:@selector(pandoraTickSelectionAutoscroll:)
+                                                                       userInfo:nil
+                                                                        repeats:YES];
+    }
+}
+
 - (void)keyDown:(NSEvent *)event {
     if (self.surface == NULL) {
         return;
@@ -137,14 +213,12 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         return;
     }
 
-    NSString *charsIgnoringModifiers = [event charactersIgnoringModifiers];
-    unichar firstChar = charsIgnoringModifiers.length > 0 ? [charsIgnoringModifiers characterAtIndex:0] : 0;
     if (cmd && !ctrl && !alt) {
-        if (firstChar == 'c' || firstChar == 'C') {
+        if (PandoraMatchesCommandKey(event, kPandoraKeyCodeC, 'c')) {
             [self copy:nil];
             return;
         }
-        if (firstChar == 'v' || firstChar == 'V') {
+        if (PandoraMatchesCommandKey(event, kPandoraKeyCodeV, 'v')) {
             [self paste:nil];
             return;
         }
@@ -174,18 +248,22 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (BOOL)performKeyEquivalent:(NSEvent *)event {
+    // performKeyEquivalent: is sent to ALL views in the hierarchy, not just the
+    // first responder. Only handle Cmd+C/V if this view actually has focus,
+    // otherwise a sibling terminal (e.g. the bottom panel) can steal the event.
+    if (self.window.firstResponder != self) {
+        return [super performKeyEquivalent:event];
+    }
     NSUInteger f = [event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
     BOOL cmd = (f & NSEventModifierFlagCommand) != 0;
     BOOL ctrl = (f & NSEventModifierFlagControl) != 0;
     BOOL alt = (f & NSEventModifierFlagOption) != 0;
     if (cmd && !ctrl && !alt) {
-        NSString *charsIgnoringModifiers = [event charactersIgnoringModifiers];
-        unichar firstChar = charsIgnoringModifiers.length > 0 ? [charsIgnoringModifiers characterAtIndex:0] : 0;
-        if (firstChar == 'c' || firstChar == 'C') {
+        if (PandoraMatchesCommandKey(event, kPandoraKeyCodeC, 'c')) {
             [self copy:nil];
             return YES;
         }
-        if (firstChar == 'v' || firstChar == 'V') {
+        if (PandoraMatchesCommandKey(event, kPandoraKeyCodeV, 'v')) {
             [self paste:nil];
             return YES;
         }
@@ -315,6 +393,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     if (self.surface == NULL) {
         return;
     }
+    [self pandoraStopSelectionAutoscroll];
     [[self window] makeFirstResponder:self];
     if (self.sessionID != nil) {
         pandora_emit_terminal_focus(self.sessionID.UTF8String);
@@ -328,6 +407,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     if (self.surface == NULL) {
         return;
     }
+    [self pandoraStopSelectionAutoscroll];
     NSPoint point = [self pandoraConvertedPoint:event];
     ghostty_surface_mouse_pos(self.surface, point.x, point.y, PandoraModsFromEvent(event));
     ghostty_surface_mouse_button(self.surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, PandoraModsFromEvent(event));
@@ -337,6 +417,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     if (self.surface == NULL) {
         return;
     }
+    [self pandoraStopSelectionAutoscroll];
     [[self window] makeFirstResponder:self];
     if (self.sessionID != nil) {
         pandora_emit_terminal_focus(self.sessionID.UTF8String);
@@ -350,6 +431,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     if (self.surface == NULL) {
         return;
     }
+    [self pandoraStopSelectionAutoscroll];
     NSPoint point = [self pandoraConvertedPoint:event];
     ghostty_surface_mouse_pos(self.surface, point.x, point.y, PandoraModsFromEvent(event));
     ghostty_surface_mouse_button(self.surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, PandoraModsFromEvent(event));
@@ -364,7 +446,12 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)mouseDragged:(NSEvent *)event {
-    [self mouseMoved:event];
+    if (self.surface == NULL) {
+        return;
+    }
+    NSPoint point = [self pandoraConvertedPoint:event];
+    ghostty_surface_mouse_pos(self.surface, point.x, point.y, PandoraModsFromEvent(event));
+    [self pandoraUpdateSelectionAutoscrollForPoint:point mods:PandoraModsFromEvent(event)];
 }
 
 - (void)scrollWheel:(NSEvent *)event {

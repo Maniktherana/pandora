@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { getDesktopRuntime } from "@/app/desktop-runtime";
 import { DaemonGateway } from "@/services/daemon/daemon-gateway";
 import { UiPreferencesService } from "@/services/preferences/ui-preferences-service";
+import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 
 export function useDesktopRuntime() {
@@ -45,5 +46,26 @@ export function useBootstrapDesktop() {
         yield* uiPreferences.hydrate();
       })
     );
+
+    const teardown = () => {
+      void runtime.runPromise(
+        Effect.gen(function* () {
+          const terminalSurface = yield* TerminalSurfaceService;
+          const daemonGateway = yield* DaemonGateway;
+          yield* terminalSurface.removeAllSurfaces().pipe(Effect.catchAll(() => Effect.void));
+          yield* daemonGateway.disconnect().pipe(Effect.catchAll(() => Effect.void));
+        })
+      );
+    };
+
+    window.addEventListener("beforeunload", teardown);
+    window.addEventListener("pagehide", teardown);
+
+    return () => {
+      window.removeEventListener("beforeunload", teardown);
+      window.removeEventListener("pagehide", teardown);
+      bootstrappedRef.current = false;
+      teardown();
+    };
   }, [runtime]);
 }

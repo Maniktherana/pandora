@@ -11,6 +11,7 @@ import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar";
 import TerminalSurface from "@/components/terminal/terminal-surface";
+import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
@@ -46,6 +47,8 @@ function ProjectTerminalAnchorSlot({
   const anchorRef = useRef<HTMLDivElement>(null);
   const projectTerminalCommands = useProjectTerminalActions();
   const workspaceCommands = useWorkspaceActions();
+  const layoutTargetRuntimeId = useDesktopView((view) => view.layoutTargetRuntimeId);
+  const ownsNativeFocus = layoutTargetRuntimeId === workspaceId;
 
   const handleFocus = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(workspaceId);
@@ -71,10 +74,10 @@ function ProjectTerminalAnchorSlot({
     registerTerminalAnchor(sessionId, {
       el,
       visible: isVisible,
-      focused: isVisible && isFocused,
+      focused: isVisible && ownsNativeFocus && isFocused,
       onFocus: handleFocus,
     });
-  }, [handleFocus, isFocused, isVisible, registerTerminalAnchor, sessionId]);
+  }, [handleFocus, isFocused, isVisible, ownsNativeFocus, registerTerminalAnchor, sessionId]);
 
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
@@ -256,7 +259,7 @@ export default function BottomTerminalPanelView({
                         null
                       }
                       visible={groupVisible}
-                      active={groupVisible}
+                      active={groupVisible && panel.activeSlotId === group.children[0]}
                     />
                   ) : (
                     <ResizablePanelGroup direction="horizontal">
