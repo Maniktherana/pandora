@@ -25,7 +25,7 @@ import type {
   SessionState,
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
-import { cn } from "@/lib/shared/utils";
+import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
 
@@ -327,13 +327,8 @@ function LayoutRenderer({
         <div key={child.id} className="contents">
           {i > 0 && (
             <PanelResizeHandle
-              hitAreaMargins={{ coarse: 0, fine: 0 }}
-              className={cn(
-                "z-20 shrink-0 border-0 p-0 outline-none transition-colors hover:bg-[var(--theme-interactive)]",
-                direction === "horizontal"
-                  ? "h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] cursor-col-resize bg-[var(--theme-text-faint)]"
-                  : "h-[2px] min-h-[2px] max-h-[2px] w-full cursor-row-resize bg-[var(--theme-text-faint)]"
-              )}
+              className={panelResizeHandleClasses(direction === "horizontal" ? "horizontal" : "vertical")}
+              hitAreaMargins={{ coarse: 10, fine: 8 }}
               onDragging={setLocalResizing}
             />
           )}

@@ -8,7 +8,6 @@ import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
 import AppToolbar from "@/components/layout/app-toolbar";
-import AppStatusBar from "@/components/layout/app-status-bar";
 import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
 import { useDesktopView } from "@/hooks/use-desktop-view";
@@ -26,16 +25,11 @@ export default function App() {
 
   const {
     selectedWorkspace: selectedWs,
-    activeRuntime: runtime,
   } = useDesktopView();
   const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
   const workspaceCommands = useWorkspaceActions();
-
-  const handleNewWorkspaceTerminal = useCallback(() => {
-    terminalCommands.newTerminal();
-  }, [terminalCommands]);
 
   const handleNewTerminalShortcut = useCallback(() => {
     terminalCommands.newTerminal();
@@ -64,8 +58,6 @@ export default function App() {
     onToggleSidebar: handleToggleSidebar,
     onToggleBottomPanel: toggleBottomPanel,
   });
-
-  const connectionState = runtime?.connectionState ?? "disconnected";
 
   useEffect(() => {
     uiPreferencesCommands.syncSelectedWorkspace(
@@ -137,7 +129,6 @@ export default function App() {
           bottomPanelOpen={bottomPanelOpen}
           fileTreeOpen={fileTreeOpen}
           onToggleSidebar={handleShowSidebar}
-          onNewTerminal={handleNewWorkspaceTerminal}
           onToggleBottomPanel={toggleBottomPanel}
           onToggleFileTree={() => {
             if (selectedWs?.status !== "ready") return;
@@ -163,9 +154,9 @@ export default function App() {
                     </div>
                   </ResizablePanel>
                   <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 0, fine: 0 }}
+                    hitAreaMargins={{ coarse: 6, fine: 4 }}
                     className={cn(
-                      "z-20 w-[2px] min-w-[2px] max-w-[2px] shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
+                      "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       fileTreeOpen && selectedWs?.status === "ready"
                         ? "cursor-col-resize"
                         : "hidden"
@@ -201,9 +192,9 @@ export default function App() {
               {selectedWs?.status === "ready" && (
                 <>
                   <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 0, fine: 0 }}
+                    hitAreaMargins={{ coarse: 6, fine: 4 }}
                     className={cn(
-                      "z-20 h-[2px] min-h-[2px] max-h-[2px] w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
+                      "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       bottomPanelOpen ? "cursor-row-resize" : "hidden"
                     )}
                   />
@@ -217,7 +208,7 @@ export default function App() {
                     className="min-h-0"
                   >
                     <ErrorBoundary name="bottom-panel">
-                      {bottomPanelOpen ? <BottomPanel /> : null}
+                      {bottomPanelOpen ? <BottomPanel onCollapse={() => setBottomPanelOpen(false)} /> : null}
                     </ErrorBoundary>
                   </ResizablePanel>
                 </>
@@ -226,10 +217,7 @@ export default function App() {
           </TabDragProvider>
         </div>
 
-        <AppStatusBar
-          connectionState={connectionState}
-          workspaceStatus={selectedWs?.status ?? null}
-        />
+        {/* Removed status strip to match new bottom layout direction. */}
       </div>
     </div>
   );

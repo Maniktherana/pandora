@@ -42,6 +42,7 @@ export const UiPreferencesServiceLive = Layer.effect(
   Effect.gen(function* () {
     const currentViewRef = yield* Ref.make(emptyUiPreferencesView);
     const fileTreeOpenByWorkspace = new Map<string, boolean>();
+    let globalFileTreeOpen = false;
     publishUiPreferences(emptyUiPreferencesView);
 
     const updateView = (updater: (current: UiPreferencesView) => UiPreferencesView) =>
@@ -66,10 +67,14 @@ export const UiPreferencesServiceLive = Layer.effect(
             for (const [workspaceId, open] of Object.entries(fileTreeOpenMap)) {
               fileTreeOpenByWorkspace.set(workspaceId, open);
             }
+            globalFileTreeOpen = Object.values(fileTreeOpenMap).some(Boolean);
             const next: UiPreferencesView = {
               ...emptyUiPreferencesView,
               sidebarVisible,
               sidebarHydrated: true,
+              fileTreeOpen: globalFileTreeOpen,
+              fileTreeHydrated: true,
+              fileTreeWorkspaceId: null,
             };
             publishUiPreferences(next);
             await Effect.runPromise(Ref.set(currentViewRef, next));
@@ -94,6 +99,7 @@ export const UiPreferencesServiceLive = Layer.effect(
         Effect.tryPromise({
           try: async () => {
             fileTreeOpenByWorkspace.set(workspaceId, open);
+            globalFileTreeOpen = open;
             await Effect.runPromise(
               updateView((current) => ({
                 ...current,
@@ -115,7 +121,7 @@ export const UiPreferencesServiceLive = Layer.effect(
               await Effect.runPromise(
                 updateView(() => ({
                   ...current,
-                  fileTreeOpen: false,
+                  fileTreeOpen: globalFileTreeOpen,
                   fileTreeHydrated: true,
                   fileTreeWorkspaceId: workspaceId,
                 }))
@@ -123,7 +129,8 @@ export const UiPreferencesServiceLive = Layer.effect(
               return;
             }
 
-            const open = fileTreeOpenByWorkspace.get(workspaceId) ?? false;
+            const open =
+              fileTreeOpenByWorkspace.get(workspaceId) ?? globalFileTreeOpen;
             await Effect.runPromise(
               updateView(() => ({
                 sidebarVisible: current.sidebarVisible,

@@ -4,7 +4,7 @@ export const UI_KEYS = {
   sidebarVisible: "sidebar_visible",
   /** JSON map: workspaceId -> relative folder paths that stay expanded */
   workspaceFileTreeExpanded: "workspace_file_tree_expanded",
-  /** JSON map: workspaceId -> whether the right file-tree panel was open */
+  /** Boolean string ("true"/"false") for whether the right file-tree panel is open (global). */
   workspaceFileTreeOpen: "workspace_file_tree_open",
 } as const;
 
@@ -79,8 +79,12 @@ type FileTreeOpenMap = Record<string, boolean>;
 
 function parseOpenMap(raw: string | null): FileTreeOpenMap {
   if (!raw) return {};
+  // Canonical persisted shape is a boolean string (global).
+  if (raw === "true" || raw === "false") return { __global__: raw === "true" };
   try {
     const o = JSON.parse(raw) as unknown;
+    // Back-compat: sometimes the persisted value might be a JSON boolean.
+    if (typeof o === "boolean") return { __global__: o };
     if (!o || typeof o !== "object" || Array.isArray(o)) return {};
     const out: FileTreeOpenMap = {};
     for (const [k, v] of Object.entries(o)) {
@@ -95,7 +99,7 @@ function parseOpenMap(raw: string | null): FileTreeOpenMap {
 export async function loadFileTreeOpenForWorkspace(workspaceId: string): Promise<boolean> {
   const raw = await getUiState(UI_KEYS.workspaceFileTreeOpen);
   const map = parseOpenMap(raw);
-  return map[workspaceId] === true;
+  return map[workspaceId] === true || map.__global__ === true;
 }
 
 export async function loadPersistedFileTreeOpenMap(): Promise<Record<string, boolean>> {
@@ -107,12 +111,7 @@ export async function persistFileTreeOpenForWorkspace(
   workspaceId: string,
   open: boolean
 ): Promise<void> {
-  const raw = await getUiState(UI_KEYS.workspaceFileTreeOpen);
-  const map = parseOpenMap(raw);
-  if (open) {
-    map[workspaceId] = true;
-  } else {
-    delete map[workspaceId];
-  }
-  await setUiState(UI_KEYS.workspaceFileTreeOpen, JSON.stringify(map));
+  // This is a single global toggle; workspaceId is ignored (kept for API stability).
+  void workspaceId;
+  await setUiState(UI_KEYS.workspaceFileTreeOpen, open ? "true" : "false");
 }

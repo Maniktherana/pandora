@@ -155,6 +155,28 @@ fn generate_slug() -> String {
         .collect()
 }
 
+const WORKTREE_NAMES: &[&str] = &[
+    "Achilles", "Aether", "Aphrodite", "Apollo", "Ares", "Artemis", "Asclepius", "Asteria",
+    "Astraeus", "Atalanta", "Athena", "Atlas", "Bellerophon", "Chaos", "Coeus", "Crius",
+    "Cronus", "Demeter", "Deucalion", "Dione", "Dionysus", "Eos", "Epimetheus", "Erebus",
+    "Eris", "Eros", "Gaia", "Hades", "Hebe", "Hecate", "Helios", "Hephaestus", "Hera",
+    "Heracles", "Hermes", "Hestia", "Hippolyta", "Hyperion", "Hypnos", "Iapetus", "Iris",
+    "Leto", "Metis", "Mnemosyne", "Nemesis", "Nike", "Nyx", "Oceanus", "Orpheus", "Pallas",
+    "Pan", "Persephone", "Perseus", "Phoebe", "Pontus", "Poseidon", "Prometheus", "Rhea",
+    "Selene", "Tartarus", "Tethys", "Thanatos", "Theia", "Themis", "Theseus", "Triton",
+    "Uranus", "Zeus",
+];
+
+fn generate_workspace_name(existing_count: usize) -> String {
+    let base = WORKTREE_NAMES[existing_count % WORKTREE_NAMES.len()];
+    let cycle = existing_count / WORKTREE_NAMES.len();
+    if cycle == 0 {
+        base.to_string()
+    } else {
+        format!("{} {}", base, cycle + 1)
+    }
+}
+
 pub fn pandora_home() -> String {
     if let Ok(home) = std::env::var("PANDORA_HOME") {
         if !home.is_empty() {
@@ -197,7 +219,7 @@ pub fn make_linked_workspace(
     Ok(WorkspaceRecord {
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.id.clone(),
-        name: format!("Workspace {}", existing_count + 1),
+        name: generate_workspace_name(existing_count),
         git_branch_name: branch,
         git_worktree_owner: "linked".into(),
         git_worktree_slug: slug,
@@ -228,7 +250,7 @@ pub fn make_optimistic_workspace(
     WorkspaceRecord {
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.id.clone(),
-        name: format!("Workspace {}", existing_count + 1),
+        name: generate_workspace_name(existing_count),
         git_branch_name: branch,
         git_worktree_owner: owner,
         git_worktree_slug: slug,

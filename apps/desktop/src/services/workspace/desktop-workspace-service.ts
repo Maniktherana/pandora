@@ -381,6 +381,23 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         publish();
       });
 
+    /** When the daemon has not created any terminal slot yet, seed one so the workspace always has a terminal tab. */
+    const ensureWorkspaceDefaultTerminal = (workspaceId: string) => {
+      if (isProjectRuntimeKey(workspaceId)) return;
+      const runtime = desktopStateSnapshot.runtimes[workspaceId];
+      if (!runtime) return;
+      if (runtime.layoutLoading) return;
+      if (runtime.connectionState !== "connected") return;
+      if (runtime.slots.some((s) => s.kind === "terminal_slot")) return;
+      void Promise.all([import("@/app/desktop-runtime"), import("@/services/terminal/terminal-command-service")]).then(
+        ([{ getDesktopRuntime }, { TerminalCommandService }]) => {
+          getDesktopRuntime().runFork(
+            Effect.flatMap(TerminalCommandService, (svc) => svc.createWorkspaceTerminal(workspaceId))
+          );
+        }
+      );
+    };
+
     const ensureRuntimeLayoutForWorkspace = (workspaceId: string) => {
       const runtime = desktopStateSnapshot.runtimes[workspaceId];
       if (!runtime) return;
@@ -390,6 +407,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ensureRuntimeLayoutState(runtime);
       }
       publish();
+      ensureWorkspaceDefaultTerminal(workspaceId);
     };
 
     const startupGet: WorkspaceStartupGet = () =>
@@ -634,6 +652,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                   client.requestSnapshot(event.workspaceId);
                 });
               }
+              yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
             }
             break;
           case "slot_snapshot":
@@ -657,6 +676,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               event.workspaceId,
               event.slots.map((slot) => slot.id)
             );
+            yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
             break;
           case "session_snapshot":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -690,6 +710,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               }
             });
             yield* maybeOpenSessionInstances(event.workspaceId, [event.slot.id]);
+            yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
             break;
           case "slot_removed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {

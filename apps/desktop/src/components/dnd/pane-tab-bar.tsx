@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GitCompare, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { GitCompare, Plus, X } from "lucide-react";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
@@ -227,17 +227,50 @@ export default function PaneTabBar({
 
   const scmByPath = useMemo(() => new Map(scmEntries.map((entry) => [entry.path, entry])), [scmEntries]);
 
+  const rowRef = useRef<HTMLDivElement>(null);
+  const tabsWrapRef = useRef<HTMLDivElement>(null);
+  const plusWrapRef = useRef<HTMLDivElement>(null);
+  const [pinPlus, setPinPlus] = useState(false);
+
+  const measurePlusPin = useCallback(() => {
+    const row = rowRef.current;
+    const tabsWrap = tabsWrapRef.current;
+    const plusWrap = plusWrapRef.current;
+    if (!row || !tabsWrap || !plusWrap) return;
+    const tabsW = tabsWrap.scrollWidth;
+    const plusW = plusWrap.offsetWidth;
+    setPinPlus(tabsW + plusW > row.clientWidth + 0.5);
+  }, []);
+
+  useLayoutEffect(() => {
+    measurePlusPin();
+    const el = rowRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => measurePlusPin());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measurePlusPin, tabs]);
+
   if (tabs.length === 0) return null;
 
   return (
     <div
-      className="tab-bar-hide-scrollbar flex h-8 items-center overflow-x-auto border-b border-neutral-800 bg-neutral-900/80"
+      className="flex h-8 min-w-0 items-stretch border-b border-neutral-800 bg-neutral-900/80"
       onPointerMove={handlePointerMove}
       onPointerLeave={() => {
         pendingDragRef.current = null;
       }}
     >
-      {tabs.map((tab, index) => {
+      <div ref={rowRef} className="flex min-w-0 flex-1 items-stretch">
+        <div
+          ref={tabsWrapRef}
+          className={cn(
+            "tab-bar-hide-scrollbar flex min-w-0 items-stretch overflow-x-auto",
+            pinPlus ? "flex-1" : "w-max max-w-full"
+          )}
+        >
+        {tabs.map((tab, index) => {
+        const isLast = index === tabs.length - 1;
         const isActive = index === selectedIndex;
         const isBeingDragged =
           dragState?.kind === "pane-tab" &&
@@ -248,99 +281,109 @@ export default function PaneTabBar({
           tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
         return (
           <div
-            key={tabKey(tab)}
-            data-tab-pane={paneID}
-            data-tab-index={index}
-            data-tab-kind={tab.kind}
-            data-workspace-id={workspaceId}
-            onPointerDown={(e) => handlePointerDown(e, index)}
-            onPointerUp={(e) => handlePointerUp(e, index)}
-            className={cn(
-              "relative flex h-full shrink-0 cursor-default select-none items-center gap-1.5 border-r border-neutral-800 pl-3 pr-1.5 text-xs",
-              isActive && isFocused
-                ? "bg-neutral-900 text-neutral-200"
-                : isActive
-                  ? "bg-neutral-900 text-neutral-500"
-                  : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
-              isBeingDragged && "opacity-30"
-            )}
+              key={tabKey(tab)}
+              data-tab-pane={paneID}
+              data-tab-index={index}
+              data-tab-kind={tab.kind}
+              data-workspace-id={workspaceId}
+              onPointerDown={(e) => handlePointerDown(e, index)}
+              onPointerUp={(e) => handlePointerUp(e, index)}
+              className={cn(
+                "relative flex h-full shrink-0 cursor-default select-none items-center gap-1.5 pl-3 pr-1.5 text-xs",
+                !isLast && "border-r border-neutral-800",
+                isActive && isFocused
+                  ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-200 after:content-['']"
+                  : isActive
+                    ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-800 after:content-['']"
+                    : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
+                isBeingDragged && "opacity-30"
+              )}
+            >
+              {(() => {
+                const scmEntry =
+                  tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined;
+                const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
+                return (
+                  <>
+              {tab.kind === "editor" ? (
+                <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
+              ) : tab.kind === "diff" ? (
+                <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
+              ) : terminalDisplay ? (
+                <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
+              ) : null}
+              <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
+                {tabLabel(tab, slotsMap, sessionsMap, displayMap)}
+              </span>
+                  </>
+                );
+              })()}
+
+              {tab.kind === "editor" ? (
+                <EditorTabCloseControl
+                  workspaceId={workspaceId}
+                  workspaceRoot={workspaceRoot}
+                  paneID={paneID}
+                  index={index}
+                  path={tab.path}
+                  label={tabLabel(tab, slotsMap, sessionsMap, displayMap)}
+                  isActive={isActive}
+                />
+              ) : tab.kind === "diff" ? (
+                <div
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    layoutCommands.removePaneTabByIndex(paneID, index);
+                  }}
+                  className={cn(
+                    "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
+                    isActive
+                      ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                      : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                  )}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </div>
+              ) : (
+                <div
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTerminalTab(index);
+                  }}
+                  className={cn(
+                    "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
+                    isActive
+                      ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                      : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                  )}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </div>
+              )}
+
+            </div>
+          );
+        })}
+        </div>
+        <div ref={plusWrapRef} className="flex shrink-0 items-stretch border-l border-neutral-800">
+          <button
+            type="button"
+            onClick={() => terminalCommands.createWorkspaceTerminal(workspaceId)}
+            className="flex h-full w-8 items-center justify-center text-neutral-500 transition-colors hover:bg-neutral-800/30 hover:text-neutral-200"
+            title="New tab"
           >
-            {(() => {
-              const scmEntry =
-                tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined;
-              const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
-              return (
-                <>
-            {tab.kind === "editor" ? (
-              <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
-            ) : tab.kind === "diff" ? (
-              <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
-            ) : terminalDisplay ? (
-              <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
-            ) : null}
-            <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
-              {tabLabel(tab, slotsMap, sessionsMap, displayMap)}
-            </span>
-                </>
-              );
-            })()}
-
-            {tab.kind === "editor" ? (
-              <EditorTabCloseControl
-                workspaceId={workspaceId}
-                workspaceRoot={workspaceRoot}
-                paneID={paneID}
-                index={index}
-                path={tab.path}
-                label={tabLabel(tab, slotsMap, sessionsMap, displayMap)}
-                isActive={isActive}
-              />
-            ) : tab.kind === "diff" ? (
-              <div
-                role="button"
-                tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  layoutCommands.removePaneTabByIndex(paneID, index);
-                }}
-                className={cn(
-                  "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-                  isActive
-                    ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-                    : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-                )}
-              >
-                <X className="h-3 w-3" aria-hidden />
-              </div>
-            ) : (
-              <div
-                role="button"
-                tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTerminalTab(index);
-                }}
-                className={cn(
-                  "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-                  isActive
-                    ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-                    : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-                )}
-              >
-                <X className="h-3 w-3" aria-hidden />
-              </div>
-            )}
-
-            {isActive && isFocused && (
-              <span className="pointer-events-none absolute inset-x-2 bottom-0 h-px bg-neutral-500" />
-            )}
-          </div>
-        );
-      })}
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

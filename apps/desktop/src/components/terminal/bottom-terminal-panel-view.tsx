@@ -14,6 +14,7 @@ import TerminalSurface from "@/components/terminal/terminal-surface";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
 import { cn } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
@@ -124,8 +125,8 @@ function TerminalPane({
       data-bottom-terminal-runtime-id={workspaceId}
       data-bottom-terminal-group-id={groupId}
       className={cn(
-        "relative h-full min-h-0 overflow-hidden rounded-sm border bg-neutral-950",
-        active ? "border-neutral-700" : "border-neutral-800"
+        "relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950",
+        active ? "ring-1 ring-neutral-700/60" : ""
       )}
       style={{ background: terminalTheme.background ?? "#0a0a0a" }}
       onPointerDownCapture={() => {
@@ -263,8 +264,8 @@ export default function BottomTerminalPanelView({
                         <div key={slotId} className="contents">
                           {index > 0 && (
                             <PanelResizeHandle
-                              hitAreaMargins={{ coarse: 0, fine: 0 }}
-                              className="z-20 h-full min-h-0 w-[2px] min-w-[2px] max-w-[2px] shrink-0 cursor-col-resize bg-neutral-600 transition-colors hover:bg-blue-500"
+                              hitAreaMargins={{ coarse: 10, fine: 8 }}
+                              className={panelResizeHandleClasses("horizontal")}
                             />
                           )}
                           <ResizablePanel defaultSize={100 / group.children.length} minSize={12}>

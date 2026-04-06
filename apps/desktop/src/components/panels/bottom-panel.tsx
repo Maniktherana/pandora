@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { Plus, SplitSquareHorizontal } from "lucide-react";
+import { ChevronDown, Plus, SplitSquareHorizontal } from "lucide-react";
 import BottomTerminalPanelView from "@/components/terminal/bottom-terminal-panel-view";
 import { useDesktopView, useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
@@ -205,7 +205,7 @@ function PortsTabContent({
   );
 }
 
-export default function BottomPanel() {
+export default function BottomPanel({ onCollapse }: { onCollapse: () => void }) {
   const [tab, setTab] = useState<BottomTab>("terminal");
   const project = useDesktopView((view) => view.selectedProject);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
@@ -243,16 +243,24 @@ export default function BottomPanel() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col border-t border-neutral-800 bg-neutral-950"
+      className="flex h-full min-h-0 flex-col bg-neutral-950"
       onPointerDownCapture={() => {
         workspaceCommands.setLayoutTargetRuntimeId(projectKey);
       }}
     >
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-neutral-800 px-2">
-        {(["terminal", "ports"] as const).map((id) => (
+      <div className="flex h-8 shrink-0 items-stretch border-t border-neutral-800">
         <button
-          key={id}
           type="button"
+          title="Collapse bottom panel"
+          onClick={onCollapse}
+          className="flex h-full w-8 shrink-0 items-center justify-center text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+        >
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+        {(["terminal", "ports"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
             onClick={() => {
               setTab(id);
               if (id === "terminal") {
@@ -263,29 +271,22 @@ export default function BottomPanel() {
               }
             }}
             className={cn(
-              "select-none rounded px-2.5 py-1 text-xs font-medium transition-colors",
+              "relative flex h-full items-center px-3 text-xs transition-colors",
               tab === id
-                ? "bg-neutral-800 text-neutral-100"
-                : "text-neutral-500 hover:bg-neutral-800/80 hover:text-neutral-300"
+                ? "bg-neutral-900 text-neutral-100"
+                : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300"
             )}
           >
             {id === "terminal" ? "Terminal" : "Ports"}
+            {tab === id && <span className="pointer-events-none absolute inset-x-2 bottom-[-1px] h-[2px] bg-neutral-200" />}
           </button>
         ))}
-        {tab === "terminal" && (
-          <span
-            className="ml-1 truncate select-none text-[10px] text-neutral-500"
-            title="Shared shell at the git repository root (separate from the worktree checkout above)."
-          >
-            · git root
-          </span>
-        )}
         {tab === "terminal" && (
           <button
             type="button"
             title="New project terminal"
             onClick={addProjectTerminal}
-            className="ml-auto flex h-7 w-7 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            className="ml-auto flex h-full w-8 shrink-0 items-center justify-center text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -296,7 +297,7 @@ export default function BottomPanel() {
             title="Split active terminal group"
             onClick={splitActiveGroup}
             disabled={(projectRuntime.terminalPanel?.groups.length ?? 0) === 0}
-            className="flex h-7 w-7 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-full w-8 shrink-0 items-center justify-center text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <SplitSquareHorizontal className="h-3.5 w-3.5" />
           </button>
