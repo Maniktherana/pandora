@@ -8,6 +8,7 @@ import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
 import AppToolbar from "@/components/layout/app-toolbar";
+import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
 import { useDesktopView } from "@/hooks/use-desktop-view";
@@ -19,9 +20,13 @@ import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
+  const [isResizingPanels, setIsResizingPanels] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
+  const sidebarResizeFrameRef = useRef<number | null>(null);
+  const sidebarResizeWidthRef = useRef<number | null>(null);
   useBootstrapDesktop();
+  useNativeTerminalOverlay(isResizingPanels);
 
   const {
     selectedWorkspace: selectedWs,
@@ -98,18 +103,37 @@ export default function App() {
             onPointerDown={(event) => {
               if (event.button !== 0) return;
               event.preventDefault();
+              setIsResizingPanels(true);
 
               const startX = event.clientX;
               const startWidth = sidebarWidth;
 
               const onPointerMove = (moveEvent: PointerEvent) => {
                 const nextWidth = Math.min(360, Math.max(180, startWidth + moveEvent.clientX - startX));
-                setSidebarWidth(nextWidth);
+                sidebarResizeWidthRef.current = nextWidth;
+                if (sidebarResizeFrameRef.current != null) return;
+                sidebarResizeFrameRef.current = requestAnimationFrame(() => {
+                  sidebarResizeFrameRef.current = null;
+                  const width = sidebarResizeWidthRef.current;
+                  if (width != null) {
+                    setSidebarWidth(width);
+                  }
+                });
               };
 
               const onPointerUp = () => {
                 window.removeEventListener("pointermove", onPointerMove);
                 window.removeEventListener("pointerup", onPointerUp);
+                if (sidebarResizeFrameRef.current != null) {
+                  cancelAnimationFrame(sidebarResizeFrameRef.current);
+                  sidebarResizeFrameRef.current = null;
+                }
+                const width = sidebarResizeWidthRef.current;
+                if (width != null) {
+                  setSidebarWidth(width);
+                  sidebarResizeWidthRef.current = null;
+                }
+                setIsResizingPanels(false);
               };
 
               window.addEventListener("pointermove", onPointerMove);
@@ -155,6 +179,7 @@ export default function App() {
                   </ResizablePanel>
                   <PanelResizeHandle
                     hitAreaMargins={{ coarse: 6, fine: 4 }}
+                    onDragging={setIsResizingPanels}
                     className={cn(
                       "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       fileTreeOpen && selectedWs?.status === "ready"
@@ -193,6 +218,7 @@ export default function App() {
                 <>
                   <PanelResizeHandle
                     hitAreaMargins={{ coarse: 6, fine: 4 }}
+                    onDragging={setIsResizingPanels}
                     className={cn(
                       "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       bottomPanelOpen ? "cursor-row-resize" : "hidden"

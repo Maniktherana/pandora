@@ -89,6 +89,8 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     const entries = new Map<string, ManagedSurfaceEntry>();
     let nativeSupportPromise: Promise<boolean> | null = null;
     let createQueue: Promise<void> = Promise.resolve();
+    let webOverlayDepth = 0;
+    let needsSyncAfterOverlay = false;
 
     const getNativeSupport = () => {
       if (!nativeSupportPromise) {
@@ -125,6 +127,12 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       if (entry.rafId != null) {
         cancelAnimationFrame(entry.rafId);
         entry.rafId = null;
+      }
+    };
+
+    const clearAllScheduledSyncs = () => {
+      for (const entry of entries.values()) {
+        clearScheduledSync(entry);
       }
     };
 
@@ -237,6 +245,11 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     };
 
     const runSync = (entry: ManagedSurfaceEntry) => {
+      if (webOverlayDepth > 0) {
+        needsSyncAfterOverlay = true;
+        return;
+      }
+
       if (entry.syncInFlight) {
         entry.resyncRequested = true;
         return;
@@ -263,6 +276,11 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       const entry = entries.get(surfaceId);
       if (!entry) return;
       if (forceCreate) entry.pendingCreate = true;
+      if (webOverlayDepth > 0) {
+        needsSyncAfterOverlay = true;
+        clearScheduledSync(entry);
+        return;
+      }
       console.debug("[terminal-surface]", "sync scheduled", {
         workspaceId: entry.workspaceId,
         sessionId: entry.sessionId,
@@ -444,12 +462,28 @@ export const TerminalSurfaceServiceLive = Layer.effect(
         }),
       beginWebOverlay: () =>
         Effect.tryPromise({
-          try: () => invoke("terminal_surfaces_begin_web_overlay"),
+          try: async () => {
+            webOverlayDepth += 1;
+            if (webOverlayDepth === 1) {
+              needsSyncAfterOverlay = false;
+              clearAllScheduledSyncs();
+              await invoke("terminal_surfaces_begin_web_overlay");
+            }
+          },
           catch: (cause) => nativeSurfaceError(cause, "web-overlay"),
         }),
       endWebOverlay: () =>
         Effect.tryPromise({
-          try: () => invoke("terminal_surfaces_end_web_overlay"),
+          try: async () => {
+            webOverlayDepth = Math.max(0, webOverlayDepth - 1);
+            if (webOverlayDepth === 0) {
+              await invoke("terminal_surfaces_end_web_overlay");
+              if (needsSyncAfterOverlay) {
+                needsSyncAfterOverlay = false;
+                syncAll();
+              }
+            }
+          },
           catch: (cause) => nativeSurfaceError(cause, "web-overlay"),
         }),
     } satisfies TerminalSurfaceServiceApi;

@@ -15,6 +15,7 @@ import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
+import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { useDesktopView, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
@@ -314,6 +315,7 @@ function LayoutRenderer({
 }: LayoutRendererProps) {
   const [localResizing, setLocalResizing] = useState(false);
   const anyResizing = isResizing || localResizing;
+  useNativeTerminalOverlay(localResizing);
 
   if (node.type === "leaf") {
     return (

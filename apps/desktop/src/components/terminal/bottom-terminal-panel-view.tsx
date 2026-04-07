@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -13,6 +14,7 @@ import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
@@ -153,6 +155,33 @@ function TerminalPane({
   );
 }
 
+function ResizableTerminalGroup({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [isResizing, setIsResizing] = useState(false);
+  useNativeTerminalOverlay(isResizing);
+  const childArray = useMemo(() => (Array.isArray(children) ? children : [children]), [children]);
+
+  return (
+    <ResizablePanelGroup direction="horizontal">
+      {childArray.map((child, index) => (
+        <div key={index} className="contents">
+          {index > 0 && (
+            <PanelResizeHandle
+              hitAreaMargins={{ coarse: 10, fine: 8 }}
+              className={panelResizeHandleClasses("horizontal")}
+              onDragging={setIsResizing}
+            />
+          )}
+          {child}
+        </div>
+      ))}
+    </ResizablePanelGroup>
+  );
+}
+
 function HoistedNativeTerminals({
   workspaceId,
   anchors,
@@ -277,33 +306,29 @@ export default function BottomTerminalPanelView({
                       active={groupVisible && panel.activeSlotId === group.children[0]}
                     />
                   ) : (
-                    <ResizablePanelGroup direction="horizontal">
-                      {group.children.map((slotId, index) => (
-                        <div key={slotId} className="contents">
-                          {index > 0 && (
-                            <PanelResizeHandle
-                              hitAreaMargins={{ coarse: 10, fine: 8 }}
-                              className={panelResizeHandleClasses("horizontal")}
-                            />
-                          )}
-                          <ResizablePanel defaultSize={100 / group.children.length} minSize={12}>
-                            <TerminalPane
-                              connectedSlotIds={connectedSlotIds}
-                              workspaceId={workspaceId}
-                              groupId={group.id}
-                              slot={slotMap.get(slotId)}
-                              sessionId={
-                                sessionMap.get(slotId)?.id ??
-                                slotMap.get(slotId)?.sessionIDs[0] ??
-                                null
-                              }
-                              visible={groupVisible}
-                              active={groupVisible && panel.activeSlotId === slotId}
-                            />
-                          </ResizablePanel>
-                        </div>
+                    <ResizableTerminalGroup>
+                      {group.children.map((slotId) => (
+                        <ResizablePanel
+                          key={slotId}
+                          defaultSize={100 / group.children.length}
+                          minSize={12}
+                        >
+                          <TerminalPane
+                            connectedSlotIds={connectedSlotIds}
+                            workspaceId={workspaceId}
+                            groupId={group.id}
+                            slot={slotMap.get(slotId)}
+                            sessionId={
+                              sessionMap.get(slotId)?.id ??
+                              slotMap.get(slotId)?.sessionIDs[0] ??
+                              null
+                            }
+                            visible={groupVisible}
+                            active={groupVisible && panel.activeSlotId === slotId}
+                          />
+                        </ResizablePanel>
                       ))}
-                    </ResizablePanelGroup>
+                    </ResizableTerminalGroup>
                   )}
                 </div>
               );

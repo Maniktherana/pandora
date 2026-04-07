@@ -588,14 +588,6 @@ impl SurfaceRegistry {
             )
         };
 
-        unsafe {
-            ghostty_surface_set_content_scale(
-                ghostty_surface,
-                rect.scale_factor,
-                rect.scale_factor,
-            );
-        }
-
         if surface_state_unchanged(
             &prev_rect,
             &rect,
@@ -640,23 +632,22 @@ impl SurfaceRegistry {
         let width_px = (rect.width * rect.scale_factor) as u32;
         let height_px = (rect.height * rect.scale_factor) as u32;
         unsafe {
-            ghostty_surface_set_size(ghostty_surface, width_px, height_px);
-        }
-
-        // Update focus
-        unsafe {
-            ghostty_surface_set_focus(ghostty_surface, focused);
-        }
-        if focused {
-            let _ = unsafe { pandora_terminal_view_focus(ns_view_ptr) };
-        }
-
-        unsafe {
             ghostty_surface_set_content_scale(
                 ghostty_surface,
                 rect.scale_factor,
                 rect.scale_factor,
             );
+            ghostty_surface_set_size(ghostty_surface, width_px, height_px);
+        }
+
+        // Refocusing AppKit/Ghostty on every resize is expensive and unnecessary.
+        if prev_focused != focused {
+            unsafe {
+                ghostty_surface_set_focus(ghostty_surface, focused);
+            }
+            if focused {
+                let _ = unsafe { pandora_terminal_view_focus(ns_view_ptr) };
+            }
         }
 
         // Persist state
