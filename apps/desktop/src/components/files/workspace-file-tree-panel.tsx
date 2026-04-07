@@ -1,112 +1,45 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ChevronRight } from "lucide-react";
 import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/files/file-type-icon";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
-import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
-import { cn } from "@/lib/shared/utils";
+import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
 import {
   decorationForScmEntry,
-  scmToneTextClass,
   scmStatus,
   type ScmStatusEntry,
   type TreeScmDecoration,
 } from "@/lib/workspace/scm";
 import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/lib/workspace/ui-persistence";
 import { findLeaf } from "@/lib/layout/layout-tree";
-
-type DirEntry = { name: string; isDirectory: boolean; isIgnored?: boolean };
-type LeftPanelMode = "files" | "changes";
-type TreeRowKind = "file" | "directory";
-type TreeDropMode = "directory" | "root";
-type TreeDropTarget = {
-  mode: TreeDropMode;
-  targetRelPath: string | null;
-};
-type DragPointer = {
-  x: number;
-  y: number;
-};
-type NativeDragPayload =
-  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
-  | { type: "over"; position: { x: number; y: number } }
-  | { type: "drop"; paths: string[]; position: { x: number; y: number } }
-  | { type: "leave" };
-type PendingPointerDrag = {
-  sourceRelPath: string;
-  sourceAbsPath: string;
-  sourceKind: TreeRowKind;
-  label: string;
-  startPointer: DragPointer;
-};
-type InternalTreeDragSession = {
-  kind: "internal";
-  sourceRelPath: string;
-  sourceAbsPath: string;
-  sourceKind: TreeRowKind;
-  label: string;
-  pointer: DragPointer;
-  target: TreeDropTarget | null;
-};
-type ExternalNativeTreeDragSession = {
-  kind: "external-native";
-  paths: string[];
-  pointer: DragPointer;
-  target: TreeDropTarget | null;
-};
-type TreeDragSession = InternalTreeDragSession | ExternalNativeTreeDragSession;
-type ExpansionCtx = {
-  isPathExpanded: (relPath: string) => boolean;
-  setPathExpanded: (relPath: string, expanded: boolean) => void;
-};
-type ScmDecorationResolver = (
-  relPath: string,
-  isDirectory: boolean,
-  isIgnored?: boolean
-) => TreeScmDecoration;
-type FileTreeRowHandle = {
-  kind: TreeRowKind;
-  relPath: string;
-  parentRelPath: string;
-  label: string;
-  absolutePath: string;
-};
-const FileTreeExpansionContext = createContext<ExpansionCtx | null>(null);
-
-const TREE_ROW_SELECTOR = "[data-tree-row-path]";
-const INTERNAL_DRAG_THRESHOLD_PX = 4;
-const SUPPRESS_CLICK_MS = 400;
-const SUPPRESS_HOVER_AFTER_DRAG_MS = 120;
-const TRANSPARENT_DRAG_IMAGE =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X3s0AAAAASUVORK5CYII=";
-
-function joinRel(parent: string, name: string): string {
-  return parent ? `${parent}/${name}` : name;
-}
-
-function getParentRelPath(relPath: string): string {
-  const index = relPath.lastIndexOf("/");
-  return index === -1 ? "" : relPath.slice(0, index);
-}
-
-function joinAbsolutePath(workspaceRoot: string, relPath: string): string {
-  return relPath ? `${workspaceRoot}/${relPath}` : workspaceRoot;
-}
+import {
+  INTERNAL_DRAG_THRESHOLD_PX,
+  SUPPRESS_CLICK_MS,
+  SUPPRESS_HOVER_AFTER_DRAG_MS,
+  TRANSPARENT_DRAG_IMAGE,
+  TREE_ROW_SELECTOR,
+  type DirEntry,
+  type DragPointer,
+  type ExpansionCtx,
+  type FileTreeRowHandle,
+  type InternalTreeDragSession,
+  type LeftPanelMode,
+  type NativeDragPayload,
+  type PendingPointerDrag,
+  type TreeDragSession,
+  type TreeDropTarget,
+  type TreeRowKind,
+} from "./file-tree.types";
+import { createPortal } from "react-dom";
+import { useEditorActions } from "@/hooks/use-editor-actions";
+import { FileTreeExpansionContext } from "./file-tree-expansion-context";
+import { FileTreeRow } from "./file-tree-row";
+import { DirectoryNode } from "./directory-node";
+import { TreeDragOverlay } from "./tree-drag-overlay";
 
 function isPointerOutsideWindow(pointer: DragPointer): boolean {
   return (
@@ -143,7 +76,7 @@ function scoreTone(tone: TreeScmDecoration["tone"]): number {
   }
 }
 
-function createDecorationResolver(entries: ScmStatusEntry[]): ScmDecorationResolver {
+function createDecorationResolver(entries: ScmStatusEntry[]) {
   const visibleEntries = entries.filter(
     (entry) => decorationForScmEntry(entry, { includeDeleted: false }).tone !== null
   );
@@ -153,7 +86,7 @@ function createDecorationResolver(entries: ScmStatusEntry[]): ScmDecorationResol
       decorationForScmEntry(entry, { includeDeleted: false }),
     ])
   );
-  return (relPath, isDirectory, isIgnored) => {
+  return (relPath: string, isDirectory: boolean, isIgnored?: boolean): TreeScmDecoration => {
     if (isIgnored) return { badge: null, tone: "ignored", dimmed: true };
     const hit = exact.get(relPath);
     if (hit) return hit;
@@ -171,330 +104,6 @@ function createDecorationResolver(entries: ScmStatusEntry[]): ScmDecorationResol
     }
     return winner;
   };
-}
-
-function useFileTreeExpansion(): ExpansionCtx {
-  const ctx = useContext(FileTreeExpansionContext);
-  if (!ctx) throw new Error("useFileTreeExpansion outside provider");
-  return ctx;
-}
-
-function FileTreeRow({
-  depth,
-  icon,
-  label,
-  decoration,
-  className,
-  onOpen,
-  onPointerDown,
-  onClickCapture,
-  fileRelPath,
-  onOpenDiffMenu,
-  active,
-  rowKind,
-  rowRelPath,
-  parentRelPath,
-  absolutePath,
-  highlightedLeafDirectory,
-  isHoverSuppressed,
-}: {
-  depth: number;
-  icon: React.ReactNode;
-  label: string;
-  decoration: TreeScmDecoration;
-  className?: string;
-  onOpen?: () => void;
-  onPointerDown?: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
-  onClickCapture?: (event: React.MouseEvent) => void;
-  fileRelPath?: string;
-  onOpenDiffMenu?: (clientX: number, clientY: number, relPath: string) => void;
-  active?: boolean;
-  rowKind: TreeRowKind;
-  rowRelPath: string;
-  parentRelPath: string;
-  absolutePath: string;
-  highlightedLeafDirectory: string | null;
-  isHoverSuppressed: boolean;
-}) {
-  const isHighlightedLeaf =
-    rowKind === "file" &&
-    highlightedLeafDirectory !== null &&
-    parentRelPath === highlightedLeafDirectory;
-  const handle: FileTreeRowHandle = {
-    kind: rowKind,
-    relPath: rowRelPath,
-    parentRelPath,
-    label,
-    absolutePath,
-  };
-
-  const content = (
-    <>
-      {icon}
-      <span className="truncate">{label}</span>
-      {decoration.badge ? (
-        <span
-          className={cn(
-            "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-            scmToneTextClass(decoration.tone, false)
-          )}
-        >
-          {decoration.badge}
-        </span>
-      ) : null}
-    </>
-  );
-
-  const rowClassName = cn(
-    "relative flex min-w-0 w-full select-none items-center gap-1.5 rounded-sm py-1 pr-1 text-left text-xs",
-    !isHoverSuppressed && "hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-    scmToneTextClass(decoration.tone, decoration.dimmed),
-    decoration.dimmed && "opacity-55",
-    active && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
-    isHighlightedLeaf && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
-    className
-  );
-
-  if (onOpen) {
-    return (
-      <button
-        type="button"
-        data-tree-row-path={rowRelPath}
-        data-tree-row-kind={rowKind}
-        data-tree-parent-path={parentRelPath}
-        className={rowClassName}
-        style={{ paddingLeft: 6 + depth * 12 }}
-        onPointerDown={(event) => onPointerDown?.(event, handle)}
-        onClickCapture={onClickCapture}
-        onClick={onOpen}
-        onContextMenu={(event) => {
-          if (!fileRelPath || !onOpenDiffMenu) return;
-          event.preventDefault();
-          onOpenDiffMenu(event.clientX, event.clientY, fileRelPath);
-        }}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div
-      data-tree-row-path={rowRelPath}
-      data-tree-row-kind={rowKind}
-      data-tree-parent-path={parentRelPath}
-      className={rowClassName}
-      style={{ paddingLeft: 6 + depth * 12 }}
-      onPointerDown={(event) => onPointerDown?.(event, handle)}
-      onClickCapture={onClickCapture}
-    >
-      {content}
-    </div>
-  );
-}
-
-function DirectoryNode({
-  workspaceRoot,
-  workspaceId,
-  relPath,
-  parentRelPath,
-  name,
-  depth,
-  isIgnored,
-  resolveDecoration,
-  onOpenDiffMenu,
-  activePath,
-  refreshTick,
-  highlightedLeafDirectory,
-  targetDirectory,
-  isHoverSuppressed,
-  onRowPointerDown,
-  onRowClickCapture,
-}: {
-  workspaceRoot: string;
-  workspaceId: string;
-  relPath: string;
-  parentRelPath: string;
-  name: string;
-  depth: number;
-  isIgnored?: boolean;
-  resolveDecoration: ScmDecorationResolver;
-  onOpenDiffMenu?: (clientX: number, clientY: number, fileRelPath: string) => void;
-  activePath: string | null;
-  refreshTick: number;
-  highlightedLeafDirectory: string | null;
-  targetDirectory: string | null;
-  isHoverSuppressed: boolean;
-  onRowPointerDown: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
-  onRowClickCapture: (event: React.MouseEvent) => void;
-}) {
-  const { openFile } = useEditorActions();
-  const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
-  const open = isPathExpanded(relPath);
-  const [children, setChildren] = useState<DirEntry[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const decoration = resolveDecoration(relPath, true, isIgnored);
-  const isTargetedDirectory = targetDirectory !== null && targetDirectory === relPath;
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void invoke<DirEntry[]>("list_workspace_directory", {
-      workspaceRoot,
-      relativePath: relPath,
-    })
-      .then((list) => {
-        if (!cancelled) {
-          setChildren(list);
-          setLoadError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setLoadError(String(error));
-          setChildren([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceRoot, relPath, refreshTick]);
-
-  return (
-    <div>
-      <Collapsible open={open} onOpenChange={(next) => setPathExpanded(relPath, next)}>
-        <CollapsibleTrigger
-          nativeButton={false}
-          render={
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "group relative h-auto min-h-0 w-full justify-start gap-1.5 rounded-sm py-1 pr-1 pl-0 text-left font-normal transition-none aria-expanded:bg-transparent dark:aria-expanded:bg-transparent",
-                !isHoverSuppressed &&
-                  "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]",
-                scmToneTextClass(decoration.tone, decoration.dimmed),
-                decoration.dimmed && "opacity-55",
-                isTargetedDirectory &&
-                  "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]"
-              )}
-              data-tree-row-path={relPath}
-              data-tree-row-kind="directory"
-              data-tree-parent-path={parentRelPath}
-              style={{ paddingLeft: 6 + depth * 12 }}
-              onPointerDown={(event) =>
-                onRowPointerDown(event, {
-                  kind: "directory",
-                  relPath,
-                  parentRelPath,
-                  label: name,
-                  absolutePath: joinAbsolutePath(workspaceRoot, relPath),
-                })
-              }
-              onClickCapture={onRowClickCapture}
-            >
-              <ChevronRight className="size-3.5 shrink-0 group-data-[panel-open]:rotate-90" />
-              <FileTypeIcon path={relPath} kind="directory" expanded={open} />
-              <span className="truncate text-xs">{name}</span>
-              {decoration.badge ? (
-                <span
-                  className={cn(
-                    "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-                    scmToneTextClass(decoration.tone, false)
-                  )}
-                >
-                  {decoration.badge}
-                </span>
-              ) : null}
-            </Button>
-          }
-        />
-        <CollapsibleContent noTransition>
-          <div className="flex flex-col">
-            {loadError && (
-              <div
-                className="px-2 py-1 text-[11px] text-[var(--theme-error)]"
-                style={{ paddingLeft: 18 + depth * 12 }}
-              >
-                {loadError}
-              </div>
-            )}
-            {children?.map((entry) =>
-              entry.isDirectory ? (
-                <DirectoryNode
-                  key={joinRel(relPath, entry.name)}
-                  workspaceRoot={workspaceRoot}
-                  workspaceId={workspaceId}
-                  relPath={joinRel(relPath, entry.name)}
-                  parentRelPath={relPath}
-                  name={entry.name}
-                  depth={depth + 1}
-                  isIgnored={entry.isIgnored}
-                  resolveDecoration={resolveDecoration}
-                  onOpenDiffMenu={onOpenDiffMenu}
-                  activePath={activePath}
-                  refreshTick={refreshTick}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  targetDirectory={targetDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                  onRowPointerDown={onRowPointerDown}
-                  onRowClickCapture={onRowClickCapture}
-                />
-              ) : (
-                <FileTreeRow
-                  key={joinRel(relPath, entry.name)}
-                  depth={depth + 1}
-                  icon={<FileTypeIcon path={joinRel(relPath, entry.name)} kind="file" />}
-                  label={entry.name}
-                  decoration={resolveDecoration(
-                    joinRel(relPath, entry.name),
-                    false,
-                    entry.isIgnored
-                  )}
-                  fileRelPath={joinRel(relPath, entry.name)}
-                  onOpenDiffMenu={onOpenDiffMenu}
-                  active={activePath === joinRel(relPath, entry.name)}
-                  onOpen={() =>
-                    void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))
-                  }
-                  onPointerDown={onRowPointerDown}
-                  onClickCapture={onRowClickCapture}
-                  rowKind="file"
-                  rowRelPath={joinRel(relPath, entry.name)}
-                  parentRelPath={relPath}
-                  absolutePath={joinAbsolutePath(
-                    workspaceRoot,
-                    joinRel(relPath, entry.name)
-                  )}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                />
-              )
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
-  );
-}
-
-function TreeDragOverlay({
-  session,
-}: {
-  session: InternalTreeDragSession;
-}) {
-  return createPortal(
-    <div
-      className="pointer-events-none fixed z-[10001] rounded border border-[var(--theme-border)] bg-[var(--theme-panel-elevated)] px-2.5 py-1 text-xs text-[var(--theme-text)] shadow-lg"
-      style={{
-        left: Math.min(session.pointer.x + 14, window.innerWidth - 220),
-        top: Math.min(session.pointer.y + 16, window.innerHeight - 40),
-      }}
-    >
-      {session.label}
-    </div>,
-    document.body
-  );
 }
 
 export default function WorkspaceFileTreePanel({
@@ -1283,7 +892,8 @@ export default function WorkspaceFileTreePanel({
         <FileTreeExpansionContext.Provider value={expansionValue}>
           <div
             ref={treeBodyRef}
-            className="relative min-h-0 flex-1 overflow-auto py-1"
+            className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
+            style={{ overscrollBehavior: "none" }}
             onDragEnter={(event) => {
               if (pendingPointerDrag || dragSession?.kind === "internal") return;
               if (!isExternalFileDrag(event)) return;

@@ -456,9 +456,6 @@ pub fn list_workspace_directory(
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                return None;
-            }
             let meta = e.file_type().ok()?;
             let child_path = dir.join(&name);
             let rel = child_path
