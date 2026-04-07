@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import monacoEditorPluginPkg from "vite-plugin-monaco-editor";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const monacoEditorPlugin =
   (monacoEditorPluginPkg as { default?: typeof monacoEditorPluginPkg }).default ??

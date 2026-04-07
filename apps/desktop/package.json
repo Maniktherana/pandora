@@ -12,7 +12,7 @@
     "tauri:build": "cargo tauri build",
     "test": "bun test",
     "lint": "oxlint -c oxlint.json src/",
-    "fmt": "oxlint -c oxlint.json --fix src/",
+    "fmt": "oxfmt src/",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -23,6 +23,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "esbuild": "^0.27.4",
+    "oxfmt": "^0.44.0",
     "oxlint": "^1.57.0",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.3",

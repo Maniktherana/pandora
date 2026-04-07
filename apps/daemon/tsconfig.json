@@ -8,8 +8,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "types": [
-      "bun-types",
-      "node"
+      "bun"
     ]
   },
   "include": [
