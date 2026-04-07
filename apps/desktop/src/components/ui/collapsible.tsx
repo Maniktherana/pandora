@@ -10,9 +10,17 @@ function CollapsibleTrigger({ ...props }: CollapsiblePrimitive.Trigger.Props) {
   )
 }
 
-function CollapsibleContent({ ...props }: CollapsiblePrimitive.Panel.Props) {
+function CollapsibleContent({
+  noTransition,
+  style,
+  ...props
+}: CollapsiblePrimitive.Panel.Props & { noTransition?: boolean }) {
   return (
-    <CollapsiblePrimitive.Panel data-slot="collapsible-content" {...props} />
+    <CollapsiblePrimitive.Panel
+      data-slot="collapsible-content"
+      style={noTransition ? { transitionDuration: "0ms", animationDuration: "0ms", ...style } : style}
+      {...props}
+    />
   )
 }
 

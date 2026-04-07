@@ -103,6 +103,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
         .on_menu_event(|app, event| match event.id().0.as_str() {
             MENU_CLOSE_TAB_ID => {
                 let _ = app.emit("app-shortcut", "close-tab");
@@ -175,6 +176,8 @@ fn main() {
             commands::pr_write_instruction,
             commands::pr_link,
             commands::archive_workspace,
+            commands::copy_into_workspace,
+            commands::move_within_workspace,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());

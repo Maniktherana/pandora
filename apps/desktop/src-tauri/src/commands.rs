@@ -690,6 +690,121 @@ pub async fn archive_workspace(
     Ok(())
 }
 
+// ─── File import (drag-drop into workspace) ───
+
+fn copy_path_recursive(src: &Path, dest: &Path) -> Result<(), String> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dest)
+            .map_err(|e| format!("Failed to create directory '{}': {e}", dest.display()))?;
+        for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            copy_path_recursive(&entry.path(), &dest.join(entry.file_name()))?;
+        }
+    } else {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(src, dest)
+            .map(|_| ())
+            .map_err(|e| format!("Failed to copy '{}': {e}", src.display()))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn copy_into_workspace(
+    workspace_root: String,
+    dest_relative_path: String,
+    source_paths: Vec<String>,
+) -> Result<(), String> {
+    let root_abs = Path::new(&workspace_root)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {e}"))?;
+
+    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
+        root_abs.clone()
+    } else {
+        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
+        let candidate = root_abs.join(rel);
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|e| format!("Invalid destination: {e}"))?;
+        if !resolved.starts_with(&root_abs) {
+            return Err("Destination escapes workspace root".to_string());
+        }
+        resolved
+    };
+
+    if !dest_dir.is_dir() {
+        return Err("Destination is not a directory".to_string());
+    }
+
+    for src_str in &source_paths {
+        let src = Path::new(src_str);
+        if !src.exists() {
+            return Err(format!("Source does not exist: {src_str}"));
+        }
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("Cannot determine filename for: {src_str}"))?;
+        copy_path_recursive(src, &dest_dir.join(name))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn move_within_workspace(
+    workspace_root: String,
+    source_relative_path: String,
+    dest_relative_path: String,
+) -> Result<(), String> {
+    let root_abs = Path::new(&workspace_root)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {e}"))?;
+
+    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
+
+    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
+        root_abs.clone()
+    } else {
+        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
+        let candidate = root_abs.join(rel);
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|e| format!("Invalid destination: {e}"))?;
+        if !resolved.starts_with(&root_abs) {
+            return Err("Destination escapes workspace root".to_string());
+        }
+        resolved
+    };
+
+    if !dest_dir.is_dir() {
+        return Err("Destination is not a directory".to_string());
+    }
+
+    let name = src
+        .file_name()
+        .ok_or_else(|| "Cannot determine filename".to_string())?;
+    let dest = dest_dir.join(name);
+
+    if dest == src {
+        return Ok(());
+    }
+
+    // Try rename first (same filesystem), fall back to copy+delete
+    if std::fs::rename(&src, &dest).is_err() {
+        copy_path_recursive(&src, &dest)?;
+        if src.is_dir() {
+            std::fs::remove_dir_all(&src).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::remove_file(&src).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 // ─── Reload all data (convenience for frontend) ───
 
 #[derive(serde::Serialize)]
