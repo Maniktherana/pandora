@@ -14,11 +14,13 @@ import DiffViewer from "@/components/editor/diff-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
+import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useDesktopView, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { tabKey } from "@/lib/layout/layout-tree";
+import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import type {
   LayoutNode,
   LayoutLeaf,
@@ -131,6 +133,7 @@ function PaneTerminalAnchorSlot({
 interface PaneViewProps {
   leaf: LayoutLeaf;
   isFocused: boolean;
+  connectedSlotIds: ReadonlySet<string>;
   workspaceId: string;
   workspaceRoot: string;
   layoutTargetOnFocus: string | null;
@@ -141,6 +144,7 @@ interface PaneViewProps {
 function PaneView({
   leaf,
   isFocused,
+  connectedSlotIds,
   workspaceId,
   workspaceRoot,
   layoutTargetOnFocus,
@@ -248,6 +252,7 @@ function PaneView({
             (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
           const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
           if (!sessionId) return null;
+          if (!isActiveTab && !connectedSlotIds.has(tab.slotId)) return null;
           return (
             <PaneTerminalAnchorSlot
               key={tabKey(tab)}
@@ -288,6 +293,7 @@ const MemoPaneView = memo(PaneView);
 
 interface LayoutRendererProps {
   node: LayoutNode;
+  connectedSlotIds: ReadonlySet<string>;
   focusedPaneID: string | null;
   workspaceId: string;
   workspaceRoot: string;
@@ -298,6 +304,7 @@ interface LayoutRendererProps {
 
 function LayoutRenderer({
   node,
+  connectedSlotIds,
   focusedPaneID,
   workspaceId,
   workspaceRoot,
@@ -313,6 +320,7 @@ function LayoutRenderer({
       <MemoPaneView
         leaf={node}
         isFocused={node.id === focusedPaneID}
+        connectedSlotIds={connectedSlotIds}
         workspaceId={workspaceId}
         workspaceRoot={workspaceRoot}
         layoutTargetOnFocus={layoutTargetOnFocus}
@@ -338,6 +346,7 @@ function LayoutRenderer({
           <ResizablePanel defaultSize={node.ratios[i] * 100} minSize={10}>
             <MemoLayoutRenderer
               node={child}
+              connectedSlotIds={connectedSlotIds}
               focusedPaneID={focusedPaneID}
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
@@ -398,6 +407,16 @@ export function WorkspaceRuntimeView({
   isVisible?: boolean;
 }) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
+  const visibleSlotIds = useMemo(
+    () => getVisibleWorkspaceTerminalSlotIds(runtime.root),
+    [runtime.root]
+  );
+  const liveSlotIds = useMemo(() => runtime.slots.map((slot) => slot.id), [runtime.slots]);
+  const connectedSlotIds = useLazyTerminalSlotConnections(
+    workspaceId,
+    visibleSlotIds,
+    liveSlotIds
+  );
 
   const registerTerminalAnchor = useCallback((sessionId: string, info: TerminalAnchorInfo | null) => {
     setAnchors((prev) => {
@@ -436,6 +455,7 @@ export function WorkspaceRuntimeView({
         <div className="relative h-full min-h-0 min-w-0">
           <MemoLayoutRenderer
             node={runtime.root!}
+            connectedSlotIds={connectedSlotIds}
             focusedPaneID={runtime.focusedPaneID}
             workspaceId={workspaceId}
             workspaceRoot={workspaceRoot}

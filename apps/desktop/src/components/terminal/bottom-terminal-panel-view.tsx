@@ -11,12 +11,14 @@ import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import BottomTerminalSidebar from "@/components/terminal/bottom-terminal-sidebar";
 import TerminalSurface from "@/components/terminal/terminal-surface";
+import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SessionState, SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
 import { cn } from "@/lib/shared/utils";
+import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 type TerminalAnchorInfo = {
@@ -106,6 +108,7 @@ function ProjectTerminalAnchorSlot({
 }
 
 function TerminalPane({
+  connectedSlotIds,
   workspaceId,
   groupId,
   slot,
@@ -113,6 +116,7 @@ function TerminalPane({
   visible,
   active,
 }: {
+  connectedSlotIds: ReadonlySet<string>;
   workspaceId: string;
   groupId: string;
   slot: SlotState | undefined;
@@ -136,7 +140,7 @@ function TerminalPane({
         if (visible) projectTerminalCommands.focusProjectTerminal(workspaceId, slot?.id ?? null);
       }}
     >
-      {sessionId && slot ? (
+      {sessionId && slot && (visible || connectedSlotIds.has(slot.id)) ? (
         <ProjectTerminalAnchorSlot
           sessionId={sessionId}
           slotId={slot.id}
@@ -189,6 +193,16 @@ export default function BottomTerminalPanelView({
 }) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
   const panel = runtime.terminalPanel;
+  const visibleSlotIds = useMemo(
+    () => getVisibleProjectTerminalSlotIds(panel),
+    [panel]
+  );
+  const liveSlotIds = useMemo(() => runtime.slots.map((slot) => slot.id), [runtime.slots]);
+  const connectedSlotIds = useLazyTerminalSlotConnections(
+    workspaceId,
+    visibleSlotIds,
+    liveSlotIds
+  );
   const slots = runtime.slots;
   const slotMap = useMemo(() => {
     const map = new Map<string, SlotState>();
@@ -250,6 +264,7 @@ export default function BottomTerminalPanelView({
                 >
                   {group.children.length === 1 ? (
                     <TerminalPane
+                      connectedSlotIds={connectedSlotIds}
                       workspaceId={workspaceId}
                       groupId={group.id}
                       slot={slotMap.get(group.children[0])}
@@ -273,6 +288,7 @@ export default function BottomTerminalPanelView({
                           )}
                           <ResizablePanel defaultSize={100 / group.children.length} minSize={12}>
                             <TerminalPane
+                              connectedSlotIds={connectedSlotIds}
                               workspaceId={workspaceId}
                               groupId={group.id}
                               slot={slotMap.get(slotId)}
