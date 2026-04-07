@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ChevronRight } from "lucide-react";
 import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
@@ -85,13 +85,6 @@ type FileTreeRowHandle = {
   label: string;
   absolutePath: string;
 };
-type TauriDragApi = {
-  startDrag: (
-    payload: { item: string[]; icon: string; mode?: "copy" | "move" },
-    onEvent?: (event: unknown) => void
-  ) => Promise<void>;
-};
-
 const FileTreeExpansionContext = createContext<ExpansionCtx | null>(null);
 
 const TREE_ROW_SELECTOR = "[data-tree-row-path]";
@@ -609,15 +602,6 @@ export default function WorkspaceFileTreePanel({
     []
   );
 
-  const getDragApi = useCallback((): TauriDragApi | null => {
-    const tauriWindow = window as Window & {
-      __TAURI__?: {
-        drag?: TauriDragApi;
-      };
-    };
-    return tauriWindow.__TAURI__?.drag ?? null;
-  }, []);
-
   const computeDropTargetFromPoint = useCallback(
     (clientX: number, clientY: number): TreeDropTarget | null => {
       const body = treeBodyRef.current;
@@ -752,18 +736,14 @@ export default function WorkspaceFileTreePanel({
 
   const startNativeFileDrag = useCallback(
     async (sourceAbsPath: string) => {
-      const dragApi = getDragApi();
-      if (!dragApi) {
-        console.error("Tauri drag API is unavailable");
-        return;
-      }
-      await dragApi.startDrag({
+      await invoke("plugin:drag|start_drag", {
         item: [sourceAbsPath],
-        icon: TRANSPARENT_DRAG_IMAGE,
-        mode: "move",
+        image: TRANSPARENT_DRAG_IMAGE,
+        options: { mode: "copy" },
+        onEvent: new Channel(() => {}),
       });
     },
-    [getDragApi]
+    []
   );
 
   const handoffInternalDragToNative = useCallback(
