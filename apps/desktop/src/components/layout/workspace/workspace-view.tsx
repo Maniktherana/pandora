@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { PanelResizeHandle } from "react-resizable-panels";
-import PaneTabBar from "@/components/dnd/pane-tab-bar";
+import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
@@ -190,7 +190,7 @@ function PaneView({
       className="flex flex-col h-full overflow-hidden rounded-sm relative"
     >
       {!hideTabBar && (
-        <PaneTabBar
+        <WorkspaceTabBar
           paneID={leaf.id}
           tabs={leaf.tabs}
           selectedIndex={leaf.selectedIndex}

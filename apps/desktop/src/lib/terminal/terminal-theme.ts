@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { TerminalThemeColors } from "@/lib/theme/theme";
-import { defaultTheme } from "@/lib/theme/themes";
+import type { TerminalThemeColors } from "@/lib/theme";
+import { defaultTheme } from "@/lib/theme";
 
 /**
  * Ghostty-format theme config (for UI chrome around the native terminal).

@@ -11,7 +11,7 @@ import {
   getLargeDiffOptions,
   getPierreSurfaceStyle,
 } from "@/components/editor/pierre-pandora";
-import { defaultTheme } from "@/lib/theme/themes";
+import { defaultTheme } from "@/lib/theme";
 import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 

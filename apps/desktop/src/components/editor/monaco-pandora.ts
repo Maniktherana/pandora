@@ -1,6 +1,6 @@
 import type { BeforeMount, DiffBeforeMount } from "@monaco-editor/react";
-import { toMonacoTheme } from "@/lib/theme/theme";
-import { defaultTheme } from "@/lib/theme/themes";
+import { toMonacoTheme } from "@/lib/theme";
+import { defaultTheme } from "@/lib/theme";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 export const MONACO_THEME_ID = "pandora-theme";

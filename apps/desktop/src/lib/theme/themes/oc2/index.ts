@@ -3,10 +3,10 @@ import type {
   ReactUiTheme,
   TerminalThemeColors,
   WorkspaceTheme,
-} from "@/lib/theme/theme";
-import codeEditor from "./oc2/code-editor.json";
-import terminal from "./oc2/terminal.json";
-import ui from "./oc2/ui.json";
+} from "../../theme";
+import codeEditor from "./code-editor.json";
+import terminal from "./terminal.json";
+import ui from "./ui.json";
 
 export const oc2CodeEditorTheme: CodeEditorTheme = codeEditor;
 export const oc2TerminalTheme: TerminalThemeColors = terminal;

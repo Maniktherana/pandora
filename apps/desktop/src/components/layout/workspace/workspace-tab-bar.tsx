@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { GitCompare, Plus, X } from "lucide-react";
-import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
-import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
-import { useEditorActions } from "@/hooks/use-editor-actions";
+import { Plus } from "lucide-react";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { useEditorStore } from "@/stores/editor-store";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
 import type {
   PaneTab,
@@ -16,11 +12,12 @@ import type {
 } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { scmStatus, scmToneTextClass, statusTone } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
-import { useTabDrag } from "./tab-drag-layer";
+import { useTabDrag } from "@/components/dnd/tab-drag-provider";
+import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 
-interface TabBarProps {
+interface WorkspaceTabBarProps {
   paneID: string;
   tabs: PaneTab[];
   selectedIndex: number;
@@ -59,67 +56,14 @@ function tabLabel(
   return base;
 }
 
-function EditorTabCloseControl({
-  workspaceId,
-  workspaceRoot,
-  paneID,
-  index,
-  path,
-  label,
-  isActive,
-}: {
-  workspaceId: string;
-  workspaceRoot: string;
-  paneID: string;
-  index: number;
-  path: string;
-  label: string;
-  isActive: boolean;
-}) {
-  const isDirty = useEditorStore((s) => s.isFileDirty(workspaceId, path));
-  const { closeEditorTab } = useEditorActions();
-
-  return (
-    <div
-      role="button"
-      tabIndex={-1}
-      aria-label={isDirty ? `Close ${label} (unsaved changes)` : `Close ${label}`}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
-        e.stopPropagation();
-        void closeEditorTab({
-          workspaceId,
-          workspaceRoot,
-          paneID,
-          tabIndex: index,
-          relativePath: path,
-          displayName: label,
-        });
-      }}
-      className={cn(
-        "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-        isActive
-          ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-          : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-      )}
-    >
-      {isDirty ? (
-        <span className="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden />
-      ) : (
-        <X className="h-3 w-3" aria-hidden />
-      )}
-    </div>
-  );
-}
-
-export default function PaneTabBar({
+export default function WorkspaceTabBar({
   paneID,
   tabs,
   selectedIndex,
   workspaceId,
   workspaceRoot,
   isFocused,
-}: TabBarProps) {
+}: WorkspaceTabBarProps) {
   const { startDrag, dragState } = useTabDrag();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
@@ -205,6 +149,13 @@ export default function PaneTabBar({
     [tabs, terminalCommands, workspaceId]
   );
 
+  const closeDiffTab = useCallback(
+    (index: number) => {
+      layoutCommands.removePaneTabByIndex(paneID, index);
+    },
+    [layoutCommands, paneID]
+  );
+
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
@@ -270,109 +221,32 @@ export default function PaneTabBar({
             pinPlus ? "flex-1" : "w-max max-w-full"
           )}
         >
-        {tabs.map((tab, index) => {
-        const isLast = index === tabs.length - 1;
-        const isActive = index === selectedIndex;
-        const isBeingDragged =
-          dragState?.kind === "pane-tab" &&
-          dragState.sourcePaneID === paneID &&
-          dragState.sourceIndex === index;
-
-        const terminalDisplay =
-          tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
-        return (
-          <div
-              key={tabKey(tab)}
-              data-tab-pane={paneID}
-              data-tab-index={index}
-              data-tab-kind={tab.kind}
-              data-workspace-id={workspaceId}
-              onPointerDown={(e) => handlePointerDown(e, index)}
-              onPointerUp={(e) => handlePointerUp(e, index)}
-              className={cn(
-                "relative flex h-full shrink-0 cursor-default select-none items-center gap-1.5 pl-3 pr-1.5 text-xs",
-                !isLast && "border-r border-neutral-800",
-                isActive && isFocused
-                  ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-200 after:content-['']"
-                  : isActive
-                    ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-800 after:content-['']"
-                    : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
-                isBeingDragged && "opacity-30"
-              )}
-            >
-              {(() => {
-                const scmEntry =
-                  tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined;
-                const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
-                return (
-                  <>
-              {tab.kind === "editor" ? (
-                <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
-              ) : tab.kind === "diff" ? (
-                <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
-              ) : terminalDisplay ? (
-                <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
-              ) : null}
-              <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>
-                {tabLabel(tab, slotsMap, sessionsMap, displayMap)}
-              </span>
-                  </>
-                );
-              })()}
-
-              {tab.kind === "editor" ? (
-                <EditorTabCloseControl
-                  workspaceId={workspaceId}
-                  workspaceRoot={workspaceRoot}
-                  paneID={paneID}
-                  index={index}
-                  path={tab.path}
-                  label={tabLabel(tab, slotsMap, sessionsMap, displayMap)}
-                  isActive={isActive}
-                />
-              ) : tab.kind === "diff" ? (
-                <div
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    layoutCommands.removePaneTabByIndex(paneID, index);
-                  }}
-                  className={cn(
-                    "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-                    isActive
-                      ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-                      : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-                  )}
-                >
-                  <X className="h-3 w-3" aria-hidden />
-                </div>
-              ) : (
-                <div
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`Close ${tabLabel(tab, slotsMap, sessionsMap, displayMap)}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTerminalTab(index);
-                  }}
-                  className={cn(
-                    "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-                    isActive
-                      ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-                      : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-                  )}
-                >
-                  <X className="h-3 w-3" aria-hidden />
-                </div>
-              )}
-
-            </div>
-          );
-        })}
+        {tabs.map((tab, index) => (
+          <WorkspaceTab
+            key={tabKey(tab)}
+            tab={tab}
+            index={index}
+            paneID={paneID}
+            workspaceId={workspaceId}
+            workspaceRoot={workspaceRoot}
+            selectedIndex={selectedIndex}
+            isFocused={isFocused}
+            isLast={index === tabs.length - 1}
+            isBeingDragged={
+              dragState?.kind === "pane-tab" &&
+              dragState.sourcePaneID === paneID &&
+              dragState.sourceIndex === index
+            }
+            scmEntry={tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined}
+            slotsMap={slotsMap}
+            sessionsMap={sessionsMap}
+            displayMap={displayMap}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onCloseDiffTab={closeDiffTab}
+            onCloseTerminalTab={closeTerminalTab}
+          />
+        ))}
         </div>
         <div ref={plusWrapRef} className="flex shrink-0 items-stretch border-l border-neutral-800">
           <button

@@ -3,7 +3,7 @@ import { PanelResizeHandle, ImperativePanelHandle } from "react-resizable-panels
 import LeftSidebar from "@/components/layout/left-sidebar/left-sidebar";
 import BottomPanel from "@/components/layout/bottom-panel";
 import RightSidebar from "@/components/layout/right-sidebar/right-sidebar";
-import { TabDragProvider } from "@/components/dnd/tab-drag-layer";
+import { TabDragProvider } from "@/components/dnd/tab-drag-provider";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/layout/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";

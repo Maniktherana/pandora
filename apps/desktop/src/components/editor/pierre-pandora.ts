@@ -4,8 +4,8 @@ import {
   type FileContents,
   type FileDiffOptions,
 } from "@pierre/diffs";
-import { toPierreVariables } from "@/lib/theme/theme";
-import { defaultTheme } from "@/lib/theme/themes";
+import { toPierreVariables } from "@/lib/theme";
+import { defaultTheme } from "@/lib/theme";
 
 const PANDORA_PIERRE_THEME = "pandora-theme";
 const syntax = defaultTheme.codeEditor.syntax;

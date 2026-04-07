@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useEditorStore } from "@/stores/editor-store";
+import { useEditorStore } from "@/state/editor-store";
 import { languageFromRelativePath } from "@/components/editor/editor-language";
 import {
   MONACO_THEME_ID,

@@ -1,8 +1,8 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { applyTheme } from "@/lib/theme/theme";
-import { defaultTheme } from "@/lib/theme/themes";
+import { applyTheme } from "@/lib/theme";
+import { defaultTheme } from "@/lib/theme";
 
 applyTheme(defaultTheme);
 

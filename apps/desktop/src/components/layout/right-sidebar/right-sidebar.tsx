@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useTabDrag } from "@/components/dnd/tab-drag-layer";
+import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";

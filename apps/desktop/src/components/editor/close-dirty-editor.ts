@@ -1,5 +1,5 @@
 import { message } from "@tauri-apps/plugin-dialog";
-import { useEditorStore } from "@/stores/editor-store";
+import { useEditorStore } from "@/state/editor-store";
 
 const LABEL_SAVE = "Save";
 const LABEL_DISCARD = "Don't Save";
