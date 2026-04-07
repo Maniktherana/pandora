@@ -23,7 +23,7 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
 import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import type { SessionState } from "@/lib/shared/types";
-import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
+import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";

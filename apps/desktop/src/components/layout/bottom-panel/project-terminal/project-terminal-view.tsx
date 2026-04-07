@@ -17,7 +17,7 @@ import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
+import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
