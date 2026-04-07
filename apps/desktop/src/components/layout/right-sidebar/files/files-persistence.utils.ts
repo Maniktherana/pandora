@@ -56,7 +56,7 @@ let persistExpandedChain: Promise<void> = Promise.resolve();
 
 export function persistFileTreeExpandedPaths(
   workspaceId: string,
-  paths: Iterable<string>
+  paths: Iterable<string>,
 ): Promise<void> {
   const nextPaths = Array.from(new Set(paths)).sort();
   const run = async () => {
@@ -109,7 +109,7 @@ export async function loadPersistedFileTreeOpenMap(): Promise<Record<string, boo
 
 export async function persistFileTreeOpenForWorkspace(
   workspaceId: string,
-  open: boolean
+  open: boolean,
 ): Promise<void> {
   // This is a single global toggle; workspaceId is ignored (kept for API stability).
   void workspaceId;

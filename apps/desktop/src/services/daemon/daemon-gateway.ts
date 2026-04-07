@@ -18,7 +18,7 @@ export class DaemonGateway extends Context.Tag("pandora/DaemonGateway")<
 >() {}
 
 export function createDaemonClientCallbacks(
-  publish: (event: DaemonEvent) => void
+  publish: (event: DaemonEvent) => void,
 ): DaemonClientCallbacks {
   const emit = (event: DaemonEvent) => {
     try {
@@ -81,7 +81,7 @@ export const DaemonGatewayLive = Layer.effect(
           const created = new RawDaemonClient(
             createDaemonClientCallbacks((event) => {
               void Effect.runPromise(eventQueue.publish(event));
-            })
+            }),
           );
 
           return [created, created] as const;
@@ -95,8 +95,8 @@ export const DaemonGatewayLive = Layer.effect(
               yield* Effect.sync(() => {
                 console.error("Failed to connect daemon gateway:", error);
               });
-            })
-          )
+            }),
+          ),
         );
       });
 
@@ -116,5 +116,5 @@ export const DaemonGatewayLive = Layer.effect(
       disconnect,
       getClient: () => Ref.get(clientRef),
     } satisfies DaemonGatewayService;
-  })
+  }),
 );

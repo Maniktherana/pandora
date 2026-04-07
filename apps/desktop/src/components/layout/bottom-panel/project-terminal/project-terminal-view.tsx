@@ -30,7 +30,6 @@ type ProjectTerminalViewProps = {
   workspaceId: string;
 };
 
-
 const NativeTerminalRegContext = createContext<
   ((sessionId: string, info: ProjectTerminalAnchorInfo | null) => void) | null
 >(null);
@@ -59,12 +58,7 @@ function ProjectTerminalAnchorSlot({
     workspaceCommands.setLayoutTargetRuntimeId(workspaceId);
     workspaceCommands.setNavigationArea("workspace");
     projectTerminalCommands.focusProjectTerminal(workspaceId, slotId);
-  }, [
-    projectTerminalCommands,
-    slotId,
-    workspaceCommands,
-    workspaceId,
-  ]);
+  }, [projectTerminalCommands, slotId, workspaceCommands, workspaceId]);
 
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
@@ -136,7 +130,7 @@ function TerminalPane({
       data-bottom-terminal-group-id={groupId}
       className={cn(
         "relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950",
-        active ? "ring-1 ring-neutral-700/60" : ""
+        active ? "ring-1 ring-neutral-700/60" : "",
       )}
       style={{ background: terminalTheme.background ?? "#0a0a0a" }}
       onPointerDownCapture={() => {
@@ -156,11 +150,7 @@ function TerminalPane({
   );
 }
 
-function ResizableTerminalGroup({
-  children,
-}: {
-  children: ReactNode;
-}) {
+function ResizableTerminalGroup({ children }: { children: ReactNode }) {
   const [isResizing, setIsResizing] = useState(false);
   useNativeTerminalOverlay(isResizing);
   const childArray = useMemo(() => (Array.isArray(children) ? children : [children]), [children]);
@@ -214,47 +204,40 @@ function HoistedNativeTerminals({
   );
 }
 
-export default function ProjectTerminalView({
-  runtime,
-  workspaceId,
-}: ProjectTerminalViewProps) {
+export default function ProjectTerminalView({ runtime, workspaceId }: ProjectTerminalViewProps) {
   const [anchors, setAnchors] = useState<Record<string, ProjectTerminalAnchorInfo>>({});
   const panel = runtime.terminalPanel;
-  const visibleSlotIds = useMemo(
-    () => getVisibleProjectTerminalSlotIds(panel),
-    [panel]
-  );
+  const visibleSlotIds = useMemo(() => getVisibleProjectTerminalSlotIds(panel), [panel]);
   const liveSlotIds = useMemo(() => runtime.slots.map((slot) => slot.id), [runtime.slots]);
-  const connectedSlotIds = useLazyTerminalSlotConnections(
-    workspaceId,
-    visibleSlotIds,
-    liveSlotIds
-  );
+  const connectedSlotIds = useLazyTerminalSlotConnections(workspaceId, visibleSlotIds, liveSlotIds);
   const slots = runtime.slots;
   const slotMap = useMemo(() => createSlotMap(slots), [slots]);
   const sessionMap = useMemo(() => createSessionMap(runtime.sessions), [runtime.sessions]);
 
-  const registerTerminalAnchor = useCallback((sessionId: string, info: ProjectTerminalAnchorInfo | null) => {
-    setAnchors((prev) => {
-      if (info == null) {
-        if (!(sessionId in prev)) return prev;
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      }
-      const existing = prev[sessionId];
-      if (
-        existing &&
-        existing.el === info.el &&
-        existing.visible === info.visible &&
-        existing.focused === info.focused &&
-        existing.onFocus === info.onFocus
-      ) {
-        return prev;
-      }
-      return { ...prev, [sessionId]: info };
-    });
-  }, []);
+  const registerTerminalAnchor = useCallback(
+    (sessionId: string, info: ProjectTerminalAnchorInfo | null) => {
+      setAnchors((prev) => {
+        if (info == null) {
+          if (!(sessionId in prev)) return prev;
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        }
+        const existing = prev[sessionId];
+        if (
+          existing &&
+          existing.el === info.el &&
+          existing.visible === info.visible &&
+          existing.focused === info.focused &&
+          existing.onFocus === info.onFocus
+        ) {
+          return prev;
+        }
+        return { ...prev, [sessionId]: info };
+      });
+    },
+    [],
+  );
 
   return (
     <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>

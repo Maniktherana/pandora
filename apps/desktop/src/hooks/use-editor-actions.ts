@@ -17,9 +17,9 @@ export function useEditorActions() {
         await runPromise(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             Effect.flatMap(service.getWorkspaceSession(workspaceId), (session) =>
-              session.commands.addEditorTab(relativePath)
-            )
-          )
+              session.commands.addEditorTab(relativePath),
+            ),
+          ),
         );
       },
 
@@ -37,13 +37,13 @@ export function useEditorActions() {
             runPromise(
               Effect.flatMap(DesktopWorkspaceService, (service) =>
                 Effect.flatMap(service.getWorkspaceSession(params.workspaceId), (session) =>
-                  session.commands.closeTab(paneID, tabIndex)
-                )
-              )
+                  session.commands.closeTab(paneID, tabIndex),
+                ),
+              ),
             ),
         });
       },
     }),
-    [ensureFileLoaded, runPromise]
+    [ensureFileLoaded, runPromise],
   );
 }

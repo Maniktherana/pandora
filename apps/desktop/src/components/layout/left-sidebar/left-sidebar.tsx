@@ -16,11 +16,9 @@ export default function LeftSidebar({ onCollapse }: LeftSidebarProps) {
   const filteredProjects = useMemo(
     () =>
       projects.filter((project) =>
-        searchText
-          ? project.displayName.toLowerCase().includes(searchText.toLowerCase())
-          : true
+        searchText ? project.displayName.toLowerCase().includes(searchText.toLowerCase()) : true,
       ),
-    [projects, searchText]
+    [projects, searchText],
   );
 
   const handleAddProject = async () => {
@@ -89,4 +87,3 @@ export default function LeftSidebar({ onCollapse }: LeftSidebarProps) {
     </div>
   );
 }
-

@@ -1,15 +1,8 @@
 import { useCallback, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import {
-  useDesktopView,
-  useProjectTerminalView,
-  useWorkspaceView,
-} from "@/hooks/use-desktop-view";
-import {
-  useProjectTerminalActions,
-  useTerminalActions,
-} from "@/hooks/use-terminal-actions";
+import { useDesktopView, useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { PortsTabContent } from "./ports/ports-tab-content";
@@ -40,8 +33,7 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
 
   const splitActiveGroup = useCallback(() => {
     const activeGroup =
-      projectRuntime?.terminalPanel?.groups[projectRuntime.terminalPanel.activeGroupIndex] ??
-      null;
+      projectRuntime?.terminalPanel?.groups[projectRuntime.terminalPanel.activeGroupIndex] ?? null;
     if (!projectKey || !activeGroup) return;
     projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id);
   }, [projectKey, projectRuntime?.terminalPanel, projectTerminalCommands]);
@@ -101,4 +93,3 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
     </Tabs>
   );
 }
-

@@ -147,7 +147,8 @@ export default function useKeyboardShortcuts({
     let unlisten: (() => void) | undefined;
     void listen<string>("pr-state-changed", (event) => {
       try {
-        const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+        const payload =
+          typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
         const { workspaceId, prState } = payload as { workspaceId: string; prState: string };
         updateWorkspacePrState(workspaceId, prState);
       } catch {}

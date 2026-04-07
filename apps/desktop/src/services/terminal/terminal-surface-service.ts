@@ -41,11 +41,13 @@ interface NativeSyncPayload {
 export interface TerminalSurfaceServiceApi {
   readonly isNativeSupported: () => Effect.Effect<boolean>;
   readonly upsertSurface: (
-    input: ManagedSurfaceRegistration
+    input: ManagedSurfaceRegistration,
   ) => Effect.Effect<void, NativeSurfaceError>;
   readonly parkSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
-  readonly removeWorkspaceSurfaces: (workspaceId: string) => Effect.Effect<void, NativeSurfaceError>;
+  readonly removeWorkspaceSurfaces: (
+    workspaceId: string,
+  ) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeAllSurfaces: () => Effect.Effect<void, NativeSurfaceError>;
   readonly beginWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
   readonly endWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
@@ -110,10 +112,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
         requestAnimationFrame(() => resolve());
       });
 
-    const enqueueSurfaceCreate = async (
-      surfaceId: string,
-      task: () => Promise<void>
-    ) => {
+    const enqueueSurfaceCreate = async (surfaceId: string, task: () => Promise<void>) => {
       const queued = createQueue.then(async () => {
         console.debug("[terminal-surface]", "create queued", { surfaceId });
         await waitForNextFrame();
@@ -487,5 +486,5 @@ export const TerminalSurfaceServiceLive = Layer.effect(
           catch: (cause) => nativeSurfaceError(cause, "web-overlay"),
         }),
     } satisfies TerminalSurfaceServiceApi;
-  })
+  }),
 );

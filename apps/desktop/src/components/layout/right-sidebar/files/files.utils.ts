@@ -2,15 +2,15 @@
 // (packages/ui/src/components/file-icon.tsx), MIT License — https://github.com/sst/opencode
 
 type IconMaps = {
-  fileNames: Record<string, string>
-  fileExtensions: Record<string, string>
-  folderNames: Record<string, string>
+  fileNames: Record<string, string>;
+  fileExtensions: Record<string, string>;
+  folderNames: Record<string, string>;
   defaults: {
-    file: string
-    folder: string
-    folderOpen: string
-  }
-}
+    file: string;
+    folder: string;
+    folderOpen: string;
+  };
+};
 
 const ICON_MAPS: IconMaps = {
   fileNames: {
@@ -505,51 +505,55 @@ const ICON_MAPS: IconMaps = {
     folder: "Folder",
     folderOpen: "FolderOpen",
   },
-}
+};
 
 const toOpenVariant = (icon: string): string => {
-  if (!icon.startsWith("Folder")) return icon
-  if (icon.endsWith("_light")) return icon.replace("_light", "Open_light") as string
-  if (!icon.endsWith("Open")) return (icon + "Open") as string
-  return icon
-}
+  if (!icon.startsWith("Folder")) return icon;
+  if (icon.endsWith("_light")) return icon.replace("_light", "Open_light") as string;
+  if (!icon.endsWith("Open")) return (icon + "Open") as string;
+  return icon;
+};
 
-const basenameOf = (p: string) => p.split("\\").join("/").split("/").filter(Boolean).pop() ?? ""
+const basenameOf = (p: string) => p.split("\\").join("/").split("/").filter(Boolean).pop() ?? "";
 
 const folderNameVariants = (name: string) => {
-  const n = name.toLowerCase()
-  return [n, `.${n}`, `_${n}`, `__${n}__`]
-}
+  const n = name.toLowerCase();
+  return [n, `.${n}`, `_${n}`, `__${n}__`];
+};
 
 const dottedSuffixesDesc = (name: string) => {
-  const n = name.toLowerCase()
-  const idxs: number[] = []
-  for (let i = 0; i < n.length; i++) if (n[i] === ".") idxs.push(i)
-  const out = new Set<string>()
-  out.add(n) // allow exact whole-name "extensions" like "dockerfile"
-  for (const i of idxs) if (i + 1 < n.length) out.add(n.slice(i + 1))
-  return Array.from(out).sort((a, b) => b.length - a.length) // longest first
-}
+  const n = name.toLowerCase();
+  const idxs: number[] = [];
+  for (let i = 0; i < n.length; i++) if (n[i] === ".") idxs.push(i);
+  const out = new Set<string>();
+  out.add(n); // allow exact whole-name "extensions" like "dockerfile"
+  for (const i of idxs) if (i + 1 < n.length) out.add(n.slice(i + 1));
+  return Array.from(out).sort((a, b) => b.length - a.length); // longest first
+};
 
-export function chooseIconName(path: string, type: "directory" | "file", expanded: boolean): string {
-  const base = basenameOf(path)
-  const baseLower = base.toLowerCase()
+export function chooseIconName(
+  path: string,
+  type: "directory" | "file",
+  expanded: boolean,
+): string {
+  const base = basenameOf(path);
+  const baseLower = base.toLowerCase();
 
   if (type === "directory") {
     for (const cand of folderNameVariants(baseLower)) {
-      const icon = ICON_MAPS.folderNames[cand]
-      if (icon) return expanded ? toOpenVariant(icon) : icon
+      const icon = ICON_MAPS.folderNames[cand];
+      if (icon) return expanded ? toOpenVariant(icon) : icon;
     }
-    return expanded ? ICON_MAPS.defaults.folderOpen : ICON_MAPS.defaults.folder
+    return expanded ? ICON_MAPS.defaults.folderOpen : ICON_MAPS.defaults.folder;
   }
 
-  const byName = ICON_MAPS.fileNames[baseLower]
-  if (byName) return byName
+  const byName = ICON_MAPS.fileNames[baseLower];
+  if (byName) return byName;
 
   for (const ext of dottedSuffixesDesc(baseLower)) {
-    const icon = ICON_MAPS.fileExtensions[ext]
-    if (icon) return icon
+    const icon = ICON_MAPS.fileExtensions[ext];
+    if (icon) return icon;
   }
 
-  return ICON_MAPS.defaults.file
+  return ICON_MAPS.defaults.file;
 }

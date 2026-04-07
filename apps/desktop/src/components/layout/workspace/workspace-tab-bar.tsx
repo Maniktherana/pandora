@@ -4,12 +4,7 @@ import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
-import type {
-  PaneTab,
-  SessionState,
-  SlotState,
-  TerminalDisplayState,
-} from "@/lib/shared/types";
+import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
@@ -32,19 +27,23 @@ function terminalTabDisplay(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
   sessionsMap: Record<string, SessionState | undefined>,
-  displayMap: Record<string, TerminalDisplayState>
+  displayMap: Record<string, TerminalDisplayState>,
 ): TerminalDisplayState {
   if (tab.kind !== "terminal") {
     return { kind: "terminal", label: "" };
   }
-  return terminalDisplayForSlot(slotsMap[tab.slotId], sessionsMap[tab.slotId], displayMap[tab.slotId]);
+  return terminalDisplayForSlot(
+    slotsMap[tab.slotId],
+    sessionsMap[tab.slotId],
+    displayMap[tab.slotId],
+  );
 }
 
 function tabLabel(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
   sessionsMap: Record<string, SessionState | undefined>,
-  displayMap: Record<string, TerminalDisplayState>
+  displayMap: Record<string, TerminalDisplayState>,
 ): string {
   if (tab.kind === "terminal") {
     return terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap).label;
@@ -74,7 +73,7 @@ export default function WorkspaceTabBar({
         string,
         SlotState | undefined
       >,
-    [runtime?.slots]
+    [runtime?.slots],
   );
   const displayMap = runtime?.terminalDisplayBySlotId ?? {};
   const sessions = runtime?.sessions ?? [];
@@ -84,7 +83,7 @@ export default function WorkspaceTabBar({
         string,
         SessionState | undefined
       >,
-    [sessions]
+    [sessions],
   );
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const pendingDragRef = useRef<{
@@ -107,7 +106,7 @@ export default function WorkspaceTabBar({
         startY: e.clientY,
       };
     },
-    [tabs, slotsMap, sessionsMap, displayMap]
+    [tabs, slotsMap, sessionsMap, displayMap],
   );
 
   const handlePointerMove = useCallback(
@@ -126,7 +125,7 @@ export default function WorkspaceTabBar({
         pendingDragRef.current = null;
       }
     },
-    [paneID, startDrag]
+    [paneID, startDrag],
   );
 
   const handlePointerUp = useCallback(
@@ -137,7 +136,7 @@ export default function WorkspaceTabBar({
         pendingDragRef.current = null;
       }
     },
-    [layoutCommands, paneID]
+    [layoutCommands, paneID],
   );
 
   const closeTerminalTab = useCallback(
@@ -146,14 +145,14 @@ export default function WorkspaceTabBar({
       if (!tab || tab.kind !== "terminal") return;
       terminalCommands.closeTerminalSlot(workspaceId, tab.slotId);
     },
-    [tabs, terminalCommands, workspaceId]
+    [tabs, terminalCommands, workspaceId],
   );
 
   const closeDiffTab = useCallback(
     (index: number) => {
       layoutCommands.removePaneTabByIndex(paneID, index);
     },
-    [layoutCommands, paneID]
+    [layoutCommands, paneID],
   );
 
   useEffect(() => {
@@ -177,7 +176,10 @@ export default function WorkspaceTabBar({
     };
   }, [workspaceRoot]);
 
-  const scmByPath = useMemo(() => new Map(scmEntries.map((entry) => [entry.path, entry])), [scmEntries]);
+  const scmByPath = useMemo(
+    () => new Map(scmEntries.map((entry) => [entry.path, entry])),
+    [scmEntries],
+  );
 
   const rowRef = useRef<HTMLDivElement>(null);
   const tabsWrapRef = useRef<HTMLDivElement>(null);
@@ -218,35 +220,37 @@ export default function WorkspaceTabBar({
           ref={tabsWrapRef}
           className={cn(
             "tab-bar-hide-scrollbar flex min-w-0 items-stretch overflow-x-auto",
-            pinPlus ? "flex-1" : "w-max max-w-full"
+            pinPlus ? "flex-1" : "w-max max-w-full",
           )}
         >
-        {tabs.map((tab, index) => (
-          <WorkspaceTab
-            key={tabKey(tab)}
-            tab={tab}
-            index={index}
-            paneID={paneID}
-            workspaceId={workspaceId}
-            workspaceRoot={workspaceRoot}
-            selectedIndex={selectedIndex}
-            isFocused={isFocused}
-            isLast={index === tabs.length - 1}
-            isBeingDragged={
-              dragState?.kind === "pane-tab" &&
-              dragState.sourcePaneID === paneID &&
-              dragState.sourceIndex === index
-            }
-            scmEntry={tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined}
-            slotsMap={slotsMap}
-            sessionsMap={sessionsMap}
-            displayMap={displayMap}
-            onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerUp}
-            onCloseDiffTab={closeDiffTab}
-            onCloseTerminalTab={closeTerminalTab}
-          />
-        ))}
+          {tabs.map((tab, index) => (
+            <WorkspaceTab
+              key={tabKey(tab)}
+              tab={tab}
+              index={index}
+              paneID={paneID}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
+              selectedIndex={selectedIndex}
+              isFocused={isFocused}
+              isLast={index === tabs.length - 1}
+              isBeingDragged={
+                dragState?.kind === "pane-tab" &&
+                dragState.sourcePaneID === paneID &&
+                dragState.sourceIndex === index
+              }
+              scmEntry={
+                tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined
+              }
+              slotsMap={slotsMap}
+              sessionsMap={sessionsMap}
+              displayMap={displayMap}
+              onPointerDown={handlePointerDown}
+              onPointerUp={handlePointerUp}
+              onCloseDiffTab={closeDiffTab}
+              onCloseTerminalTab={closeTerminalTab}
+            />
+          ))}
         </div>
         <div ref={plusWrapRef} className="flex shrink-0 items-stretch border-l border-neutral-800">
           <button

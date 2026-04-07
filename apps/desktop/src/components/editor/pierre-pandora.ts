@@ -1,9 +1,5 @@
 import type { CSSProperties } from "react";
-import {
-  registerCustomTheme,
-  type FileContents,
-  type FileDiffOptions,
-} from "@pierre/diffs";
+import { registerCustomTheme, type FileContents, type FileDiffOptions } from "@pierre/diffs";
 import { toPierreVariables } from "@/lib/theme";
 import { defaultTheme } from "@/lib/theme";
 
@@ -70,7 +66,7 @@ function registerPandoraPierreTheme() {
           settings: { foreground: syntax.punctuation },
         },
       ],
-    })
+    }),
   );
 }
 

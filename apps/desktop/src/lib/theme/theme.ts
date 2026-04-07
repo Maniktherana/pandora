@@ -154,8 +154,7 @@ export function getThemeCssVariables(theme: WorkspaceTheme): Record<string, stri
     "--theme-font-editor": tokens.typography.fontFamily,
     "--theme-font-editor-size": `${tokens.typography.fontSize}px`,
     "--theme-font-editor-line-height": `${tokens.typography.lineHeight}px`,
-    "--theme-font-terminal":
-      theme.terminal.typography?.fontFamily ?? tokens.typography.fontFamily,
+    "--theme-font-terminal": theme.terminal.typography?.fontFamily ?? tokens.typography.fontFamily,
     "--theme-font-terminal-size": theme.terminal.typography?.fontSize
       ? `${theme.terminal.typography.fontSize}px`
       : `${tokens.typography.fontSize}px`,
@@ -298,7 +297,11 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
     inherit: false,
     semanticHighlighting: false,
     rules: [
-      { token: "", foreground: tokens.text.primary.slice(1), background: tokens.surface.base.slice(1) },
+      {
+        token: "",
+        foreground: tokens.text.primary.slice(1),
+        background: tokens.surface.base.slice(1),
+      },
       { token: "comment", foreground: tokens.syntax.comment.slice(1) },
       { token: "comment.doc", foreground: tokens.syntax.comment.slice(1) },
       { token: "keyword", foreground: tokens.syntax.keyword.slice(1) },

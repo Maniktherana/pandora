@@ -26,14 +26,14 @@ export function TabDragProvider({ children }: { children: ReactNode }) {
     if (!dragState) return;
     void runtime.runPromise(
       Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay()).pipe(
-        Effect.catchAll(() => Effect.void)
-      )
+        Effect.catchAll(() => Effect.void),
+      ),
     );
     return () => {
       void runtime.runPromise(
         Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay()).pipe(
-          Effect.catchAll(() => Effect.void)
-        )
+          Effect.catchAll(() => Effect.void),
+        ),
       );
     };
   }, [dragState, runtime]);
@@ -49,9 +49,7 @@ export function TabDragProvider({ children }: { children: ReactNode }) {
   return (
     <TabDragContext.Provider value={{ dragState, startDrag }}>
       {children}
-      {dragState && (
-        <TabDragOverlay dragState={dragState} onDone={endDrag} />
-      )}
+      {dragState && <TabDragOverlay dragState={dragState} onDone={endDrag} />}
     </TabDragContext.Provider>
   );
 }

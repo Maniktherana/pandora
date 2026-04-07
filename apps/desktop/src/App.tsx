@@ -28,9 +28,7 @@ export default function App() {
   useBootstrapDesktop();
   useNativeTerminalOverlay(isResizingPanels);
 
-  const {
-    selectedWorkspace: selectedWs,
-  } = useDesktopView();
+  const { selectedWorkspace: selectedWs } = useDesktopView();
   const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
@@ -67,7 +65,7 @@ export default function App() {
   useEffect(() => {
     uiPreferencesCommands.syncSelectedWorkspace(
       selectedWs?.status === "ready" ? selectedWs.id : null,
-      selectedWs?.status === "ready"
+      selectedWs?.status === "ready",
     );
   }, [selectedWs?.id, selectedWs?.status, uiPreferencesCommands]);
 
@@ -109,7 +107,10 @@ export default function App() {
               const startWidth = sidebarWidth;
 
               const onPointerMove = (moveEvent: PointerEvent) => {
-                const nextWidth = Math.min(360, Math.max(180, startWidth + moveEvent.clientX - startX));
+                const nextWidth = Math.min(
+                  360,
+                  Math.max(180, startWidth + moveEvent.clientX - startX),
+                );
                 sidebarResizeWidthRef.current = nextWidth;
                 if (sidebarResizeFrameRef.current != null) return;
                 sidebarResizeFrameRef.current = requestAnimationFrame(() => {
@@ -186,7 +187,7 @@ export default function App() {
                       "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
                       fileTreeOpen && selectedWs?.status === "ready"
                         ? "cursor-col-resize"
-                        : "hidden"
+                        : "hidden",
                     )}
                   />
                   <ResizablePanel
@@ -223,7 +224,7 @@ export default function App() {
                     onDragging={setIsResizingPanels}
                     className={cn(
                       "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
-                      bottomPanelOpen ? "cursor-row-resize" : "hidden"
+                      bottomPanelOpen ? "cursor-row-resize" : "hidden",
                     )}
                   />
                   <ResizablePanel
@@ -236,7 +237,9 @@ export default function App() {
                     className="min-h-0"
                   >
                     <ErrorBoundary name="bottom-panel">
-                      {bottomPanelOpen ? <BottomPanel onCollapse={() => setBottomPanelOpen(false)} /> : null}
+                      {bottomPanelOpen ? (
+                        <BottomPanel onCollapse={() => setBottomPanelOpen(false)} />
+                      ) : null}
                     </ErrorBoundary>
                   </ResizablePanel>
                 </>

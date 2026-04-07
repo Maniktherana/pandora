@@ -1,12 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Effect, Schedule } from "effect";
-import type {
-  ClientMessage,
-  DaemonMessage,
-  SessionState,
-  SlotState,
-} from "../shared/types";
+import type { ClientMessage, DaemonMessage, SessionState, SlotState } from "../shared/types";
 import { DaemonSendError } from "./errors";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -86,17 +81,12 @@ export class DaemonClient {
           cause,
         }),
     }).pipe(
-      Effect.retry(
-        Schedule.intersect(
-          Schedule.exponential("100 millis"),
-          Schedule.recurs(2)
-        )
-      ),
+      Effect.retry(Schedule.intersect(Schedule.exponential("100 millis"), Schedule.recurs(2))),
       Effect.catchAll((error) =>
         Effect.sync(() => {
           console.error("Daemon send failed after retries:", error);
-        })
-      )
+        }),
+      ),
     );
   }
 

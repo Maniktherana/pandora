@@ -3,12 +3,7 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useEditorStore } from "@/state/editor-store";
-import type {
-  PaneTab,
-  SessionState,
-  SlotState,
-  TerminalDisplayState,
-} from "@/lib/shared/types";
+import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import { scmToneTextClass, statusTone } from "@/components/layout/right-sidebar/scm/scm.utils";
@@ -38,19 +33,23 @@ function terminalTabDisplay(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
   sessionsMap: Record<string, SessionState | undefined>,
-  displayMap: Record<string, TerminalDisplayState>
+  displayMap: Record<string, TerminalDisplayState>,
 ): TerminalDisplayState {
   if (tab.kind !== "terminal") {
     return { kind: "terminal", label: "" };
   }
-  return terminalDisplayForSlot(slotsMap[tab.slotId], sessionsMap[tab.slotId], displayMap[tab.slotId]);
+  return terminalDisplayForSlot(
+    slotsMap[tab.slotId],
+    sessionsMap[tab.slotId],
+    displayMap[tab.slotId],
+  );
 }
 
 function tabLabel(
   tab: PaneTab,
   slotsMap: Record<string, SlotState | undefined>,
   sessionsMap: Record<string, SessionState | undefined>,
-  displayMap: Record<string, TerminalDisplayState>
+  displayMap: Record<string, TerminalDisplayState>,
 ): string {
   if (tab.kind === "terminal") {
     return terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap).label;
@@ -103,7 +102,7 @@ function EditorTabCloseControl({
         "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
         isActive
           ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-          : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+          : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
       )}
     >
       {isDirty ? (
@@ -158,13 +157,16 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
           : isActive
             ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-800 after:content-['']"
             : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
-        isBeingDragged && "opacity-30"
+        isBeingDragged && "opacity-30",
       )}
     >
       {tab.kind === "editor" ? (
         <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
       ) : tab.kind === "diff" ? (
-        <GitCompare className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")} aria-hidden />
+        <GitCompare
+          className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")}
+          aria-hidden
+        />
       ) : terminalDisplay ? (
         <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
       ) : null}
@@ -194,7 +196,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
             "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
             isActive
               ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
           )}
         >
           <X className="h-3 w-3" aria-hidden />
@@ -213,7 +215,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
             "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
             isActive
               ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
           )}
         >
           <X className="h-3 w-3" aria-hidden />

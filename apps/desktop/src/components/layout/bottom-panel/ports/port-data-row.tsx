@@ -42,4 +42,3 @@ export function PortDataRow({ port, process, origin, onRemove }: PortDataRowProp
     </tr>
   );
 }
-

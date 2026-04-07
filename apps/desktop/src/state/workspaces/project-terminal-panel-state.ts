@@ -21,7 +21,7 @@ export function createProjectTerminalPanelState(): TerminalPanelState {
 
 export function reconcileProjectTerminalPanelState(
   panel: TerminalPanelState | null | undefined,
-  slotIds: Iterable<string>
+  slotIds: Iterable<string>,
 ): TerminalPanelState {
   const liveSlotIds = new Set(slotIds);
   let terminalPanel = panel ?? createEmptyTerminalPanel();
@@ -47,7 +47,7 @@ export function reconcileProjectTerminalPanelState(
 
 function updateProjectTerminalPanel(
   runtime: WorkspaceRuntimeState,
-  updater: (panel: TerminalPanelState) => TerminalPanelState
+  updater: (panel: TerminalPanelState) => TerminalPanelState,
 ) {
   if (!isProjectRuntimeKey(runtime.workspaceId)) return;
   runtime.terminalPanel = updater(runtime.terminalPanel ?? createEmptyTerminalPanel());
@@ -56,7 +56,7 @@ function updateProjectTerminalPanel(
 export function addProjectTerminalGroupInRuntime(
   runtime: WorkspaceRuntimeState,
   slotId: string,
-  index?: number
+  index?: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => addTerminalGroup(panel, slotId, { index }));
 }
@@ -64,7 +64,7 @@ export function addProjectTerminalGroupInRuntime(
 export function splitProjectTerminalGroupInRuntime(
   runtime: WorkspaceRuntimeState,
   groupId: string,
-  slotId: string
+  slotId: string,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => addTerminalToGroup(panel, groupId, slotId));
 }
@@ -76,18 +76,21 @@ export function closeProjectTerminalInRuntime(runtime: WorkspaceRuntimeState, sl
 export function selectProjectTerminalGroupInRuntime(
   runtime: WorkspaceRuntimeState,
   groupId: string,
-  slotId?: string | null
+  slotId?: string | null,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => setActiveTerminalGroup(panel, groupId, slotId));
 }
 
-export function focusProjectTerminalInRuntime(runtime: WorkspaceRuntimeState, slotId: string | null) {
+export function focusProjectTerminalInRuntime(
+  runtime: WorkspaceRuntimeState,
+  slotId: string | null,
+) {
   updateProjectTerminalPanel(runtime, (panel) => setActiveTerminalSlot(panel, slotId));
 }
 
 export function setProjectTerminalPanelVisibleInRuntime(
   runtime: WorkspaceRuntimeState,
-  visible: boolean
+  visible: boolean,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => setTerminalPanelVisible(panel, visible));
 }
@@ -95,7 +98,7 @@ export function setProjectTerminalPanelVisibleInRuntime(
 export function reorderProjectTerminalGroupsInRuntime(
   runtime: WorkspaceRuntimeState,
   fromIndex: number,
-  toIndex: number
+  toIndex: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => reorderTerminalGroups(panel, fromIndex, toIndex));
 }
@@ -104,10 +107,10 @@ export function reorderProjectTerminalGroupChildrenInRuntime(
   runtime: WorkspaceRuntimeState,
   groupId: string,
   fromIndex: number,
-  toIndex: number
+  toIndex: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) =>
-    reorderTerminalGroupChildren(panel, groupId, fromIndex, toIndex)
+    reorderTerminalGroupChildren(panel, groupId, fromIndex, toIndex),
   );
 }
 
@@ -115,17 +118,17 @@ export function moveProjectTerminalToGroupInRuntime(
   runtime: WorkspaceRuntimeState,
   slotId: string,
   targetGroupId: string,
-  index?: number
+  index?: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) =>
-    moveTerminalToGroup(panel, slotId, targetGroupId, { index })
+    moveTerminalToGroup(panel, slotId, targetGroupId, { index }),
   );
 }
 
 export function moveProjectTerminalToNewGroupInRuntime(
   runtime: WorkspaceRuntimeState,
   slotId: string,
-  index: number
+  index: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) => moveTerminalToNewGroup(panel, slotId, index));
 }

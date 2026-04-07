@@ -4,14 +4,18 @@ import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import type { SidebarRow } from "../project-terminal.types";
-import { createSessionMap, createSlotMap, buildSidebarRows, PROJECT_TERMINAL_DRAG_THRESHOLD } from "../project-terminal.utils";
+import {
+  createSessionMap,
+  createSlotMap,
+  buildSidebarRows,
+  PROJECT_TERMINAL_DRAG_THRESHOLD,
+} from "../project-terminal.utils";
 import { ProjectTab } from "./project-tab";
 
 type ProjectTerminalSidebarProps = {
   runtime: WorkspaceRuntimeState;
   workspaceId: string;
 };
-
 
 export default function ProjectTerminalSidebar({
   runtime,
@@ -28,7 +32,7 @@ export default function ProjectTerminalSidebar({
 
   const rows = useMemo(
     () => buildSidebarRows(panel, slotMap, sessionsMap, displayMap),
-    [displayMap, panel, sessionsMap, slotMap]
+    [displayMap, panel, sessionsMap, slotMap],
   );
 
   const pendingDragRef = useRef<{
@@ -41,7 +45,7 @@ export default function ProjectTerminalSidebar({
     (row: SidebarRow) => {
       projectTerminalCommands.selectProjectTerminalGroup(workspaceId, row.groupId, row.slotId);
     },
-    [projectTerminalCommands, workspaceId]
+    [projectTerminalCommands, workspaceId],
   );
 
   const handlePointerDown = useCallback((e: React.PointerEvent, row: SidebarRow) => {
@@ -72,24 +76,31 @@ export default function ProjectTerminalSidebar({
       });
       pendingDragRef.current = null;
     },
-    [startDrag, workspaceId]
+    [startDrag, workspaceId],
   );
 
-  const handlePointerUp = useCallback((row: SidebarRow) => {
-    if (!pendingDragRef.current) return;
-    onSelectRow(row);
-    pendingDragRef.current = null;
-  }, [onSelectRow]);
+  const handlePointerUp = useCallback(
+    (row: SidebarRow) => {
+      if (!pendingDragRef.current) return;
+      onSelectRow(row);
+      pendingDragRef.current = null;
+    },
+    [onSelectRow],
+  );
 
   const promptRename = useCallback(
     (slotId: string) => {
       const slot = slotMap.get(slotId);
-      const current = terminalDisplayForSlot(slot, sessionsMap.get(slotId), displayMap[slotId]).label;
+      const current = terminalDisplayForSlot(
+        slot,
+        sessionsMap.get(slotId),
+        displayMap[slotId],
+      ).label;
       const next = window.prompt("Rename terminal", current)?.trim();
       if (!next || next === current) return;
       projectTerminalCommands.renameTerminal(workspaceId, slotId, next);
     },
-    [displayMap, projectTerminalCommands, sessionsMap, slotMap, workspaceId]
+    [displayMap, projectTerminalCommands, sessionsMap, slotMap, workspaceId],
   );
 
   const handleRowKeyDown = useCallback(
@@ -99,7 +110,7 @@ export default function ProjectTerminalSidebar({
         onSelectRow(row);
       }
     },
-    [onSelectRow]
+    [onSelectRow],
   );
 
   const handleRenameClick = useCallback(
@@ -107,7 +118,7 @@ export default function ProjectTerminalSidebar({
       event.stopPropagation();
       promptRename(slotId);
     },
-    [promptRename]
+    [promptRename],
   );
 
   const handleCloseClick = useCallback(
@@ -115,7 +126,7 @@ export default function ProjectTerminalSidebar({
       event.stopPropagation();
       projectTerminalCommands.closeProjectTerminal(workspaceId, slotId);
     },
-    [projectTerminalCommands, workspaceId]
+    [projectTerminalCommands, workspaceId],
   );
 
   if (!panel || panel.groups.length === 0) {
@@ -149,7 +160,8 @@ export default function ProjectTerminalSidebar({
             {rows
               .filter((row) => row.groupId === group.id)
               .map((row) => {
-                const active = groupIndex === panel.activeGroupIndex && panel.activeSlotId === row.slotId;
+                const active =
+                  groupIndex === panel.activeGroupIndex && panel.activeSlotId === row.slotId;
                 const isBeingDragged =
                   dragState?.kind === "bottom-terminal-slot" && dragState.slotId === row.slotId;
                 return (

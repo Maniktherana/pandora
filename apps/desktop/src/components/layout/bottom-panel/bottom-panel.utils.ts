@@ -13,4 +13,3 @@ export function parseUserPort(raw: string): number | null {
   if (/^\d{1,5}$/.test(trimmed)) return clampPort(Number(trimmed));
   return null;
 }
-

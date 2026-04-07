@@ -35,4 +35,3 @@ export type ScmGitBlobSource = "head" | "index";
 export type OpenDiffFn = (path: string, source: DiffSource) => void;
 export type RunScmActionFn = (fn: () => Promise<void>) => void;
 export type DiscardEntryFn = (entry: ScmStatusEntry) => void;
-

@@ -42,9 +42,7 @@ export default function PaneEditor({
   relativePath: string;
   isActive: boolean;
 }) {
-  const buffer = useEditorStore(
-    (s) => s.bufferByWorkspace[workspaceId]?.[relativePath] ?? ""
-  );
+  const buffer = useEditorStore((s) => s.bufferByWorkspace[workspaceId]?.[relativePath] ?? "");
   const setBuffer = useEditorStore((s) => s.setBuffer);
   const mergeSaved = useEditorStore((s) => s.mergeDiskContent);
 
@@ -68,10 +66,7 @@ export default function PaneEditor({
   const saveFile = useEditorStore((s) => s.saveFile);
   const workspaceCommands = useWorkspaceActions();
 
-  const language = useMemo(
-    () => languageFromRelativePath(relativePath),
-    [relativePath]
-  );
+  const language = useMemo(() => languageFromRelativePath(relativePath), [relativePath]);
 
   const handleMount = useCallback<OnMount>(
     (editor, monaco) => {
@@ -79,7 +74,7 @@ export default function PaneEditor({
 
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void saveFile(workspaceId, workspaceRoot, relativePath).catch((e) =>
-          console.error("Save failed:", e)
+          console.error("Save failed:", e),
         );
       });
 
@@ -88,14 +83,14 @@ export default function PaneEditor({
         workspaceCommands.setNavigationArea("workspace");
       });
     },
-    [workspaceCommands, workspaceId, workspaceRoot, relativePath, saveFile]
+    [workspaceCommands, workspaceId, workspaceRoot, relativePath, saveFile],
   );
 
   const onChange = useCallback(
     (value: string | undefined) => {
       setBuffer(workspaceId, relativePath, value ?? "");
     },
-    [workspaceId, relativePath, setBuffer]
+    [workspaceId, relativePath, setBuffer],
   );
 
   if (!isActive) {
@@ -113,10 +108,7 @@ export default function PaneEditor({
   }
 
   return (
-    <div
-      className="absolute inset-0 min-h-0"
-      style={{ backgroundColor: PANDORA_EDITOR_BG }}
-    >
+    <div className="absolute inset-0 min-h-0" style={{ backgroundColor: PANDORA_EDITOR_BG }}>
       <Editor
         height="100%"
         path={relativePath}

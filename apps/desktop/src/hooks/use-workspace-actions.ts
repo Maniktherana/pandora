@@ -15,77 +15,70 @@ export function useWorkspaceActions() {
       addProject: (path: string) =>
         run(Effect.flatMap(DesktopWorkspaceService, (service) => service.addProject(path))),
       toggleProject: (projectId: string) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.toggleProject(projectId))
-        ),
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.toggleProject(projectId))),
       removeProject: (projectId: string) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.removeProject(projectId))
-        ),
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.removeProject(projectId))),
       selectProject: (projectId: string) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.selectProject(projectId))
-        ),
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.selectProject(projectId))),
       selectWorkspace: (workspaceId: string) =>
         run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.selectWorkspace(workspaceId))
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.selectWorkspace(workspaceId),
+          ),
         ),
       activateSidebarSelection: () =>
         run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.activateSidebarSelection()
-          )
+          Effect.flatMap(DesktopWorkspaceService, (service) => service.activateSidebarSelection()),
         ),
       navigateSidebar: (offset: number) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.navigateSidebar(offset))
-        ),
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.navigateSidebar(offset))),
       setNavigationArea: (area: DesktopViewStateSnapshot["navigationArea"]) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.setNavigationArea(area))
-        ),
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.setNavigationArea(area))),
       setSearchText: (text: string) =>
         run(Effect.flatMap(DesktopWorkspaceService, (service) => service.setSearchText(text))),
       setLayoutTargetRuntimeId: (runtimeId: string | null) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.setLayoutTargetRuntimeId(runtimeId)
-          )
+            service.setLayoutTargetRuntimeId(runtimeId),
+          ),
         ),
       createWorkspace: (projectId: string, workspaceKind?: "worktree" | "linked") =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.createWorkspace(projectId, workspaceKind)
-          )
+            service.createWorkspace(projectId, workspaceKind),
+          ),
         ),
       retryWorkspace: (workspaceId: string) =>
         run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.retryWorkspace(workspaceId))
+          Effect.flatMap(DesktopWorkspaceService, (service) => service.retryWorkspace(workspaceId)),
         ),
       removeWorkspace: (workspaceId: string) =>
         run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.removeWorkspace(workspaceId))
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.removeWorkspace(workspaceId),
+          ),
         ),
       updateWorkspacePrState: (workspaceId: string, prState: string) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.updateWorkspacePrState(workspaceId, prState)
-          )
+            service.updateWorkspacePrState(workspaceId, prState),
+          ),
         ),
       setPrAwaiting: (workspaceId: string, awaiting: boolean) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.setPrAwaiting(workspaceId, awaiting)
-          )
+            service.setPrAwaiting(workspaceId, awaiting),
+          ),
         ),
       archiveWorkspace: (workspaceId: string) =>
         run(
-          Effect.flatMap(DesktopWorkspaceService, (service) => service.archiveWorkspace(workspaceId))
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.archiveWorkspace(workspaceId),
+          ),
         ),
       connectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.connect())),
-      disconnectDaemon: () =>
-        run(Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect())),
+      disconnectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect())),
     }),
-    [run]
+    [run],
   );
 }

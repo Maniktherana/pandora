@@ -16,15 +16,15 @@ export interface UiPreferencesServiceApi {
   readonly setSidebarVisible: (visible: boolean) => Effect.Effect<void, UiPreferenceError>;
   readonly setFileTreeOpenForWorkspace: (
     workspaceId: string,
-    open: boolean
+    open: boolean,
   ) => Effect.Effect<void, UiPreferenceError>;
   readonly syncSelectedWorkspace: (
     workspaceId: string | null,
-    ready: boolean
+    ready: boolean,
   ) => Effect.Effect<void, UiPreferenceError>;
   readonly saveSelection: (
     projectId: string | null,
-    workspaceId: string | null
+    workspaceId: string | null,
   ) => Effect.Effect<void, UiPreferenceError>;
 }
 
@@ -59,8 +59,7 @@ export const UiPreferencesServiceLive = Layer.effect(
       hydrate: () =>
         Effect.gen(function* () {
           const [sidebarVisible, fileTreeOpenMap] = yield* Effect.tryPromise({
-            try: () =>
-              Promise.all([loadPersistedSidebarVisible(), loadPersistedFileTreeOpenMap()]),
+            try: () => Promise.all([loadPersistedSidebarVisible(), loadPersistedFileTreeOpenMap()]),
             catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
           });
           fileTreeOpenByWorkspace.clear();
@@ -139,5 +138,5 @@ export const UiPreferencesServiceLive = Layer.effect(
           catch: (cause) => new UiPreferenceError({ cause, key: "selection" }),
         }),
     } satisfies UiPreferencesServiceApi;
-  })
+  }),
 );

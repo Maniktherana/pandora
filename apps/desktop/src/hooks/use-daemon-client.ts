@@ -7,14 +7,10 @@ export default function useDaemonClient() {
   const runtime = useDesktopRuntime();
 
   useEffect(() => {
-    void runtime.runPromise(
-      Effect.flatMap(DaemonGateway, (gateway) => gateway.connect())
-    );
+    void runtime.runPromise(Effect.flatMap(DaemonGateway, (gateway) => gateway.connect()));
 
     return () => {
-      void runtime.runPromise(
-        Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect())
-      );
+      void runtime.runPromise(Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect()));
     };
   }, [runtime]);
 }

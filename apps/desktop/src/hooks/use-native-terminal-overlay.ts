@@ -11,15 +11,15 @@ export function useNativeTerminalOverlay(active: boolean) {
 
     void runtime.runPromise(
       Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay()).pipe(
-        Effect.catchAll(() => Effect.void)
-      )
+        Effect.catchAll(() => Effect.void),
+      ),
     );
 
     return () => {
       void runtime.runPromise(
         Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay()).pipe(
-          Effect.catchAll(() => Effect.void)
-        )
+          Effect.catchAll(() => Effect.void),
+        ),
       );
     };
   }, [active, runtime]);

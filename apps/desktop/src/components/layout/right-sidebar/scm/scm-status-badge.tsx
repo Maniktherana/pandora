@@ -10,11 +10,10 @@ export function ScmStatusBadge({ text, className }: ScmStatusBadgeProps) {
     <span
       className={cn(
         "shrink-0 rounded px-1 font-mono text-[10px] font-medium text-[var(--theme-text-muted)]",
-        className
+        className,
       )}
     >
       {text}
     </span>
   );
 }
-

@@ -1,15 +1,11 @@
-import { ChevronRightIcon, FileIcon, FolderIcon } from "lucide-react"
+import { ChevronRightIcon, FileIcon, FolderIcon } from "lucide-react";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-type FileTreeItem = { name: string } | { name: string; items: FileTreeItem[] }
+type FileTreeItem = { name: string } | { name: string; items: FileTreeItem[] };
 
 export function CollapsibleFileTree() {
   const fileTree: FileTreeItem[] = [
@@ -49,11 +45,7 @@ export function CollapsibleFileTree() {
     },
     {
       name: "public",
-      items: [
-        { name: "favicon.ico" },
-        { name: "logo.svg" },
-        { name: "images" },
-      ],
+      items: [{ name: "favicon.ico" }, { name: "logo.svg" }, { name: "images" }],
     },
     { name: "app.tsx" },
     { name: "layout.tsx" },
@@ -62,20 +54,32 @@ export function CollapsibleFileTree() {
     { name: "tsconfig.json" },
     { name: "README.md" },
     { name: ".gitignore" },
-  ]
+  ];
 
   const renderItem = (fileItem: FileTreeItem) => {
     if ("items" in fileItem) {
       return (
         <Collapsible key={fileItem.name}>
-          <CollapsibleTrigger render={<Button variant="ghost" size="sm" className="group w-full justify-start transition-none hover:bg-accent hover:text-accent-foreground"><ChevronRightIcon className="group-data-[state=open]:rotate-90" /><FolderIcon />{fileItem.name}</Button>} />
+          <CollapsibleTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="group w-full justify-start transition-none hover:bg-accent hover:text-accent-foreground"
+              >
+                <ChevronRightIcon className="group-data-[state=open]:rotate-90" />
+                <FolderIcon />
+                {fileItem.name}
+              </Button>
+            }
+          />
           <CollapsibleContent className="mt-1 ml-5 style-lyra:ml-4">
             <div className="flex flex-col gap-1">
               {fileItem.items.map((child) => renderItem(child))}
             </div>
           </CollapsibleContent>
         </Collapsible>
-      )
+      );
     }
     return (
       <Button
@@ -87,8 +91,8 @@ export function CollapsibleFileTree() {
         <FileIcon />
         <span>{fileItem.name}</span>
       </Button>
-    )
-  }
+    );
+  };
 
   return (
     <Card className="mx-auto w-full max-w-[16rem] gap-2" size="sm">
@@ -101,10 +105,8 @@ export function CollapsibleFileTree() {
         </Tabs>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col gap-1">
-          {fileTree.map((item) => renderItem(item))}
-        </div>
+        <div className="flex flex-col gap-1">{fileTree.map((item) => renderItem(item))}</div>
       </CardContent>
     </Card>
-  )
+  );
 }

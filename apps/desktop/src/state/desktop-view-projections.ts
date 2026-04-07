@@ -1,8 +1,4 @@
-import type {
-  ProjectRecord,
-  WorkspaceRecord,
-  WorkspaceRuntimeState,
-} from "@/lib/shared/types";
+import type { ProjectRecord, WorkspaceRecord, WorkspaceRuntimeState } from "@/lib/shared/types";
 
 export type NavigationArea = "sidebar" | "workspace";
 
@@ -80,8 +76,9 @@ export function buildDesktopView(state: DesktopViewStateSnapshot): DesktopView {
     state.projects.find((project) => project.id === state.selectedProjectID) ?? null;
   const selectedWorkspace =
     state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceID) ?? null;
-  const activeRuntime =
-    state.selectedWorkspaceID ? state.runtimes[state.selectedWorkspaceID] ?? null : null;
+  const activeRuntime = state.selectedWorkspaceID
+    ? (state.runtimes[state.selectedWorkspaceID] ?? null)
+    : null;
 
   return {
     projects: state.projects,
@@ -99,10 +96,7 @@ export function buildDesktopView(state: DesktopViewStateSnapshot): DesktopView {
   };
 }
 
-export function buildWorkspaceView(
-  desktopView: DesktopView,
-  workspaceId: string
-): WorkspaceView {
+export function buildWorkspaceView(desktopView: DesktopView, workspaceId: string): WorkspaceView {
   return {
     workspaceId,
     workspace: desktopView.workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
@@ -113,7 +107,7 @@ export function buildWorkspaceView(
 
 export function buildProjectTerminalView(
   desktopView: DesktopView,
-  runtimeId: string
+  runtimeId: string,
 ): ProjectTerminalView {
   return {
     runtimeId,

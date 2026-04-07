@@ -21,13 +21,19 @@ describe("getVisibleWorkspaceTerminalSlotIds", () => {
           type: "leaf",
           id: "left",
           selectedIndex: 1,
-          tabs: [{ kind: "editor", path: "README.md" }, { kind: "terminal", slotId: "slot-a" }],
+          tabs: [
+            { kind: "editor", path: "README.md" },
+            { kind: "terminal", slotId: "slot-a" },
+          ],
         },
         {
           type: "leaf",
           id: "right",
           selectedIndex: 0,
-          tabs: [{ kind: "diff", path: "src/app.ts", source: "working" }, { kind: "terminal", slotId: "slot-b" }],
+          tabs: [
+            { kind: "diff", path: "src/app.ts", source: "working" },
+            { kind: "terminal", slotId: "slot-b" },
+          ],
         },
       ],
     };
@@ -114,7 +120,7 @@ describe("mergeConnectedTerminalSlotIds", () => {
     const merged = mergeConnectedTerminalSlotIds(
       ["slot-a", "slot-b", "slot-stale"],
       ["slot-c"],
-      ["slot-a", "slot-b", "slot-c"]
+      ["slot-a", "slot-b", "slot-c"],
     );
 
     expect([...merged]).toEqual(["slot-a", "slot-b", "slot-c"]);

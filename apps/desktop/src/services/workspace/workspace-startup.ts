@@ -30,12 +30,12 @@ export interface WorkspaceStartupController {
   startWorkspaceStartup: (
     set: WorkspaceStartupSet,
     get: WorkspaceStartupGet,
-    workspace: WorkspaceRecord
+    workspace: WorkspaceRecord,
   ) => void;
   interruptWorkspaceStartup: (
     set: WorkspaceStartupSet,
     workspaceId: string,
-    disconnected?: boolean
+    disconnected?: boolean,
   ) => void;
 }
 
@@ -53,7 +53,7 @@ export function createWorkspaceRuntimeState(
     terminalPanel?: WorkspaceRuntimeState["terminalPanel"];
     layoutLoading: boolean;
     layoutLoaded: boolean;
-  }
+  },
 ): WorkspaceRuntimeState {
   return {
     workspaceId,
@@ -77,7 +77,7 @@ export function createPlaceholderWorkspaceRoot() {
 function loadWorkspaceLayoutEffect(
   get: WorkspaceStartupGet,
   set: WorkspaceStartupSet,
-  workspaceId: string
+  workspaceId: string,
 ) {
   return Effect.tryPromise({
     try: () => invoke<unknown>("load_workspace_layout", { workspaceId }),
@@ -103,16 +103,16 @@ function loadWorkspaceLayoutEffect(
         // Reconcile any live slots into the loaded layout. Without this, slots that
         // arrive while layoutLoading is true can be dropped from the visible pane tree.
         get().ensureRuntimeLayout(workspaceId);
-      })
+      }),
     ),
-    Effect.asVoid
+    Effect.asVoid,
   );
 }
 
 export function resetWorkspaceStartupState(
   set: WorkspaceStartupSet,
   workspaceId: string,
-  disconnected = false
+  disconnected = false,
 ) {
   set((s) => {
     const runtime = s.runtimes[workspaceId];
@@ -130,7 +130,7 @@ export function resetWorkspaceStartupState(
 export function startWorkspaceRuntimeEffect(
   get: WorkspaceStartupGet,
   set: WorkspaceStartupSet,
-  workspace: WorkspaceRecord
+  workspace: WorkspaceRecord,
 ) {
   const defaultCwd = workspace.workspaceContextSubpath
     ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
@@ -154,7 +154,7 @@ export function startWorkspaceRuntimeEffect(
         }),
         loadWorkspaceLayoutEffect(get, set, workspace.id),
       ],
-      { concurrency: "unbounded" }
+      { concurrency: "unbounded" },
     );
   }).pipe(
     Effect.timeout("10 seconds"),
@@ -162,15 +162,15 @@ export function startWorkspaceRuntimeEffect(
       Effect.sync(() => {
         console.error("Workspace startup failed:", error);
         resetWorkspaceStartupState(set, workspace.id, true);
-      })
-    )
+      }),
+    ),
   );
 }
 
 export function syncProjectScopedRuntime(
   set: WorkspaceStartupSet,
   get: WorkspaceStartupGet,
-  workspace: WorkspaceRecord
+  workspace: WorkspaceRecord,
 ) {
   const project = get().projects.find((p) => p.id === workspace.projectId);
   if (!project || workspace.status !== "ready") return;
@@ -199,7 +199,7 @@ export function syncProjectScopedRuntime(
 export function ensureWorkspaceStartupRuntime(
   set: WorkspaceStartupSet,
   get: WorkspaceStartupGet,
-  workspace: WorkspaceRecord
+  workspace: WorkspaceRecord,
 ) {
   const runtime = get().runtimes[workspace.id];
   if (runtime && (runtime.layoutLoaded || runtime.layoutLoading)) return;
@@ -231,7 +231,7 @@ export function createWorkspaceStartupController(): WorkspaceStartupController {
   function interruptWorkspaceStartup(
     set: WorkspaceStartupSet,
     workspaceId: string,
-    disconnected = false
+    disconnected = false,
   ) {
     if (current?.workspaceId !== workspaceId) return;
 
@@ -243,7 +243,7 @@ export function createWorkspaceStartupController(): WorkspaceStartupController {
   function startWorkspaceStartup(
     set: WorkspaceStartupSet,
     get: WorkspaceStartupGet,
-    workspace: WorkspaceRecord
+    workspace: WorkspaceRecord,
   ) {
     if (current && current.workspaceId !== workspace.id) {
       interruptWorkspaceStartup(set, current.workspaceId);

@@ -8,4 +8,3 @@ export function useFileTreeExpansion(): ExpansionCtx {
   if (!ctx) throw new Error("useFileTreeExpansion outside provider");
   return ctx;
 }
-

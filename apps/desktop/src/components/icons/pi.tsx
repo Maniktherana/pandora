@@ -2,7 +2,10 @@ import type { SVGProps } from "react";
 
 const PiAgent = (props: SVGProps<SVGSVGElement>) => (
   <svg {...props} preserveAspectRatio="xMidYMid" viewBox="0 0 800 800">
-   <path fill="#fff" fillRule="evenodd" d="
+    <path
+      fill="#fff"
+      fillRule="evenodd"
+      d="
     M165.29 165.29
     H517.36
     V400
@@ -17,7 +20,8 @@ const PiAgent = (props: SVGProps<SVGSVGElement>) => (
     H400
     V282.65
     Z
-  "/>
+  "
+    />
   </svg>
 );
 

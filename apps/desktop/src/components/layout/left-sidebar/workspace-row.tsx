@@ -5,10 +5,7 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
 import { StatusDot } from "./status-dot";
-import {
-  WORKSPACE_KIND_LABEL,
-  WORKSPACE_KIND_TITLE,
-} from "./left-sidebar.types";
+import { WORKSPACE_KIND_LABEL, WORKSPACE_KIND_TITLE } from "./left-sidebar.types";
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
@@ -39,7 +36,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
             ? "bg-[var(--theme-panel-interactive)] border border-[var(--theme-interactive)]/35"
             : isSelected
               ? "bg-[var(--theme-panel-hover)] border border-[var(--theme-border)]"
-              : "hover:bg-[var(--theme-panel-hover)] border border-transparent"
+              : "hover:bg-[var(--theme-panel-hover)] border border-transparent",
         )}
       >
         <StatusDot status={workspace.status} />
@@ -51,7 +48,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
             "shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded",
             (workspace.workspaceKind ?? "worktree") === "linked"
               ? "bg-sky-500/15 text-sky-400/90"
-              : "bg-violet-500/15 text-violet-300/90"
+              : "bg-violet-500/15 text-violet-300/90",
           )}
           title={WORKSPACE_KIND_TITLE[workspace.workspaceKind ?? "worktree"]}
         >
@@ -65,12 +62,11 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                 ? "bg-green-500/15 text-green-400/90"
                 : workspace.prState === "closed"
                   ? "bg-red-500/15 text-red-400/90"
-                  : "bg-blue-500/15 text-blue-400/90"
+                  : "bg-blue-500/15 text-blue-400/90",
             )}
             title={`PR #${workspace.prNumber} — ${workspace.prState}`}
           >
-            <GitPullRequest className="size-2.5" />
-            #{workspace.prNumber}
+            <GitPullRequest className="size-2.5" />#{workspace.prNumber}
           </span>
         )}
         {workspace.status === "failed" && (
@@ -108,4 +104,3 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
 }
 
 export const MemoWorkspaceRow = memo(WorkspaceRow);
-

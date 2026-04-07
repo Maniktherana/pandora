@@ -8,12 +8,10 @@ import { cn } from "@/lib/shared/utils";
  */
 export function panelResizeHandleClasses(
   direction: "horizontal" | "vertical",
-  enabledOrOptions: boolean | { enabled?: boolean } = true
+  enabledOrOptions: boolean | { enabled?: boolean } = true,
 ): string {
   const enabled =
-    typeof enabledOrOptions === "boolean"
-      ? enabledOrOptions
-      : (enabledOrOptions.enabled ?? true);
+    typeof enabledOrOptions === "boolean" ? enabledOrOptions : (enabledOrOptions.enabled ?? true);
   return cn(
     // High z-index so terminal/editor surfaces can't steal the hit area.
     "relative z-50 shrink-0 border-0 bg-transparent p-0 outline-none pointer-events-auto touch-none",
@@ -31,6 +29,6 @@ export function panelResizeHandleClasses(
           "bg-[var(--theme-text-faint)] transition-colors",
           "data-[resize-handle-state=hover]:bg-[var(--theme-interactive)]",
           "data-[resize-handle-state=drag]:bg-[var(--theme-interactive)]",
-        ]
+        ],
   );
 }

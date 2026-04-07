@@ -14,16 +14,16 @@ export function useUiPreferencesActions() {
       syncSelectedWorkspace: (workspaceId: string | null, ready: boolean) =>
         run(
           Effect.flatMap(UiPreferencesService, (prefs) =>
-            prefs.syncSelectedWorkspace(workspaceId, ready)
-          )
+            prefs.syncSelectedWorkspace(workspaceId, ready),
+          ),
         ),
       setFileTreeOpenForWorkspace: (workspaceId: string, open: boolean) =>
         run(
           Effect.flatMap(UiPreferencesService, (prefs) =>
-            prefs.setFileTreeOpenForWorkspace(workspaceId, open)
-          )
+            prefs.setFileTreeOpenForWorkspace(workspaceId, open),
+          ),
         ),
     }),
-    [run]
+    [run],
   );
 }

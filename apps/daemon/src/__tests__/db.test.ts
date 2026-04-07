@@ -10,7 +10,6 @@ import {
   openDatabase,
   removeSessionDefinition,
   removeSlotDefinition,
-  updateSessionDefinition,
   updateSlotDefinition,
 } from "../db";
 
@@ -116,7 +115,7 @@ describe("sqlite state", () => {
     db.query(
       `INSERT INTO runtime_metadata (key, value)
        VALUES ('seed_terminal_when_empty', '1')
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     ).run();
     db.close();
 

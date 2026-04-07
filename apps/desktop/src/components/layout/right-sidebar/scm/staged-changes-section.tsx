@@ -1,10 +1,6 @@
 import { ChevronRight, FileText, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { cn } from "@/lib/shared/utils";
 import {
@@ -73,11 +69,7 @@ export function StagedChangesSection({
                   disabled={busy}
                   onClick={() => onOpenDiff(entry.path, "staged")}
                 >
-                  <FileTypeIcon
-                    path={entry.path}
-                    kind="file"
-                    className="pointer-events-none"
-                  />
+                  <FileTypeIcon path={entry.path} kind="file" className="pointer-events-none" />
                 </Button>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1">
@@ -91,7 +83,7 @@ export function StagedChangesSection({
                       type="button"
                       className={cn(
                         "min-w-0 truncate text-left font-mono text-[11px] hover:opacity-80 hover:underline",
-                        scmToneTextClass(tone)
+                        scmToneTextClass(tone),
                       )}
                       title={entry.path}
                       disabled={busy}
@@ -141,4 +133,3 @@ export function StagedChangesSection({
     </Collapsible>
   );
 }
-

@@ -12,7 +12,6 @@ export function TreeDragOverlay({ session }: { session: InternalTreeDragSession 
     >
       {session.label}
     </div>,
-    document.body
+    document.body,
   );
 }
-

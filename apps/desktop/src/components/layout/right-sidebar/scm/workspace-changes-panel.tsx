@@ -29,9 +29,7 @@ import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { ChangesFooter } from "./changes-footer";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
-import {
-  SCM_CHANGES_REFRESH_INTERVAL_MS,
-} from "./scm.types";
+import { SCM_CHANGES_REFRESH_INTERVAL_MS } from "./scm.types";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -117,7 +115,9 @@ export default function WorkspaceChangesPanel({
       void run(() => scmDiscardUntracked(workspaceRoot, entry.path));
       return;
     }
-    if (!window.confirm(`Discard local changes to "${entry.path}"? Staged changes are not removed.`))
+    if (
+      !window.confirm(`Discard local changes to "${entry.path}"? Staged changes are not removed.`)
+    )
       return;
     void run(() => scmDiscardTracked(workspaceRoot, entry.path));
   };
@@ -131,7 +131,7 @@ export default function WorkspaceChangesPanel({
       if (ctx.isDefaultBranch) {
         if (
           !window.confirm(
-            `You're on ${ctx.baseBranch}. PRs are usually from feature branches. Continue anyway?`
+            `You're on ${ctx.baseBranch}. PRs are usually from feature branches. Continue anyway?`,
           )
         ) {
           setPrSending(false);
@@ -149,7 +149,7 @@ export default function WorkspaceChangesPanel({
       const target = findAgentTerminal(workspaceRuntime, projectRuntime);
       if (!target) {
         setPrError(
-          "No coding agent detected. Start an agent (claude, codex, etc.) in a terminal, then try again."
+          "No coding agent detected. Start an agent (claude, codex, etc.) in a terminal, then try again.",
         );
         setPrSending(false);
         return;
@@ -163,7 +163,7 @@ export default function WorkspaceChangesPanel({
         const leaves = getAllLeaves(workspaceRuntime.root);
         for (const leaf of leaves) {
           const tabIdx = leaf.tabs.findIndex(
-            (tab) => tab.kind === "terminal" && tab.slotId === target.slotId
+            (tab) => tab.kind === "terminal" && tab.slotId === target.slotId,
           );
           if (tabIdx >= 0) {
             layoutCommands.setFocusedPane(leaf.id);
@@ -308,4 +308,3 @@ export default function WorkspaceChangesPanel({
     </div>
   );
 }
-

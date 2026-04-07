@@ -8,15 +8,15 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
-import {
-  decorationForScmEntry,
-  scmStatus,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+import { decorationForScmEntry, scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type {
   ScmStatusEntry,
   TreeScmDecoration,
 } from "@/components/layout/right-sidebar/scm/scm.types";
-import { loadFileTreeExpandedPaths, persistFileTreeExpandedPaths } from "@/components/layout/right-sidebar/files/files-persistence.utils";
+import {
+  loadFileTreeExpandedPaths,
+  persistFileTreeExpandedPaths,
+} from "@/components/layout/right-sidebar/files/files-persistence.utils";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
 import {
   INTERNAL_DRAG_THRESHOLD_PX,
@@ -53,12 +53,10 @@ function isPointerOutsideWindow(pointer: DragPointer): boolean {
 }
 
 function isExternalFileDrag(
-  event: Pick<DragEvent, "dataTransfer"> | Pick<React.DragEvent, "dataTransfer">
+  event: Pick<DragEvent, "dataTransfer"> | Pick<React.DragEvent, "dataTransfer">,
 ): boolean {
   const types = event.dataTransfer?.types;
-  return Array.isArray(types)
-    ? types.includes("Files")
-    : Array.from(types ?? []).includes("Files");
+  return Array.isArray(types) ? types.includes("Files") : Array.from(types ?? []).includes("Files");
 }
 
 function scoreTone(tone: TreeScmDecoration["tone"]): number {
@@ -80,13 +78,13 @@ function scoreTone(tone: TreeScmDecoration["tone"]): number {
 
 function createDecorationResolver(entries: ScmStatusEntry[]) {
   const visibleEntries = entries.filter(
-    (entry) => decorationForScmEntry(entry, { includeDeleted: false }).tone !== null
+    (entry) => decorationForScmEntry(entry, { includeDeleted: false }).tone !== null,
   );
   const exact = new Map(
     visibleEntries.map((entry) => [
       entry.path,
       decorationForScmEntry(entry, { includeDeleted: false }),
-    ])
+    ]),
   );
   return (relPath: string, isDirectory: boolean, isIgnored?: boolean): TreeScmDecoration => {
     if (isIgnored) return { badge: null, tone: "ignored", dimmed: true };
@@ -126,8 +124,7 @@ export default function RightSidebar({
   const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [refreshTick, setRefreshTick] = useState(0);
-  const [pendingPointerDrag, setPendingPointerDrag] =
-    useState<PendingPointerDrag | null>(null);
+  const [pendingPointerDrag, setPendingPointerDrag] = useState<PendingPointerDrag | null>(null);
   const [dragSession, setDragSession] = useState<TreeDragSession | null>(null);
   const [hoverSuppressed, setHoverSuppressed] = useState(false);
   const treeBodyRef = useRef<HTMLDivElement | null>(null);
@@ -178,11 +175,7 @@ export default function RightSidebar({
   }, []);
 
   const setExternalDragTarget = useCallback(
-    (
-      target: TreeDropTarget | null,
-      pointer: DragPointer,
-      paths?: string[]
-    ) => {
+    (target: TreeDropTarget | null, pointer: DragPointer, paths?: string[]) => {
       if (externalLeaveTimerRef.current !== null) {
         window.clearTimeout(externalLeaveTimerRef.current);
         externalLeaveTimerRef.current = null;
@@ -200,15 +193,13 @@ export default function RightSidebar({
         }
         return {
           kind: "external-native",
-          paths:
-            paths ??
-            (current?.kind === "external-native" ? current.paths : []),
+          paths: paths ?? (current?.kind === "external-native" ? current.paths : []),
           pointer,
           target,
         };
       });
     },
-    []
+    [],
   );
 
   const armSuppressClick = useCallback(() => {
@@ -217,15 +208,12 @@ export default function RightSidebar({
 
   const shouldSuppressClick = useCallback(
     () => performance.now() < suppressClickUntilRef.current,
-    []
+    [],
   );
 
-  const onOpenDiffMenu = useCallback(
-    (clientX: number, clientY: number, relPath: string) => {
-      setDiffMenu({ x: clientX, y: clientY, relPath });
-    },
-    []
-  );
+  const onOpenDiffMenu = useCallback((clientX: number, clientY: number, relPath: string) => {
+    setDiffMenu({ x: clientX, y: clientY, relPath });
+  }, []);
 
   const computeDropTargetFromPoint = useCallback(
     (clientX: number, clientY: number): TreeDropTarget | null => {
@@ -265,16 +253,16 @@ export default function RightSidebar({
 
       return { mode: "directory", targetRelPath: parentRelPath };
     },
-    []
+    [],
   );
 
   const computeDropTargetFromNativePosition = useCallback(
     (position: { x: number; y: number }) =>
       computeDropTargetFromPoint(
         position.x / window.devicePixelRatio,
-        position.y / window.devicePixelRatio
+        position.y / window.devicePixelRatio,
       ),
-    [computeDropTargetFromPoint]
+    [computeDropTargetFromPoint],
   );
 
   const nativePositionToPointer = useCallback(
@@ -282,7 +270,7 @@ export default function RightSidebar({
       x: position.x / window.devicePixelRatio,
       y: position.y / window.devicePixelRatio,
     }),
-    []
+    [],
   );
 
   const isPointWithinTreeBody = useCallback((clientX: number, clientY: number) => {
@@ -314,7 +302,7 @@ export default function RightSidebar({
       }
       return false;
     },
-    [workspaceId]
+    [workspaceId],
   );
 
   const resolveDestinationDirectory = useCallback(
@@ -327,7 +315,7 @@ export default function RightSidebar({
           return target.targetRelPath ?? null;
       }
     },
-    []
+    [],
   );
 
   const clearPointerDragState = useCallback(() => {
@@ -357,11 +345,7 @@ export default function RightSidebar({
   }, [suppressHoverBriefly]);
 
   const performInternalMove = useCallback(
-    async (
-      sourceRelPath: string,
-      sourceKind: TreeRowKind,
-      target: TreeDropTarget | null
-    ) => {
+    async (sourceRelPath: string, sourceKind: TreeRowKind, target: TreeDropTarget | null) => {
       const destRelativePath = resolveDestinationDirectory(target);
       if (destRelativePath === null) return;
 
@@ -384,20 +368,17 @@ export default function RightSidebar({
       });
       refreshTree();
     },
-    [refreshTree, resolveDestinationDirectory, workspaceRoot]
+    [refreshTree, resolveDestinationDirectory, workspaceRoot],
   );
 
-  const startNativeFileDrag = useCallback(
-    async (sourceAbsPath: string) => {
-      await invoke("plugin:drag|start_drag", {
-        item: [sourceAbsPath],
-        image: TRANSPARENT_DRAG_IMAGE,
-        options: { mode: "copy" },
-        onEvent: new Channel(() => {}),
-      });
-    },
-    []
-  );
+  const startNativeFileDrag = useCallback(async (sourceAbsPath: string) => {
+    await invoke("plugin:drag|start_drag", {
+      item: [sourceAbsPath],
+      image: TRANSPARENT_DRAG_IMAGE,
+      options: { mode: "copy" },
+      onEvent: new Channel(() => {}),
+    });
+  }, []);
 
   const handoffInternalDragToNative = useCallback(
     async (session: InternalTreeDragSession) => {
@@ -411,7 +392,7 @@ export default function RightSidebar({
         refreshTree();
       }
     },
-    [armSuppressClick, clearAllDragState, refreshTree, startNativeFileDrag]
+    [armSuppressClick, clearAllDragState, refreshTree, startNativeFileDrag],
   );
 
   const onRowPointerDown = useCallback(
@@ -424,11 +405,9 @@ export default function RightSidebar({
         label: handle.label,
         startPointer: { x: event.clientX, y: event.clientY },
       });
-      setDragSession((current) =>
-        current?.kind === "external-native" ? null : current
-      );
+      setDragSession((current) => (current?.kind === "external-native" ? null : current));
     },
-    [leftMode]
+    [leftMode],
   );
 
   const onRowClickCapture = useCallback(
@@ -437,7 +416,7 @@ export default function RightSidebar({
       event.preventDefault();
       event.stopPropagation();
     },
-    [shouldSuppressClick]
+    [shouldSuppressClick],
   );
 
   const handleTreeDragEnter = useCallback(
@@ -445,12 +424,12 @@ export default function RightSidebar({
       if (pendingPointerDrag || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
-      setExternalDragTarget(
-        computeDropTargetFromPoint(event.clientX, event.clientY),
-        { x: event.clientX, y: event.clientY }
-      );
+      setExternalDragTarget(computeDropTargetFromPoint(event.clientX, event.clientY), {
+        x: event.clientX,
+        y: event.clientY,
+      });
     },
-    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget]
+    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
   );
 
   const handleTreeDragOver = useCallback(
@@ -458,12 +437,12 @@ export default function RightSidebar({
       if (pendingPointerDrag || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
-      setExternalDragTarget(
-        computeDropTargetFromPoint(event.clientX, event.clientY),
-        { x: event.clientX, y: event.clientY }
-      );
+      setExternalDragTarget(computeDropTargetFromPoint(event.clientX, event.clientY), {
+        x: event.clientX,
+        y: event.clientY,
+      });
     },
-    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget]
+    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
   );
 
   const handleTreeDragLeave = useCallback(
@@ -479,7 +458,7 @@ export default function RightSidebar({
         externalLeaveTimerRef.current = null;
       }, 60);
     },
-    [clearAllDragState, dragSession?.kind, isPointWithinTreeBody, pendingPointerDrag]
+    [clearAllDragState, dragSession?.kind, isPointWithinTreeBody, pendingPointerDrag],
   );
 
   const handleTreeDrop = useCallback(
@@ -490,7 +469,12 @@ export default function RightSidebar({
       externalTargetRef.current = computeDropTargetFromPoint(event.clientX, event.clientY);
       clearExternalDragVisualState();
     },
-    [clearExternalDragVisualState, computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag]
+    [
+      clearExternalDragVisualState,
+      computeDropTargetFromPoint,
+      dragSession?.kind,
+      pendingPointerDrag,
+    ],
   );
 
   const activeDropTarget = dragSession?.target ?? null;
@@ -564,7 +548,7 @@ export default function RightSidebar({
               pointer,
               target: computeDropTargetFromPoint(pointer.x, pointer.y),
             }
-          : current
+          : current,
       );
     };
 
@@ -576,15 +560,12 @@ export default function RightSidebar({
       if (dragSession?.kind !== "internal") return;
 
       const pointer = { x: event.clientX, y: event.clientY };
-      const target =
-        computeDropTargetFromPoint(pointer.x, pointer.y) ?? dragSession.target;
+      const target = computeDropTargetFromPoint(pointer.x, pointer.y) ?? dragSession.target;
       const sourceRelPath = dragSession.sourceRelPath;
       const sourceKind = dragSession.sourceKind;
 
       clearPointerDragState();
-      void performInternalMove(sourceRelPath, sourceKind, target).catch(
-        console.error
-      );
+      void performInternalMove(sourceRelPath, sourceKind, target).catch(console.error);
     };
 
     const onPointerCancel = () => {
@@ -637,97 +618,94 @@ export default function RightSidebar({
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    void getCurrentWindow().onDragDropEvent((event: { payload: NativeDragPayload }) => {
-      if (leftModeRef.current !== "files") return;
-      if (
-        pendingPointerDragRef.current !== null ||
-        dragSessionRef.current?.kind === "internal"
-      ) {
-        return;
-      }
-
-      const payload = event.payload;
-
-      if (payload.type === "enter") {
-        const pointer = nativePositionToPointer(payload.position);
-        setExternalDragTarget(
-          computeDropTargetFromNativePosition(payload.position),
-          pointer,
-          payload.paths
-        );
-        return;
-      }
-
-      if (payload.type === "over") {
-        const pointer = nativePositionToPointer(payload.position);
-        setExternalDragTarget(
-          computeDropTargetFromNativePosition(payload.position),
-          pointer
-        );
-        return;
-      }
-
-      if (payload.type === "leave") {
-        clearAllDragState();
-        return;
-      }
-
-      if (payload.type !== "drop") return;
-
-      const target =
-        externalTargetRef.current ??
-        computeDropTargetFromNativePosition(payload.position) ??
-        { mode: "root", targetRelPath: null };
-      const destRelativePath = resolveDestinationDirectory(target);
-      clearAllDragState();
-
-      if (destRelativePath === null) return;
-
-      const root = workspaceRootRef.current;
-      const rootPrefix = root.endsWith("/") ? root : `${root}/`;
-      const externalPaths: string[] = [];
-      const moves: Promise<unknown>[] = [];
-
-      for (const path of payload.paths) {
-        if (path.startsWith(rootPrefix)) {
-          const sourceRelPath = path.slice(rootPrefix.length);
-          if (destRelativePath === getParentRelPath(sourceRelPath)) {
-            externalPaths.push(path);
-            continue;
-          }
-          if (
-            destRelativePath === sourceRelPath ||
-            destRelativePath.startsWith(`${sourceRelPath}/`)
-          ) {
-            continue;
-          }
-          moves.push(
-            invoke("move_within_workspace", {
-              workspaceRoot: root,
-              sourceRelativePath: sourceRelPath,
-              destRelativePath,
-            })
-          );
-        } else {
-          externalPaths.push(path);
+    void getCurrentWindow()
+      .onDragDropEvent((event: { payload: NativeDragPayload }) => {
+        if (leftModeRef.current !== "files") return;
+        if (pendingPointerDragRef.current !== null || dragSessionRef.current?.kind === "internal") {
+          return;
         }
-      }
 
-      if (moves.length > 0) {
-        void Promise.all(moves).then(refreshTree).catch(console.error);
-      }
-      if (externalPaths.length > 0) {
-        void invoke("copy_into_workspace", {
-          workspaceRoot: root,
-          destRelativePath,
-          sourcePaths: externalPaths,
-        })
-          .then(refreshTree)
-          .catch(console.error);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+        const payload = event.payload;
+
+        if (payload.type === "enter") {
+          const pointer = nativePositionToPointer(payload.position);
+          setExternalDragTarget(
+            computeDropTargetFromNativePosition(payload.position),
+            pointer,
+            payload.paths,
+          );
+          return;
+        }
+
+        if (payload.type === "over") {
+          const pointer = nativePositionToPointer(payload.position);
+          setExternalDragTarget(computeDropTargetFromNativePosition(payload.position), pointer);
+          return;
+        }
+
+        if (payload.type === "leave") {
+          clearAllDragState();
+          return;
+        }
+
+        if (payload.type !== "drop") return;
+
+        const target = externalTargetRef.current ??
+          computeDropTargetFromNativePosition(payload.position) ?? {
+            mode: "root",
+            targetRelPath: null,
+          };
+        const destRelativePath = resolveDestinationDirectory(target);
+        clearAllDragState();
+
+        if (destRelativePath === null) return;
+
+        const root = workspaceRootRef.current;
+        const rootPrefix = root.endsWith("/") ? root : `${root}/`;
+        const externalPaths: string[] = [];
+        const moves: Promise<unknown>[] = [];
+
+        for (const path of payload.paths) {
+          if (path.startsWith(rootPrefix)) {
+            const sourceRelPath = path.slice(rootPrefix.length);
+            if (destRelativePath === getParentRelPath(sourceRelPath)) {
+              externalPaths.push(path);
+              continue;
+            }
+            if (
+              destRelativePath === sourceRelPath ||
+              destRelativePath.startsWith(`${sourceRelPath}/`)
+            ) {
+              continue;
+            }
+            moves.push(
+              invoke("move_within_workspace", {
+                workspaceRoot: root,
+                sourceRelativePath: sourceRelPath,
+                destRelativePath,
+              }),
+            );
+          } else {
+            externalPaths.push(path);
+          }
+        }
+
+        if (moves.length > 0) {
+          void Promise.all(moves).then(refreshTree).catch(console.error);
+        }
+        if (externalPaths.length > 0) {
+          void invoke("copy_into_workspace", {
+            workspaceRoot: root,
+            destRelativePath,
+            sourcePaths: externalPaths,
+          })
+            .then(refreshTree)
+            .catch(console.error);
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
     return () => {
       unlisten?.();
     };
@@ -804,7 +782,7 @@ export default function RightSidebar({
 
   const isPathExpanded = useCallback(
     (relPath: string) => expandedPaths.has(relPath),
-    [expandedPaths]
+    [expandedPaths],
   );
 
   const setPathExpanded = useCallback(
@@ -816,24 +794,19 @@ export default function RightSidebar({
         if (expansionLoadedRef.current) {
           const workspaceID = workspaceId;
           const snapshot = new Set(next);
-          queueMicrotask(() =>
-            void persistFileTreeExpandedPaths(workspaceID, snapshot)
-          );
+          queueMicrotask(() => void persistFileTreeExpandedPaths(workspaceID, snapshot));
         }
         return next;
       });
     },
-    [workspaceId]
+    [workspaceId],
   );
 
   const expansionValue = useMemo<ExpansionCtx>(
     () => ({ isPathExpanded, setPathExpanded }),
-    [isPathExpanded, setPathExpanded]
+    [isPathExpanded, setPathExpanded],
   );
-  const resolveDecoration = useMemo(
-    () => createDecorationResolver(scmEntries),
-    [scmEntries]
-  );
+  const resolveDecoration = useMemo(() => createDecorationResolver(scmEntries), [scmEntries]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -878,12 +851,8 @@ export default function RightSidebar({
   }, [workspaceRoot, refreshTick]);
 
   return (
-    <div
-      className="flex h-full min-w-0 flex-col border-l border-[var(--theme-border)] bg-[#151515] select-none"
-    >
-      {dragSession?.kind === "internal" ? (
-        <TreeDragOverlay session={dragSession} />
-      ) : null}
+    <div className="flex h-full min-w-0 flex-col border-l border-[var(--theme-border)] bg-[#151515] select-none">
+      {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
 
       {diffMenu &&
         createPortal(
@@ -907,7 +876,7 @@ export default function RightSidebar({
               Open diff (staged)
             </button>
           </div>,
-          document.body
+          document.body,
         )}
 
       <div className="flex shrink-0 gap-0 border-b border-[var(--theme-border)] p-1">
@@ -919,7 +888,7 @@ export default function RightSidebar({
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "files"
               ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
-              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
+              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
           )}
           onClick={() => setLeftMode("files")}
         >
@@ -933,7 +902,7 @@ export default function RightSidebar({
             "h-7 flex-1 rounded-md text-[11px] font-medium",
             leftMode === "changes"
               ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
-              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
+              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
           )}
           onClick={() => setLeftMode("changes")}
         >
@@ -1001,7 +970,7 @@ export default function RightSidebar({
                   highlightedLeafDirectory={highlightedLeafDirectory}
                   isHoverSuppressed={isHoverSuppressed}
                 />
-              )
+              ),
             )}
           </div>
         </FileTreeExpansionContext.Provider>

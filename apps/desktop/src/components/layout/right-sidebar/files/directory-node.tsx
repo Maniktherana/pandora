@@ -105,8 +105,7 @@ export function DirectoryNode({
                   "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]",
                 scmToneTextClass(decoration.tone, decoration.dimmed),
                 decoration.dimmed && "opacity-55",
-                isTargetedDirectory &&
-                  "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]"
+                isTargetedDirectory && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
               )}
               data-tree-row-path={relPath}
               data-tree-row-kind="directory"
@@ -115,9 +114,7 @@ export function DirectoryNode({
                 paddingLeft: rowPaddingLeft,
                 ...(open
                   ? {
-                      top:
-                        depth * DIRECTORY_STICKY_ROW_OFFSET_PX -
-                        STICKY_TOP_COMPENSATION_PX,
+                      top: depth * DIRECTORY_STICKY_ROW_OFFSET_PX - STICKY_TOP_COMPENSATION_PX,
                       zIndex: DIRECTORY_STICKY_Z_INDEX_BASE - depth,
                     }
                   : null),
@@ -140,7 +137,7 @@ export function DirectoryNode({
                 <span
                   className={cn(
                     "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-                    scmToneTextClass(decoration.tone, false)
+                    scmToneTextClass(decoration.tone, false),
                   )}
                 >
                   {decoration.badge}
@@ -189,7 +186,7 @@ export function DirectoryNode({
                   decoration={resolveDecoration(
                     joinRel(relPath, entry.name),
                     false,
-                    entry.isIgnored
+                    entry.isIgnored,
                   )}
                   fileRelPath={joinRel(relPath, entry.name)}
                   onOpenDiffMenu={onOpenDiffMenu}
@@ -202,14 +199,11 @@ export function DirectoryNode({
                   rowKind="file"
                   rowRelPath={joinRel(relPath, entry.name)}
                   parentRelPath={relPath}
-                  absolutePath={joinAbsolutePath(
-                    workspaceRoot,
-                    joinRel(relPath, entry.name)
-                  )}
+                  absolutePath={joinAbsolutePath(workspaceRoot, joinRel(relPath, entry.name))}
                   highlightedLeafDirectory={highlightedLeafDirectory}
                   isHoverSuppressed={isHoverSuppressed}
                 />
-              )
+              ),
             )}
           </div>
         </CollapsibleContent>
@@ -217,4 +211,3 @@ export function DirectoryNode({
     </div>
   );
 }
-

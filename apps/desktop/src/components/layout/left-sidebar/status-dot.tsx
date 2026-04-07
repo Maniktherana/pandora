@@ -16,4 +16,3 @@ export function StatusDot({ status }: StatusDotProps) {
 
   return <div className={cn("w-2 h-2 rounded-full shrink-0", colors[status])} />;
 }
-

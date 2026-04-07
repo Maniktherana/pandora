@@ -65,10 +65,7 @@ export function migrateLayoutNode(node: unknown): LayoutNode | null {
       type: "leaf",
       id,
       tabs,
-      selectedIndex:
-        tabs.length === 0
-          ? 0
-          : Math.min(Math.max(0, selectedIndex), tabs.length - 1),
+      selectedIndex: tabs.length === 0 ? 0 : Math.min(Math.max(0, selectedIndex), tabs.length - 1),
     };
   }
   return null;

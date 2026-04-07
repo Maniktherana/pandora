@@ -1,9 +1,5 @@
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import type {
-  SessionState,
-  SlotState,
-  TerminalDisplayState,
-} from "@/lib/shared/types";
+import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import type { SessionMap, SidebarRow, SlotMap } from "./project-terminal.types";
 
 export const PROJECT_TERMINAL_DRAG_THRESHOLD = 5;
@@ -28,7 +24,7 @@ export function buildSidebarRows(
   panel: { groups: { id: string; children: string[] }[] } | null | undefined,
   slotMap: SlotMap,
   sessionsMap: SessionMap,
-  displayMap: Record<string, TerminalDisplayState>
+  displayMap: Record<string, TerminalDisplayState>,
 ): SidebarRow[] {
   if (!panel) return [];
   const rows: SidebarRow[] = [];
@@ -39,7 +35,11 @@ export function buildSidebarRows(
         groupIndex,
         slotId,
         slotIndex,
-        display: terminalDisplayForSlot(slotMap.get(slotId), sessionsMap.get(slotId), displayMap[slotId]),
+        display: terminalDisplayForSlot(
+          slotMap.get(slotId),
+          sessionsMap.get(slotId),
+          displayMap[slotId],
+        ),
         treeState:
           group.children.length === 1
             ? "none"

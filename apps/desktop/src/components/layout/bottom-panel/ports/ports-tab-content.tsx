@@ -33,7 +33,8 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
     const parsed = parseUserPort(draft);
     if (parsed == null) return;
     const exists =
-      sessionRows.some((row) => row.port === parsed) || manual.some((entry) => entry.port === parsed);
+      sessionRows.some((row) => row.port === parsed) ||
+      manual.some((entry) => entry.port === parsed);
     if (exists) {
       setDraft("");
       return;
@@ -67,7 +68,8 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
     return (
       <div className="px-4 py-5">
         <p className="mb-4 max-w-lg text-sm text-neutral-400">
-          No forwarded ports. Forward a port to access your locally running services over the internet.
+          No forwarded ports. Forward a port to access your locally running services over the
+          internet.
         </p>
         <button
           type="button"
@@ -158,4 +160,3 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
     </div>
   );
 }
-

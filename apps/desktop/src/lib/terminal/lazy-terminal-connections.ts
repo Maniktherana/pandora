@@ -37,7 +37,7 @@ export function getOrderedProjectTerminalSlotIds(panel: TerminalPanelState | nul
 export function mergeConnectedTerminalSlotIds(
   connectedSlotIds: Iterable<string>,
   visibleSlotIds: Iterable<string>,
-  liveSlotIds: Iterable<string>
+  liveSlotIds: Iterable<string>,
 ): Set<string> {
   const next = new Set<string>();
   const liveSlotIdSet = new Set(liveSlotIds);

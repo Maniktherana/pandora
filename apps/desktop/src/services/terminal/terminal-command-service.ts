@@ -10,28 +10,30 @@ import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-ser
 
 export interface TerminalCommandServiceApi {
   readonly newTerminal: () => Effect.Effect<void, TerminalCommandError>;
-  readonly createWorkspaceTerminal: (runtimeId: string) => Effect.Effect<void, TerminalCommandError>;
+  readonly createWorkspaceTerminal: (
+    runtimeId: string,
+  ) => Effect.Effect<void, TerminalCommandError>;
   readonly createProjectTerminal: (
     runtimeId: string,
-    index?: number
+    index?: number,
   ) => Effect.Effect<void, TerminalCommandError>;
   readonly splitProjectTerminalGroup: (
     runtimeId: string,
-    groupId: string
+    groupId: string,
   ) => Effect.Effect<void, TerminalCommandError>;
   readonly closeTerminalSlot: (
     runtimeId: string,
-    slotId: string
+    slotId: string,
   ) => Effect.Effect<void, TerminalCommandError>;
   readonly renameTerminal: (
     runtimeId: string,
     slotId: string,
-    name: string
+    name: string,
   ) => Effect.Effect<void, TerminalCommandError>;
   readonly sendInput: (
     runtimeId: string,
     sessionId: string,
-    text: string
+    text: string,
   ) => Effect.Effect<void, TerminalCommandError>;
   readonly closeFocusedTab: () => Effect.Effect<void, TerminalCommandError>;
   readonly toggleBottomPanel: (currentlyOpen: boolean) => Effect.Effect<void, TerminalCommandError>;
@@ -70,8 +72,8 @@ export const TerminalCommandServiceLive = Layer.scoped(
               new TerminalCommandError({
                 cause: new Error("Terminal daemon not connected"),
                 runtimeId,
-              })
-            )
+              }),
+            ),
       );
 
     const createProjectTerminal = (runtimeId: string, index?: number) =>
@@ -94,16 +96,16 @@ export const TerminalCommandServiceLive = Layer.scoped(
         }
 
         const client = yield* getClient(runtimeId);
-        yield* client.sendEffect(runtimeId, { type: "remove_slot", slotID: slotId }).pipe(
-          Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId }))
-        );
+        yield* client
+          .sendEffect(runtimeId, { type: "remove_slot", slotID: slotId })
+          .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
         for (const sessionId of sessionIds) {
           yield* terminalSurfaceService.removeSurface(sessionId).pipe(
             Effect.catchAll((error) =>
               Effect.sync(() => {
                 console.warn("Failed to remove terminal surface after slot close:", error);
-              })
-            )
+              }),
+            ),
           );
         }
         if (isProjectRuntimeKey(runtimeId)) {
@@ -131,12 +133,12 @@ export const TerminalCommandServiceLive = Layer.scoped(
               const seeded = seedWorkspaceTerminal(client, runtimeId);
               const session = yield* workspaceService.getWorkspaceSession(runtimeId);
               yield* session.commands.addTerminalTab(seeded.slotID);
-            })
+            }),
           );
         }).pipe(
           Effect.mapError((cause) =>
-            cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause })
-          )
+            cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause }),
+          ),
         ),
 
       createWorkspaceTerminal: (runtimeId) =>
@@ -150,8 +152,10 @@ export const TerminalCommandServiceLive = Layer.scoped(
           });
         }).pipe(
           Effect.mapError((cause) =>
-            cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause, runtimeId })
-          )
+            cause instanceof TerminalCommandError
+              ? cause
+              : new TerminalCommandError({ cause, runtimeId }),
+          ),
         ),
       createProjectTerminal,
 
@@ -170,18 +174,22 @@ export const TerminalCommandServiceLive = Layer.scoped(
           const client = yield* getClient(runtimeId);
           const slot = yield* workspaceService.getSlotState(runtimeId, slotId);
 
-          yield* client.sendEffect(runtimeId, {
-            type: "update_slot",
-            slot: { id: slotId, name },
-          }).pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
+          yield* client
+            .sendEffect(runtimeId, {
+              type: "update_slot",
+              slot: { id: slotId, name },
+            })
+            .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
 
           const sessionDefId = slot?.sessionDefIDs[0];
           if (!sessionDefId) return;
 
-          yield* client.sendEffect(runtimeId, {
-            type: "update_session_def",
-            session: { id: sessionDefId, name },
-          }).pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
+          yield* client
+            .sendEffect(runtimeId, {
+              type: "update_session_def",
+              session: { id: sessionDefId, name },
+            })
+            .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
         }),
 
       sendInput: (runtimeId, sessionId, text) =>
@@ -192,7 +200,7 @@ export const TerminalCommandServiceLive = Layer.scoped(
               sessionID: sessionId,
               data: encodeTerminalInput(text),
             })
-            .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })))
+            .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId }))),
         ),
 
       closeFocusedTab: () =>
@@ -244,14 +252,15 @@ export const TerminalCommandServiceLive = Layer.scoped(
                 tabIndex: index,
                 relativePath: tab.path,
                 displayName: label,
-                closeTab: (paneID, tabIndex) => Effect.runPromise(session.commands.closeTab(paneID, tabIndex)),
+                closeTab: (paneID, tabIndex) =>
+                  Effect.runPromise(session.commands.closeTab(paneID, tabIndex)),
               }),
             catch: (cause) => new TerminalCommandError({ cause, runtimeId }),
           });
         }).pipe(
           Effect.mapError((cause) =>
-            cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause })
-          )
+            cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause }),
+          ),
         ),
 
       toggleBottomPanel: (currentlyOpen) =>
@@ -274,5 +283,5 @@ export const TerminalCommandServiceLive = Layer.scoped(
           yield* createProjectTerminal(runtimeId);
         }),
     } satisfies TerminalCommandServiceApi;
-  })
+  }),
 );

@@ -17,13 +17,13 @@ export function useDesktopEffectRunner() {
     <A, E, R>(effect: Effect.Effect<A, E, R>) => {
       runtime.runPromise(effect as Effect.Effect<A, E, never>).catch(console.error);
     },
-    [runtime]
+    [runtime],
   );
 
   const runPromise = useCallback(
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       runtime.runPromise(effect as Effect.Effect<A, E, never>),
-    [runtime]
+    [runtime],
   );
 
   return { run, runPromise };
@@ -36,16 +36,18 @@ export function useBootstrapDesktop() {
   useEffect(() => {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
-    runtime.runPromise(
-      Effect.gen(function* () {
-        const daemonGateway = yield* DaemonGateway;
-        const desktopWorkspace = yield* DesktopWorkspaceService;
-        const uiPreferences = yield* UiPreferencesService;
-        yield* daemonGateway.connect();
-        yield* desktopWorkspace.loadDesktopState();
-        yield* uiPreferences.hydrate();
-      })
-    ).catch(console.error);
+    runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const daemonGateway = yield* DaemonGateway;
+          const desktopWorkspace = yield* DesktopWorkspaceService;
+          const uiPreferences = yield* UiPreferencesService;
+          yield* daemonGateway.connect();
+          yield* desktopWorkspace.loadDesktopState();
+          yield* uiPreferences.hydrate();
+        }),
+      )
+      .catch(console.error);
 
     const teardown = () => {
       void runtime.runPromise(
@@ -54,7 +56,7 @@ export function useBootstrapDesktop() {
           const daemonGateway = yield* DaemonGateway;
           yield* terminalSurface.removeAllSurfaces().pipe(Effect.catchAll(() => Effect.void));
           yield* daemonGateway.disconnect().pipe(Effect.catchAll(() => Effect.void));
-        })
+        }),
       );
     };
 

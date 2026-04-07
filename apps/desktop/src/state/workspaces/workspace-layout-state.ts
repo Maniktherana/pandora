@@ -59,7 +59,7 @@ function selectTabInLayout(root: LayoutNode, paneID: string, index: number): Lay
 function insertTab(
   runtime: WorkspaceRuntimeState,
   tab: PaneTab,
-  matchesExisting: (candidate: PaneTab) => boolean
+  matchesExisting: (candidate: PaneTab) => boolean,
 ): boolean {
   const layout = ensureWorkspaceRoot(runtime);
   const paneID = selectInsertionPane(layout.root, runtime.focusedPaneID ?? layout.focusedPaneID);
@@ -83,33 +83,31 @@ function insertTab(
 
 export function addEditorTabToWorkspaceRuntime(
   runtime: WorkspaceRuntimeState,
-  relativePath: string
+  relativePath: string,
 ): boolean {
   return insertTab(
     runtime,
     { kind: "editor", path: relativePath },
-    (candidate) => candidate.kind === "editor" && candidate.path === relativePath
+    (candidate) => candidate.kind === "editor" && candidate.path === relativePath,
   );
 }
 
 export function addDiffTabToWorkspaceRuntime(
   runtime: WorkspaceRuntimeState,
   relativePath: string,
-  source: DiffSource
+  source: DiffSource,
 ): boolean {
   return insertTab(
     runtime,
     { kind: "diff", path: relativePath, source },
     (candidate) =>
-      candidate.kind === "diff" &&
-      candidate.path === relativePath &&
-      candidate.source === source
+      candidate.kind === "diff" && candidate.path === relativePath && candidate.source === source,
   );
 }
 
 export function addTerminalTabToWorkspaceRuntime(
   runtime: WorkspaceRuntimeState,
-  slotId: string
+  slotId: string,
 ): boolean {
   if (!runtime.root) {
     const root = createLeaf([{ kind: "terminal", slotId }]);
@@ -142,7 +140,7 @@ function addTabToSpecificPane(
   runtime: WorkspaceRuntimeState,
   paneID: string,
   tab: PaneTab,
-  insertIndex?: number
+  insertIndex?: number,
 ): boolean {
   const layout = ensureWorkspaceRoot(runtime);
   const leaf = findLeaf(layout.root, paneID);
@@ -164,7 +162,7 @@ export function addEditorTabToPaneInWorkspaceRuntime(
   runtime: WorkspaceRuntimeState,
   paneID: string,
   relativePath: string,
-  insertIndex?: number
+  insertIndex?: number,
 ): boolean {
   return addTabToSpecificPane(runtime, paneID, { kind: "editor", path: relativePath }, insertIndex);
 }
@@ -174,7 +172,7 @@ export function splitPaneWithEditorInWorkspaceRuntime(
   targetPaneID: string,
   relativePath: string,
   axis: "horizontal" | "vertical",
-  position: "before" | "after"
+  position: "before" | "after",
 ): boolean {
   if (!runtime.root) return false;
   if (!findLeaf(runtime.root, targetPaneID)) return false;
@@ -183,7 +181,8 @@ export function splitPaneWithEditorInWorkspaceRuntime(
   const previousLeafIds = new Set(getAllLeaves(runtime.root).map((leaf) => leaf.id));
   const nextRoot = splitPaneAroundTab(runtime.root, targetPaneID, tab, axis, position);
   const insertedLeaf = getAllLeaves(nextRoot).find(
-    (leaf) => !previousLeafIds.has(leaf.id) && leaf.tabs.some((candidate) => tabsEqual(candidate, tab))
+    (leaf) =>
+      !previousLeafIds.has(leaf.id) && leaf.tabs.some((candidate) => tabsEqual(candidate, tab)),
   );
 
   runtime.root = nextRoot;

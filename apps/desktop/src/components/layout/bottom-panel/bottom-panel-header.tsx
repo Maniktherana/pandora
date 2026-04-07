@@ -31,10 +31,7 @@ export function BottomPanelHeader({
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
 
-      <TabsList
-        variant="line"
-        className="h-full rounded-none p-0 data-[variant=line]:gap-0"
-      >
+      <TabsList variant="line" className="h-full rounded-none p-0 data-[variant=line]:gap-0">
         {(["terminal", "ports"] as const).map((id) => (
           <TabsTrigger
             key={id}
@@ -44,7 +41,7 @@ export function BottomPanelHeader({
               "h-full rounded-none px-3 text-xs after:bottom-[-1px] after:h-[2px]",
               tab === id
                 ? "bg-neutral-900 text-neutral-100"
-                : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300"
+                : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
             )}
           >
             {id === "terminal" ? "Terminal" : "Ports"}

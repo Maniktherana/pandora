@@ -6,7 +6,11 @@ interface EditorStoreState {
   savedContentByWorkspace: Record<string, Record<string, string>>;
 
   /** Load disk content if missing so the editor can be opened by the workspace service. */
-  ensureFileLoaded: (workspaceId: string, workspaceRoot: string, relativePath: string) => Promise<boolean>;
+  ensureFileLoaded: (
+    workspaceId: string,
+    workspaceRoot: string,
+    relativePath: string,
+  ) => Promise<boolean>;
   setBuffer: (workspaceId: string, relativePath: string, value: string) => void;
   forgetFile: (workspaceId: string, relativePath: string) => void;
   /** Set buffer + saved from disk (e.g. after layout restore). */

@@ -1,6 +1,4 @@
-import type {
-  WorkspaceKind,
-} from "@/lib/shared/types";
+import type { WorkspaceKind } from "@/lib/shared/types";
 
 export const WORKSPACE_KIND_LABEL: Record<WorkspaceKind, string> = {
   worktree: "Worktree",
@@ -13,4 +11,3 @@ export const WORKSPACE_KIND_TITLE: Record<WorkspaceKind, string> = {
   linked:
     "Linked to the project folder on disk — same checkout as the repo root. No extra worktree.",
 };
-

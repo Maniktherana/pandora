@@ -34,7 +34,7 @@ function detectTerminalDisplay(source: string): TerminalDisplayState | null {
 }
 
 export function detectTerminalDisplayFromProcess(
-  foregroundProcess: string | null | undefined
+  foregroundProcess: string | null | undefined,
 ): TerminalDisplayState | null {
   if (!foregroundProcess) return null;
   return detectTerminalDisplay(foregroundProcess);
@@ -52,7 +52,7 @@ function customSlotLabel(slot: SlotState | undefined): string | null {
 export function terminalDisplayForSlot(
   slot: SlotState | undefined,
   session: SessionState | undefined,
-  detected: TerminalDisplayState | undefined
+  detected: TerminalDisplayState | undefined,
 ): TerminalDisplayState {
   const liveDetected = detectTerminalDisplayFromProcess(session?.foregroundProcess);
   if (liveDetected && liveDetected.kind !== "terminal") {

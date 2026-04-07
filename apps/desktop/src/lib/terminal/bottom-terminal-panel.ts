@@ -33,14 +33,14 @@ export function createEmptyTerminalPanel(): TerminalPanelState {
 
 export function terminalPanelContainsSlot(
   panel: TerminalPanelState | null | undefined,
-  slotId: string
+  slotId: string,
 ): boolean {
   return panel?.groups.some((group) => group.children.includes(slotId)) ?? false;
 }
 
 export function findTerminalGroupBySlot(
   panel: TerminalPanelState | null | undefined,
-  slotId: string
+  slotId: string,
 ): { group: TerminalPanelGroup; groupIndex: number; slotIndex: number } | null {
   if (!panel) return null;
   for (const [groupIndex, group] of panel.groups.entries()) {
@@ -59,7 +59,7 @@ export function addTerminalGroup(
     groupId?: string;
     index?: number;
     activate?: boolean;
-  }
+  },
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   if (terminalPanelContainsSlot(base, slotId)) {
@@ -90,7 +90,7 @@ export function addTerminalToGroup(
   options?: {
     index?: number;
     activate?: boolean;
-  }
+  },
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   if (terminalPanelContainsSlot(base, slotId)) {
@@ -118,7 +118,7 @@ export function addTerminalToGroup(
 
 export function removeTerminalFromPanel(
   panel: TerminalPanelState | null | undefined,
-  slotId: string
+  slotId: string,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   return normalizePanel({
@@ -134,7 +134,7 @@ export function removeTerminalFromPanel(
 export function reorderTerminalGroups(
   panel: TerminalPanelState | null | undefined,
   fromIndex: number,
-  toIndex: number
+  toIndex: number,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return base;
@@ -160,7 +160,7 @@ export function reorderTerminalGroupChildren(
   panel: TerminalPanelState | null | undefined,
   groupId: string,
   fromIndex: number,
-  toIndex: number
+  toIndex: number,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   return normalizePanel({
@@ -184,7 +184,7 @@ export function moveTerminalToGroup(
   options?: {
     index?: number;
     activate?: boolean;
-  }
+  },
 ): TerminalPanelState {
   const base = removeTerminalFromPanel(panel, slotId);
   return addTerminalToGroup(base, targetGroupId, slotId, options);
@@ -193,7 +193,7 @@ export function moveTerminalToGroup(
 export function moveTerminalToNewGroup(
   panel: TerminalPanelState | null | undefined,
   slotId: string,
-  index: number
+  index: number,
 ): TerminalPanelState {
   const base = removeTerminalFromPanel(panel, slotId);
   return addTerminalGroup(base, slotId, { index, activate: true });
@@ -202,7 +202,7 @@ export function moveTerminalToNewGroup(
 export function setActiveTerminalGroup(
   panel: TerminalPanelState | null | undefined,
   groupId: string,
-  slotId?: string | null
+  slotId?: string | null,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   const activeGroupIndex = base.groups.findIndex((group) => group.id === groupId);
@@ -211,15 +211,14 @@ export function setActiveTerminalGroup(
   return normalizePanel({
     ...base,
     activeGroupIndex,
-    activeSlotId:
-      slotId && group.children.includes(slotId) ? slotId : (group.children[0] ?? null),
+    activeSlotId: slotId && group.children.includes(slotId) ? slotId : (group.children[0] ?? null),
     visible: group.children.length > 0,
   });
 }
 
 export function setActiveTerminalSlot(
   panel: TerminalPanelState | null | undefined,
-  slotId: string | null
+  slotId: string | null,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   if (slotId == null) {
@@ -237,7 +236,7 @@ export function setActiveTerminalSlot(
 
 export function setTerminalPanelVisible(
   panel: TerminalPanelState | null | undefined,
-  visible: boolean
+  visible: boolean,
 ): TerminalPanelState {
   const base = panel ?? createEmptyTerminalPanel();
   return normalizePanel({

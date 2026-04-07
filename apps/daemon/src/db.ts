@@ -65,9 +65,9 @@ function databaseUserVersion(db: Database): number {
 }
 
 function getRuntimeMetadata(db: Database, key: string): string | null {
-  const row = db
-    .query("SELECT value FROM runtime_metadata WHERE key = ?")
-    .get(key) as { value?: string } | null;
+  const row = db.query("SELECT value FROM runtime_metadata WHERE key = ?").get(key) as {
+    value?: string;
+  } | null;
   return row?.value ?? null;
 }
 
@@ -75,12 +75,14 @@ function setRuntimeMetadata(db: Database, key: string, value: string): void {
   db.query(
     `INSERT INTO runtime_metadata (key, value)
      VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
 }
 
 function disableTerminalSlotAutostart(db: Database): void {
-  db.query("UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0").run();
+  db.query(
+    "UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0",
+  ).run();
 }
 
 export function openDatabase(options?: {
@@ -142,14 +144,20 @@ export function openDatabase(options?: {
   db.query(`UPDATE session_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
   disableTerminalSlotAutostart(db);
   db.exec("PRAGMA user_version = 3;");
-  if (options?.dbPath === undefined || options?.workspacePath !== undefined || options?.defaultCwd !== undefined) {
+  if (
+    options?.dbPath === undefined ||
+    options?.workspacePath !== undefined ||
+    options?.defaultCwd !== undefined
+  ) {
     ensureSeedData(db, options?.defaultCwd ?? options?.workspacePath ?? homedir());
   }
   return db;
 }
 
 function ensureSeedData(db: Database, defaultCwd: string): void {
-  const slotCount = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as { count: number };
+  const slotCount = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as {
+    count: number;
+  };
   if (slotCount.count > 0) {
     return;
   }
@@ -162,22 +170,13 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
 
   db.query(
     `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    slotID,
-    "terminal_slot",
-    "Terminal",
-    0,
-    "single",
-    sessionID,
-    1,
-    0
-  );
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(slotID, "terminal_slot", "Terminal", 0, "single", sessionID, 1, 0);
 
   db.query(
     `INSERT INTO session_definitions
      (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     sessionID,
     slotID,
@@ -189,7 +188,7 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
     "{}",
     "manual",
     1,
-    1
+    1,
   );
   setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
 }
@@ -210,18 +209,18 @@ export function listSlotDefinitions(db: Database): SlotDefinition[] {
     .query(
       `SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order
        FROM slot_definitions
-       ORDER BY sort_order ASC, rowid ASC`
+       ORDER BY sort_order ASC, rowid ASC`,
     )
     .all() as Array<{
-      id: string;
-      kind: SlotKind;
-      name: string;
-      autostart: number;
-      presentation_mode: PresentationMode;
-      primary_session_def_id: string | null;
-      persisted: number;
-      sort_order: number;
-    }>;
+    id: string;
+    kind: SlotKind;
+    name: string;
+    autostart: number;
+    presentation_mode: PresentationMode;
+    primary_session_def_id: string | null;
+    persisted: number;
+    sort_order: number;
+  }>;
 
   return rows.map((row) => ({
     id: row.id,
@@ -232,7 +231,7 @@ export function listSlotDefinitions(db: Database): SlotDefinition[] {
     primarySessionDefID: row.primary_session_def_id,
     sessionDefIDs: sessionIDsBySlot.get(row.id) ?? [],
     persisted: row.persisted === 1,
-    sortOrder: row.sort_order
+    sortOrder: row.sort_order,
   }));
 }
 
@@ -241,21 +240,21 @@ export function listSessionDefinitions(db: Database): SessionDefinition[] {
     .query(
       `SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported
        FROM session_definitions
-       ORDER BY rowid ASC`
+       ORDER BY rowid ASC`,
     )
     .all() as Array<{
-      id: string;
-      slot_id: string;
-      kind: SessionDefinition["kind"];
-      name: string;
-      command: string;
-      cwd: string | null;
-      port: number | null;
-      env_overrides: string | null;
-      restart_policy: "manual" | "always";
-      pause_supported: number;
-      resume_supported: number;
-    }>;
+    id: string;
+    slot_id: string;
+    kind: SessionDefinition["kind"];
+    name: string;
+    command: string;
+    cwd: string | null;
+    port: number | null;
+    env_overrides: string | null;
+    restart_policy: "manual" | "always";
+    pause_supported: number;
+    resume_supported: number;
+  }>;
 
   return rows.map((row) => ({
     id: row.id,
@@ -268,18 +267,18 @@ export function listSessionDefinitions(db: Database): SessionDefinition[] {
     envOverrides: decodeEnv(row.env_overrides),
     restartPolicy: row.restart_policy,
     pauseSupported: row.pause_supported === 1,
-    resumeSupported: row.resume_supported === 1
+    resumeSupported: row.resume_supported === 1,
   }));
 }
 
 export function createSlotDefinition(
   db: Database,
-  slot: Omit<SlotDefinition, "sessionDefIDs">
+  slot: Omit<SlotDefinition, "sessionDefIDs">,
 ): SlotDefinition {
   const id = slot.id;
   db.query(
     `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     slot.kind,
@@ -288,18 +287,21 @@ export function createSlotDefinition(
     slot.presentationMode,
     slot.primarySessionDefID,
     slot.persisted ? 1 : 0,
-    slot.sortOrder
+    slot.sortOrder,
   );
   setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
 
   return {
     ...slot,
     id,
-    sessionDefIDs: []
+    sessionDefIDs: [],
   };
 }
 
-export function updateSlotDefinition(db: Database, slot: Partial<SlotDefinition> & { id: string }): void {
+export function updateSlotDefinition(
+  db: Database,
+  slot: Partial<SlotDefinition> & { id: string },
+): void {
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
 
@@ -342,7 +344,9 @@ export function updateSlotDefinition(db: Database, slot: Partial<SlotDefinition>
 export function removeSlotDefinition(db: Database, slotID: string): void {
   db.query("DELETE FROM session_definitions WHERE slot_id = ?").run(slotID);
   db.query("DELETE FROM slot_definitions WHERE id = ?").run(slotID);
-  const remaining = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as { count: number };
+  const remaining = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as {
+    count: number;
+  };
   if (remaining.count === 0) {
     setRuntimeMetadata(db, "seed_terminal_when_empty", "1");
   }
@@ -350,13 +354,13 @@ export function removeSlotDefinition(db: Database, slotID: string): void {
 
 export function createSessionDefinition(
   db: Database,
-  session: SessionDefinition
+  session: SessionDefinition,
 ): SessionDefinition {
   const id = session.id;
   db.query(
     `INSERT INTO session_definitions
      (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     session.slotID,
@@ -368,7 +372,7 @@ export function createSessionDefinition(
     encodeEnv(session.envOverrides),
     session.restartPolicy,
     session.pauseSupported ? 1 : 0,
-    session.resumeSupported ? 1 : 0
+    session.resumeSupported ? 1 : 0,
   );
 
   return { ...session, id };
@@ -376,7 +380,7 @@ export function createSessionDefinition(
 
 export function updateSessionDefinition(
   db: Database,
-  session: Partial<SessionDefinition> & { id: string }
+  session: Partial<SessionDefinition> & { id: string },
 ): void {
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
@@ -426,7 +430,10 @@ export function updateSessionDefinition(
     return;
   }
 
-  db.query(`UPDATE session_definitions SET ${sets.join(", ")} WHERE id = ?`).run(...values, session.id);
+  db.query(`UPDATE session_definitions SET ${sets.join(", ")} WHERE id = ?`).run(
+    ...values,
+    session.id,
+  );
 }
 
 export function removeSessionDefinition(db: Database, sessionDefID: string): void {

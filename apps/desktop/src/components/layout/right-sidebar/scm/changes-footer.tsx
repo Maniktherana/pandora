@@ -127,4 +127,3 @@ export function ChangesFooter({
     </div>
   );
 }
-

@@ -1,9 +1,4 @@
-export {
-  applyTheme,
-  getThemeCssVariables,
-  toMonacoTheme,
-  toPierreVariables,
-} from "./theme";
+export { applyTheme, getThemeCssVariables, toMonacoTheme, toPierreVariables } from "./theme";
 export type {
   CodeEditorTheme,
   ReactUiTheme,

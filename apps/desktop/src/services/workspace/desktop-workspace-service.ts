@@ -13,10 +13,7 @@ import type {
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
-import {
-  buildDesktopView,
-  type DesktopViewStateSnapshot,
-} from "@/state/desktop-view-projections";
+import { buildDesktopView, type DesktopViewStateSnapshot } from "@/state/desktop-view-projections";
 import { DesktopStateLoadError, WorkspaceSelectionError } from "@/services/service-errors";
 import { DaemonEventQueue } from "@/services/daemon/daemon-event-queue";
 import { DaemonGateway } from "@/services/daemon/daemon-gateway";
@@ -89,7 +86,7 @@ export interface WorkspaceSessionService {
     readonly addTabToPane: (
       targetPaneID: string,
       sourcePaneID: string,
-      sourceTabIndex: number
+      sourceTabIndex: number,
     ) => Effect.Effect<void>;
     readonly removeTab: (paneID: string, tabIndex: number) => Effect.Effect<void>;
     readonly selectTabInPane: (paneID: string, index: number) => Effect.Effect<void>;
@@ -98,31 +95,31 @@ export interface WorkspaceSessionService {
       sourcePaneID: string,
       sourceTabIndex: number,
       axis: "horizontal" | "vertical",
-      position: "before" | "after"
+      position: "before" | "after",
     ) => Effect.Effect<void>;
     readonly moveTab: (
       fromPaneID: string,
       toPaneID: string,
       fromIndex: number,
-      toIndex: number
+      toIndex: number,
     ) => Effect.Effect<void>;
     readonly reorderTab: (
       paneID: string,
       fromIndex: number,
-      toIndex: number
+      toIndex: number,
     ) => Effect.Effect<void>;
     readonly closeTab: (paneID: string, tabIndex: number) => Effect.Effect<void>;
     readonly addEditorTab: (relativePath: string) => Effect.Effect<void>;
     readonly addEditorTabToPane: (
       paneID: string,
       relativePath: string,
-      insertIndex?: number
+      insertIndex?: number,
     ) => Effect.Effect<void>;
     readonly splitPaneWithEditor: (
       targetPaneID: string,
       relativePath: string,
       axis: "horizontal" | "vertical",
-      position: "before" | "after"
+      position: "before" | "after",
     ) => Effect.Effect<void>;
     readonly addDiffTab: (relativePath: string, source: DiffSource) => Effect.Effect<void>;
     readonly addTerminalTab: (slotId: string) => Effect.Effect<void>;
@@ -139,11 +136,13 @@ export interface DesktopWorkspaceServiceApi {
   readonly selectProject: (projectId: string) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly selectWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly ensureWorkspaceRuntimeConnected: (
-    workspaceId: string
+    workspaceId: string,
   ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly activateSidebarSelection: () => Effect.Effect<void, WorkspaceSelectionError>;
   readonly navigateSidebar: (offset: number) => Effect.Effect<void>;
-  readonly setNavigationArea: (area: DesktopViewStateSnapshot["navigationArea"]) => Effect.Effect<void>;
+  readonly setNavigationArea: (
+    area: DesktopViewStateSnapshot["navigationArea"],
+  ) => Effect.Effect<void>;
   readonly setSearchText: (text: string) => Effect.Effect<void>;
   readonly setLayoutTargetRuntimeId: (runtimeId: string | null) => Effect.Effect<void>;
   readonly getEffectiveLayoutRuntimeId: () => Effect.Effect<string | null>;
@@ -153,13 +152,13 @@ export interface DesktopWorkspaceServiceApi {
   readonly getRuntimeState: (workspaceId: string) => Effect.Effect<WorkspaceRuntimeState | null>;
   readonly getSlotState: (
     workspaceId: string,
-    slotId: string
+    slotId: string,
   ) => Effect.Effect<SlotState | undefined>;
   readonly cycleTab: (direction: -1 | 1) => Effect.Effect<void>;
   readonly addEditorTabForPath: (relativePath: string) => Effect.Effect<void>;
   readonly addDiffTabForPath: (
     relativePath: string,
-    source: "working" | "staged"
+    source: "working" | "staged",
   ) => Effect.Effect<void>;
   readonly updateWorkspacePrState: (workspaceId: string, prState: string) => Effect.Effect<void>;
   readonly setPrAwaiting: (workspaceId: string, awaiting: boolean) => Effect.Effect<void>;
@@ -167,58 +166,60 @@ export interface DesktopWorkspaceServiceApi {
   readonly addProjectTerminalGroup: (
     workspaceId: string,
     slotId: string,
-    index?: number
+    index?: number,
   ) => Effect.Effect<void>;
   readonly splitProjectTerminalGroup: (
     workspaceId: string,
     groupId: string,
-    slotId: string
+    slotId: string,
   ) => Effect.Effect<void>;
   readonly closeProjectTerminal: (workspaceId: string, slotId: string) => Effect.Effect<void>;
   readonly selectProjectTerminalGroup: (
     workspaceId: string,
     groupId: string,
-    slotId?: string | null
+    slotId?: string | null,
   ) => Effect.Effect<void>;
   readonly focusProjectTerminal: (
     workspaceId: string,
-    slotId: string | null
+    slotId: string | null,
   ) => Effect.Effect<void>;
   readonly setProjectTerminalPanelVisible: (
     workspaceId: string,
-    visible: boolean
+    visible: boolean,
   ) => Effect.Effect<void>;
   readonly reorderProjectTerminalGroups: (
     workspaceId: string,
     fromIndex: number,
-    toIndex: number
+    toIndex: number,
   ) => Effect.Effect<void>;
   readonly reorderProjectTerminalGroupChildren: (
     workspaceId: string,
     groupId: string,
     fromIndex: number,
-    toIndex: number
+    toIndex: number,
   ) => Effect.Effect<void>;
   readonly moveProjectTerminalToGroup: (
     workspaceId: string,
     slotId: string,
     targetGroupId: string,
-    index?: number
+    index?: number,
   ) => Effect.Effect<void>;
   readonly moveProjectTerminalToNewGroup: (
     workspaceId: string,
     slotId: string,
-    index: number
+    index: number,
   ) => Effect.Effect<void>;
   readonly createWorkspace: (
     projectId: string,
-    workspaceKind?: WorkspaceKind
+    workspaceKind?: WorkspaceKind,
   ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly retryWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly removeWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
-  readonly markWorkspaceOpened: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
+  readonly markWorkspaceOpened: (
+    workspaceId: string,
+  ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly getWorkspaceSession: (
-    workspaceId: string
+    workspaceId: string,
   ) => Effect.Effect<WorkspaceSessionService, WorkspaceSelectionError>;
 }
 
@@ -228,11 +229,13 @@ export class DesktopWorkspaceService extends Context.Tag("pandora/DesktopWorkspa
 >() {}
 
 type DesktopStateSnapshot = {
-  -readonly [K in keyof DesktopViewStateSnapshot]: DesktopViewStateSnapshot[K] extends Readonly<Record<string, infer V>>
+  -readonly [K in keyof DesktopViewStateSnapshot]: DesktopViewStateSnapshot[K] extends Readonly<
+    Record<string, infer V>
+  >
     ? Record<string, V>
     : DesktopViewStateSnapshot[K] extends readonly (infer U)[]
-    ? U[]
-    : DesktopViewStateSnapshot[K];
+      ? U[]
+      : DesktopViewStateSnapshot[K];
 } & {
   prAwaitingWorkspaceIds: Set<string>;
 };
@@ -254,16 +257,19 @@ function persistWorkspaceLayout(snapshot: DesktopViewStateSnapshot, workspaceId:
   const root =
     runtime?.root?.type === "leaf" && runtime.root.tabs.length === 0
       ? null
-      : runtime?.root ?? null;
+      : (runtime?.root ?? null);
   const layout = {
     root,
-    focusedPaneID: root ? runtime?.focusedPaneID ?? null : null,
+    focusedPaneID: root ? (runtime?.focusedPaneID ?? null) : null,
   };
 
   return Effect.tryPromise({
     try: () => invoke("save_workspace_layout", { workspaceId, layout }),
     catch: (cause) => cause,
-  }).pipe(Effect.catchAll(() => Effect.void), Effect.asVoid);
+  }).pipe(
+    Effect.catchAll(() => Effect.void),
+    Effect.asVoid,
+  );
 }
 
 function projectTerminalPanelStorageKey(runtimeId: string) {
@@ -282,14 +288,13 @@ function parsePersistedProjectTerminalPanel(raw: string | null): TerminalPanelSt
             Boolean(group) &&
             typeof group.id === "string" &&
             Array.isArray(group.children) &&
-            group.children.every((child) => typeof child === "string")
+            group.children.every((child) => typeof child === "string"),
         )
         .map((group) => ({
           id: group.id,
           children: [...group.children],
         })),
-      activeGroupIndex:
-        typeof parsed.activeGroupIndex === "number" ? parsed.activeGroupIndex : 0,
+      activeGroupIndex: typeof parsed.activeGroupIndex === "number" ? parsed.activeGroupIndex : 0,
       activeSlotId: typeof parsed.activeSlotId === "string" ? parsed.activeSlotId : null,
       visible: parsed.visible === true,
     };
@@ -307,7 +312,7 @@ function loadPersistedProjectTerminalPanel(runtimeId: string) {
     catch: () => null,
   }).pipe(
     Effect.map((raw) => parsePersistedProjectTerminalPanel(raw)),
-    Effect.catchAll(() => Effect.succeed(null))
+    Effect.catchAll(() => Effect.succeed(null)),
   );
 }
 
@@ -319,7 +324,10 @@ function persistProjectTerminalPanel(runtimeId: string, panel: TerminalPanelStat
         value: panel ? JSON.stringify(panel) : null,
       }),
     catch: () => undefined,
-  }).pipe(Effect.catchAll(() => Effect.void), Effect.asVoid);
+  }).pipe(
+    Effect.catchAll(() => Effect.void),
+    Effect.asVoid,
+  );
 }
 
 function decodeOutputChunk(data: string) {
@@ -333,9 +341,9 @@ function decodeOutputChunk(data: string) {
 export function shouldAutoOpenTerminalSlot(slot: SlotState | undefined) {
   return Boolean(
     slot &&
-      slot.kind === "terminal_slot" &&
-      slot.sessionIDs.length === 0 &&
-      slot.sessionDefIDs.length > 0
+    slot.kind === "terminal_slot" &&
+    slot.sessionIDs.length === 0 &&
+    slot.sessionDefIDs.length > 0,
   );
 }
 
@@ -376,7 +384,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       desktopStateSnapshot.selectedWorkspaceID = appState.selectedWorkspaceId;
 
       const allowedRuntimeIds = new Set<string>(
-        appState.workspaces.map((workspace) => workspace.id)
+        appState.workspaces.map((workspace) => workspace.id),
       );
       for (const project of appState.projects) {
         allowedRuntimeIds.add(`project:${project.id}`);
@@ -399,8 +407,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.tap((appState) =>
           Effect.sync(() => {
             applyAppState(appState);
-          })
-        )
+          }),
+        ),
       );
 
     const updateDesktopState = (mutate: (state: DesktopStateSnapshot) => void) =>
@@ -423,10 +431,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         .then(({ getDesktopRuntime }) =>
           getDesktopRuntime().runPromise(
             Effect.gen(function* () {
-              const alreadySeeded = yield* Effect.sync(() =>
-                desktopStateSnapshot.runtimes[workspaceId]?.slots.some(
-                  (slot) => slot.kind === "terminal_slot"
-                ) ?? false
+              const alreadySeeded = yield* Effect.sync(
+                () =>
+                  desktopStateSnapshot.runtimes[workspaceId]?.slots.some(
+                    (slot) => slot.kind === "terminal_slot",
+                  ) ?? false,
               );
               if (alreadySeeded) return;
 
@@ -436,8 +445,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               const seeded = seedWorkspaceTerminal(client, workspaceId);
               const session = yield* sessionCache.get(workspaceId);
               yield* session.commands.addTerminalTab(seeded.slotID);
-            })
-          )
+            }),
+          ),
         )
         .catch((error) => {
           console.warn("Failed to seed default workspace terminal:", error);
@@ -469,7 +478,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const startupSet: WorkspaceStartupSet = ((update: unknown) => {
       if (typeof update === "function") {
         (update as (state: WritableDraft<WorkspaceStartupState>) => void)(
-          desktopStateSnapshot as unknown as WritableDraft<WorkspaceStartupState>
+          desktopStateSnapshot as unknown as WritableDraft<WorkspaceStartupState>,
         );
       } else if (update && typeof update === "object") {
         Object.assign(desktopStateSnapshot, update);
@@ -616,15 +625,19 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const ensureVisibleTerminalSessions = (runtimeId: string) =>
       Effect.all(
         [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))].map((slotId) =>
-          ensureTerminalSlotSession(runtimeId, slotId)
+          ensureTerminalSlotSession(runtimeId, slotId),
         ),
-        { concurrency: "unbounded", discard: true }
+        { concurrency: "unbounded", discard: true },
       );
 
     const scheduleHiddenWarmup = (runtimeId: string) =>
       Effect.gen(function* () {
         const runtime = desktopStateSnapshot.runtimes[runtimeId];
-        if (!runtime || runtime.connectionState !== "connected" || !isRuntimeStartupActive(runtimeId)) {
+        if (
+          !runtime ||
+          runtime.connectionState !== "connected" ||
+          !isRuntimeStartupActive(runtimeId)
+        ) {
           yield* cancelHiddenWarmup(runtimeId);
           return;
         }
@@ -637,7 +650,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         const visibleSlotIds = [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))];
         if (
           visibleSlotIds.some((slotId) =>
-            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId))
+            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId)),
           )
         ) {
           return;
@@ -647,7 +660,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         const hiddenSlotId = getOrderedRuntimeTerminalSlotIds(runtimeId).find(
           (slotId) =>
             !visibleSlotIdSet.has(slotId) &&
-            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId))
+            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId)),
         );
         if (!hiddenSlotId) return;
 
@@ -666,7 +679,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               if (opened) {
                 hiddenWarmupPendingSlots.set(runtimeId, hiddenSlotId);
               }
-            })
+            }),
           );
 
           hiddenWarmupFibers.set(runtimeId, fiber);
@@ -680,7 +693,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
     const refreshRuntimeTerminalStartup = (
       runtimeId: string,
-      options?: { rebuildHiddenQueue?: boolean }
+      options?: { rebuildHiddenQueue?: boolean },
     ) =>
       Effect.gen(function* () {
         const runtime = desktopStateSnapshot.runtimes[runtimeId];
@@ -688,7 +701,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           yield* cancelHiddenWarmup(runtimeId);
         }
 
-        if (!runtime || runtime.connectionState !== "connected" || !isRuntimeStartupActive(runtimeId)) {
+        if (
+          !runtime ||
+          runtime.connectionState !== "connected" ||
+          !isRuntimeStartupActive(runtimeId)
+        ) {
           if (!runtime || runtime.connectionState !== "connected") {
             clearPendingSessionOpensForRuntime(runtimeId);
           }
@@ -720,9 +737,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           activeRuntimeIds.map((runtimeId) =>
             refreshRuntimeTerminalStartup(runtimeId, {
               rebuildHiddenQueue: options?.rebuildHiddenQueues === true,
-            })
+            }),
           ),
-          { concurrency: "unbounded", discard: true }
+          { concurrency: "unbounded", discard: true },
         );
       });
 
@@ -734,8 +751,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         void import("@/app/desktop-runtime")
           .then(({ getDesktopRuntime }) =>
             getDesktopRuntime().runPromise(
-              refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true })
-            )
+              refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true }),
+            ),
           )
           .catch((error) => {
             console.warn("Failed to refresh terminal startup state:", error);
@@ -757,7 +774,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       });
 
     const waitForWorkspaceConnection = (
-      workspaceId: string
+      workspaceId: string,
     ): Effect.Effect<void, WorkspaceSelectionError> =>
       Effect.gen(function* () {
         if (desktopStateSnapshot.runtimes[workspaceId]?.connectionState === "connected") return;
@@ -774,9 +791,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               Effect.fail(
                 workspaceSelectionError(
                   new Error(`Workspace runtime did not connect for ${workspaceId}`),
-                  workspaceId
-                )
-              )
+                  workspaceId,
+                ),
+              ),
             );
           }, 5000);
 
@@ -808,7 +825,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === workspaceId);
         if (!workspace || workspace.status !== "ready") {
           return yield* Effect.fail(
-            workspaceSelectionError(new Error(`Workspace ${workspaceId} is not ready`), workspaceId)
+            workspaceSelectionError(
+              new Error(`Workspace ${workspaceId} is not ready`),
+              workspaceId,
+            ),
           );
         }
 
@@ -832,7 +852,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const selectWorkspaceById = (workspaceId: string) =>
       Effect.try({
         try: () => {
-          const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === workspaceId);
+          const workspace = desktopStateSnapshot.workspaces.find(
+            (entry) => entry.id === workspaceId,
+          );
           if (!workspace) {
             throw workspaceSelectionError(new Error("Workspace not found"), workspaceId);
           }
@@ -866,15 +888,17 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
             }
             yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
-          })
-        )
+          }),
+        ),
       );
 
     const maybeStartSelectedWorkspace = () =>
       Effect.gen(function* () {
         const selectedWorkspaceId = desktopStateSnapshot.selectedWorkspaceID;
         if (!selectedWorkspaceId) return;
-        const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === selectedWorkspaceId);
+        const workspace = desktopStateSnapshot.workspaces.find(
+          (entry) => entry.id === selectedWorkspaceId,
+        );
         if (!workspace || workspace.status !== "ready") return;
         yield* Effect.sync(() => {
           syncProjectScopedRuntime(startupSet, startupGet, workspace);
@@ -886,7 +910,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
     const updateWorkspaceRuntime = (
       workspaceId: string,
-      mutate: (runtime: WritableDraft<WorkspaceRuntimeState>) => boolean | void
+      mutate: (runtime: WritableDraft<WorkspaceRuntimeState>) => boolean | void,
     ) =>
       Effect.sync(() => {
         const runtime = cloneRuntimeState(readSessionRuntimeState(workspaceId));
@@ -897,21 +921,20 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.flatMap((changed) =>
           changed && !isProjectRuntimeKey(workspaceId)
             ? persistWorkspaceLayout(desktopStateSnapshot, workspaceId)
-            : Effect.void
+            : Effect.void,
         ),
-        Effect.tap(() =>
-          refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
-        )
+        Effect.tap(() => refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })),
       );
 
     const mutateRuntimeState = <T>(
       workspaceId: string,
-      mutate: (runtime: WritableDraft<WorkspaceRuntimeState>) => T
+      mutate: (runtime: WritableDraft<WorkspaceRuntimeState>) => T,
     ) =>
       Effect.sync(() => {
         const current = readSessionRuntimeState(workspaceId);
-        const previousProjectPanel =
-          isProjectRuntimeKey(workspaceId) ? JSON.stringify(current.terminalPanel ?? null) : null;
+        const previousProjectPanel = isProjectRuntimeKey(workspaceId)
+          ? JSON.stringify(current.terminalPanel ?? null)
+          : null;
         const runtime = cloneRuntimeState(current);
         const result = mutate(runtime as WritableDraft<WorkspaceRuntimeState>);
         writeSessionRuntimeState(workspaceId, runtime);
@@ -926,8 +949,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.flatMap(({ result, projectPanelChanged, terminalPanel }) =>
           projectPanelChanged
             ? Effect.as(persistProjectTerminalPanel(workspaceId, terminalPanel), result)
-            : Effect.succeed(result)
-        )
+            : Effect.succeed(result),
+        ),
       );
 
     const handleTerminalOutput = (workspaceId: string, data: string) =>
@@ -984,7 +1007,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                 const layout = sanitizeWorkspaceTerminalLayout(
                   runtime.root,
                   runtime.focusedPaneID,
-                  liveSlotIds
+                  liveSlotIds,
                 );
                 runtime.root = layout.root as WritableDraft<LayoutNode> | null;
                 runtime.focusedPaneID = layout.focusedPaneID;
@@ -1008,8 +1031,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             break;
           case "session_state_changed":
             {
-              const crashedTerminalSlotId = yield* mutateRuntimeState(event.workspaceId, (runtime) =>
-                updateRuntimeSessionState(runtime, event.session).crashedTerminalSlotId
+              const crashedTerminalSlotId = yield* mutateRuntimeState(
+                event.workspaceId,
+                (runtime) =>
+                  updateRuntimeSessionState(runtime, event.session).crashedTerminalSlotId,
               );
               if (crashedTerminalSlotId) {
                 yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -1064,14 +1089,18 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               workspaceId: event.workspaceId,
               error,
             });
-          })
-        )
-      )
+          }),
+        ),
+      ),
     );
 
     yield* Effect.forkScoped(Effect.forever(processDaemonEvent));
 
-    const sessionCache = yield* Cache.make<string, WorkspaceSessionService, WorkspaceSelectionError>({
+    const sessionCache = yield* Cache.make<
+      string,
+      WorkspaceSessionService,
+      WorkspaceSelectionError
+    >({
       capacity: 3,
       timeToLive: "30 minutes",
       lookup: (workspaceId) =>
@@ -1080,24 +1109,19 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           commands: {
             focusPane: (paneId) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                setFocusedPaneInWorkspaceRuntime(runtime, paneId)
+                setFocusedPaneInWorkspaceRuntime(runtime, paneId),
               ),
             addTabToPane: (targetPaneID, sourcePaneID, sourceTabIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                addTabToPaneInWorkspaceRuntime(
-                  runtime,
-                  targetPaneID,
-                  sourcePaneID,
-                  sourceTabIndex
-                )
+                addTabToPaneInWorkspaceRuntime(runtime, targetPaneID, sourcePaneID, sourceTabIndex),
               ),
             removeTab: (paneID, tabIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex)
+                removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex),
               ),
             selectTabInPane: (paneID, index) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                selectTabInPaneInWorkspaceRuntime(runtime, paneID, index)
+                selectTabInPaneInWorkspaceRuntime(runtime, paneID, index),
               ),
             splitPane: (targetPaneID, sourcePaneID, sourceTabIndex, axis, position) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
@@ -1107,28 +1131,28 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                   sourcePaneID,
                   sourceTabIndex,
                   axis,
-                  position
-                )
+                  position,
+                ),
               ),
             moveTab: (fromPaneID, toPaneID, fromIndex, toIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                moveTabInWorkspaceRuntime(runtime, fromPaneID, toPaneID, fromIndex, toIndex)
+                moveTabInWorkspaceRuntime(runtime, fromPaneID, toPaneID, fromIndex, toIndex),
               ),
             reorderTab: (paneID, fromIndex, toIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                reorderTabInWorkspaceRuntime(runtime, paneID, fromIndex, toIndex)
+                reorderTabInWorkspaceRuntime(runtime, paneID, fromIndex, toIndex),
               ),
             closeTab: (paneID, tabIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex)
+                removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex),
               ),
             addEditorTab: (relativePath) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                addEditorTabToWorkspaceRuntime(runtime, relativePath)
+                addEditorTabToWorkspaceRuntime(runtime, relativePath),
               ),
             addEditorTabToPane: (paneID, relativePath, insertIndex) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                addEditorTabToPaneInWorkspaceRuntime(runtime, paneID, relativePath, insertIndex)
+                addEditorTabToPaneInWorkspaceRuntime(runtime, paneID, relativePath, insertIndex),
               ),
             splitPaneWithEditor: (targetPaneID, relativePath, axis, position) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
@@ -1137,16 +1161,16 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                   targetPaneID,
                   relativePath,
                   axis,
-                  position
-                )
+                  position,
+                ),
               ),
             addDiffTab: (relativePath, source) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                addDiffTabToWorkspaceRuntime(runtime, relativePath, source)
+                addDiffTabToWorkspaceRuntime(runtime, relativePath, source),
               ),
             addTerminalTab: (slotId) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
-                addTerminalTabToWorkspaceRuntime(runtime, slotId)
+                addTerminalTabToWorkspaceRuntime(runtime, slotId),
               ),
             seedTerminal: () => Effect.void,
           },
@@ -1161,8 +1185,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           if (!selectedWorkspaceId) return;
           yield* selectWorkspaceById(selectedWorkspaceId).pipe(
             Effect.catchTag("WorkspaceSelectionError", (e) =>
-              Effect.fail(new DesktopStateLoadError({ cause: e }))
-            )
+              Effect.fail(new DesktopStateLoadError({ cause: e })),
+            ),
           );
         }),
       reloadDesktopState: () =>
@@ -1219,9 +1243,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         updateDesktopState((state) => {
           state.selectedProjectID = projectId;
         }).pipe(
-          Effect.tap(() =>
-            refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true })
-          ),
+          Effect.tap(() => refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true })),
           Effect.tap(() =>
             Effect.tryPromise({
               try: () =>
@@ -1230,8 +1252,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                   workspaceId: desktopStateSnapshot.selectedWorkspaceID,
                 }),
               catch: (cause) => workspaceSelectionError(cause),
-            })
-          )
+            }),
+          ),
         ),
       selectWorkspace: (workspaceId) => selectWorkspaceById(workspaceId),
       ensureWorkspaceRuntimeConnected,
@@ -1244,27 +1266,31 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           });
         }).pipe(
           Effect.mapError((cause) =>
-            cause instanceof WorkspaceSelectionError
-              ? cause
-              : workspaceSelectionError(cause)
-          )
+            cause instanceof WorkspaceSelectionError ? cause : workspaceSelectionError(cause),
+          ),
         ),
       navigateSidebar: (offset) =>
         Effect.gen(function* () {
           if (desktopStateSnapshot.workspaces.length === 0) return;
           const currentIndex = desktopStateSnapshot.workspaces.findIndex(
-            (workspace) => workspace.id === desktopStateSnapshot.selectedWorkspaceID
+            (workspace) => workspace.id === desktopStateSnapshot.selectedWorkspaceID,
           );
           const nextIndex = Math.max(
             0,
-            Math.min(desktopStateSnapshot.workspaces.length - 1, currentIndex + offset)
+            Math.min(desktopStateSnapshot.workspaces.length - 1, currentIndex + offset),
           );
           const workspace = desktopStateSnapshot.workspaces[nextIndex];
           if (!workspace) return;
           yield* selectWorkspaceById(workspace.id);
         }).pipe(Effect.catchAll(() => Effect.void)),
-      setNavigationArea: (area) => updateDesktopState((state) => { state.navigationArea = area; }),
-      setSearchText: (text) => updateDesktopState((state) => { state.searchText = text; }),
+      setNavigationArea: (area) =>
+        updateDesktopState((state) => {
+          state.navigationArea = area;
+        }),
+      setSearchText: (text) =>
+        updateDesktopState((state) => {
+          state.searchText = text;
+        }),
       setLayoutTargetRuntimeId: (runtimeId) =>
         updateDesktopState((state) => {
           state.layoutTargetRuntimeId = runtimeId;
@@ -1275,12 +1301,15 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       getWorkspaceRecord: (workspaceId) =>
         Effect.sync(
           () =>
-            desktopStateSnapshot.workspaces.find((workspace) => workspace.id === workspaceId) ?? null
+            desktopStateSnapshot.workspaces.find((workspace) => workspace.id === workspaceId) ??
+            null,
         ),
       getRuntimeState: (workspaceId) =>
         Effect.sync(() => readSessionRuntimeState(workspaceId) ?? null),
       getSlotState: (workspaceId, slotId) =>
-        Effect.sync(() => readSessionRuntimeState(workspaceId).slots.find((slot) => slot.id === slotId)),
+        Effect.sync(() =>
+          readSessionRuntimeState(workspaceId).slots.find((slot) => slot.id === slotId),
+        ),
       cycleTab: (direction) =>
         Effect.gen(function* () {
           const runtimeId = getEffectiveLayoutRuntimeId();
@@ -1304,7 +1333,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           const workspaceId = desktopStateSnapshot.selectedWorkspaceID;
           if (!workspaceId) return;
           yield* updateWorkspaceRuntime(workspaceId, (runtime) =>
-            openDiffTabInWorkspaceRuntime(runtime, relativePath, source)
+            openDiffTabInWorkspaceRuntime(runtime, relativePath, source),
           );
         }),
       updateWorkspacePrState: (workspaceId, prState) =>
@@ -1334,14 +1363,14 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                     }
                   }, 90_000);
                 })
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       archiveWorkspace: (workspaceId) =>
         Effect.gen(function* () {
-          yield* terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).pipe(
-            Effect.orElseSucceed(() => undefined)
-          );
+          yield* terminalSurfaceService
+            .removeWorkspaceSurfaces(workspaceId)
+            .pipe(Effect.orElseSucceed(() => undefined));
           yield* updateDesktopState((state) => {
             const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
             if (workspace) {
@@ -1353,7 +1382,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               (workspace) =>
                 workspace.projectId === desktopStateSnapshot.selectedProjectID &&
                 workspace.id !== workspaceId &&
-                workspace.status !== "archived"
+                workspace.status !== "archived",
             );
             if (next) {
               yield* selectWorkspaceById(next.id);
@@ -1363,98 +1392,98 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           Effect.mapError((cause) =>
             cause instanceof WorkspaceSelectionError
               ? cause
-              : workspaceSelectionError(cause, workspaceId)
-          )
+              : workspaceSelectionError(cause, workspaceId),
+          ),
         ),
       addProjectTerminalGroup: (workspaceId, slotId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           addProjectTerminalGroupInRuntime(runtime, slotId, index);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       splitProjectTerminalGroup: (workspaceId, groupId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           splitProjectTerminalGroupInRuntime(runtime, groupId, slotId);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       closeProjectTerminal: (workspaceId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           closeProjectTerminalInRuntime(runtime, slotId);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       selectProjectTerminalGroup: (workspaceId, groupId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           selectProjectTerminalGroupInRuntime(runtime, groupId, slotId);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       focusProjectTerminal: (workspaceId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           focusProjectTerminalInRuntime(runtime, slotId);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       setProjectTerminalPanelVisible: (workspaceId, visible) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           setProjectTerminalPanelVisibleInRuntime(runtime, visible);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       reorderProjectTerminalGroups: (workspaceId, fromIndex, toIndex) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           reorderProjectTerminalGroupsInRuntime(runtime, fromIndex, toIndex);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       reorderProjectTerminalGroupChildren: (workspaceId, groupId, fromIndex, toIndex) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           reorderProjectTerminalGroupChildrenInRuntime(runtime, groupId, fromIndex, toIndex);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       moveProjectTerminalToGroup: (workspaceId, slotId, targetGroupId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           moveProjectTerminalToGroupInRuntime(runtime, slotId, targetGroupId, index);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       moveProjectTerminalToNewGroup: (workspaceId, slotId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           moveProjectTerminalToNewGroupInRuntime(runtime, slotId, index);
         }).pipe(
           Effect.tap(() =>
-            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true }),
           ),
-          Effect.asVoid
+          Effect.asVoid,
         ),
       createWorkspace: (projectId, workspaceKind) =>
         Effect.tryPromise({
@@ -1485,9 +1514,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         }),
       removeWorkspace: (workspaceId) =>
         Effect.gen(function* () {
-          yield* terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).pipe(
-            Effect.orElseSucceed(() => undefined)
-          );
+          yield* terminalSurfaceService
+            .removeWorkspaceSurfaces(workspaceId)
+            .pipe(Effect.orElseSucceed(() => undefined));
           yield* clearRuntimeTerminalStartupTracking(workspaceId);
           yield* Effect.sync(() => {
             interruptWorkspaceStartup(startupSet, workspaceId);
@@ -1511,5 +1540,5 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         }),
       getWorkspaceSession: (workspaceId) => sessionCache.get(workspaceId),
     } satisfies DesktopWorkspaceServiceApi;
-  })
+  }),
 );

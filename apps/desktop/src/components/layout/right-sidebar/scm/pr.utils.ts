@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  PrContext,
-  TerminalDisplayKind,
-  WorkspaceRuntimeState,
-} from "@/lib/shared/types";
+import type { PrContext, TerminalDisplayKind, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
 import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
@@ -23,7 +19,7 @@ const AGENT_KINDS: TerminalDisplayKind[] = [
  */
 export function findAgentTerminal(
   workspaceRuntime: WorkspaceRuntimeState | null,
-  projectRuntime: WorkspaceRuntimeState | null
+  projectRuntime: WorkspaceRuntimeState | null,
 ): AgentTerminalTarget | null {
   for (const runtime of [workspaceRuntime, projectRuntime]) {
     if (!runtime) continue;
@@ -34,16 +30,12 @@ export function findAgentTerminal(
   return null;
 }
 
-function findAgentInRuntime(
-  runtime: WorkspaceRuntimeState
-): AgentTerminalTarget | null {
+function findAgentInRuntime(runtime: WorkspaceRuntimeState): AgentTerminalTarget | null {
   const { slots, terminalDisplayBySlotId, sessions, root, focusedPaneID } = runtime;
 
   const trySlotId = (slotId: string): AgentTerminalTarget | null => {
     const slot = slots.find((item) => item.id === slotId);
-    const session = sessions.find(
-      (s) => s.slotID === slotId && s.status === "running"
-    );
+    const session = sessions.find((s) => s.slotID === slotId && s.status === "running");
     const display = terminalDisplayForSlot(slot, session, terminalDisplayBySlotId[slotId]);
     if (!display || !AGENT_KINDS.includes(display.kind)) return null;
     if (!session) return null;
@@ -110,30 +102,26 @@ export function composePrInstruction(ctx: PrContext, hasUncommittedChanges: bool
 
   let step = 1;
   if (hasUncommittedChanges) {
-    lines.push(`${step}. There are uncommitted changes — commit them first with an appropriate message`);
+    lines.push(
+      `${step}. There are uncommitted changes — commit them first with an appropriate message`,
+    );
     step++;
   }
   lines.push(
     `${step}. Push the branch to origin if not already pushed`,
     `${step + 1}. Create a pull request using \`gh pr create\` targeting ${ctx.baseBranch}`,
     `${step + 2}. Write a clear title and description based on the changes above`,
-    `${step + 3}. Report back the PR URL when done`
+    `${step + 3}. Report back the PR URL when done`,
   );
 
   return lines.join("\n");
 }
 
-export async function gatherPrContext(
-  workspaceId: string
-): Promise<PrContext> {
+export async function gatherPrContext(workspaceId: string): Promise<PrContext> {
   return invoke<PrContext>("pr_gather_context", { workspaceId });
 }
 
-export async function linkPr(
-  workspaceId: string,
-  prUrl: string,
-  prNumber: number
-): Promise<void> {
+export async function linkPr(workspaceId: string, prUrl: string, prNumber: number): Promise<void> {
   return invoke("pr_link", { workspaceId, prUrl, prNumber });
 }
 
@@ -145,12 +133,9 @@ export async function archiveWorkspace(workspaceId: string): Promise<void> {
  * Regex to detect GitHub PR URLs in terminal output.
  * Matches: https://github.com/owner/repo/pull/123
  */
-export const PR_URL_PATTERN =
-  /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/;
+export const PR_URL_PATTERN = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/;
 
-export function extractPrFromOutput(
-  text: string
-): { url: string; number: number } | null {
+export function extractPrFromOutput(text: string): { url: string; number: number } | null {
   const match = text.match(PR_URL_PATTERN);
   if (!match) return null;
   return { url: match[0], number: parseInt(match[1], 10) };

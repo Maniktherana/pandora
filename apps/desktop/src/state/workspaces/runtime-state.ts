@@ -28,7 +28,7 @@ function createProjectTerminalPanelState(): WorkspaceRuntimeState["terminalPanel
 
 function reconcileProjectTerminalPanelState(
   panel: WorkspaceRuntimeState["terminalPanel"],
-  slotIds: Iterable<string>
+  slotIds: Iterable<string>,
 ): WorkspaceRuntimeState["terminalPanel"] {
   const liveSlotIds = new Set(slotIds);
   let terminalPanel = panel ?? createEmptyTerminalPanel();
@@ -55,7 +55,7 @@ function reconcileProjectTerminalPanelState(
 export function sanitizeWorkspaceTerminalLayout(
   root: LayoutNode | null,
   focusedPaneID: string | null,
-  liveSlotIds: Set<string>
+  liveSlotIds: Set<string>,
 ): { root: LayoutNode | null; focusedPaneID: string | null } {
   if (!root) {
     return { root: null, focusedPaneID: null };
@@ -97,7 +97,7 @@ export function createWorkspaceRuntimeState(workspaceId: string): WorkspaceRunti
 
 export function ensureRuntimeRecord(
   runtimes: Record<string, WorkspaceRuntimeState>,
-  workspaceId: string
+  workspaceId: string,
 ): WorkspaceRuntimeState {
   const existing = runtimes[workspaceId];
   if (existing) return existing;
@@ -108,7 +108,7 @@ export function ensureRuntimeRecord(
 
 export function setRuntimeConnectionState(
   runtime: WorkspaceRuntimeState,
-  state: WorkspaceRuntimeState["connectionState"]
+  state: WorkspaceRuntimeState["connectionState"],
 ) {
   runtime.connectionState = state;
 }
@@ -116,7 +116,10 @@ export function setRuntimeConnectionState(
 export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotState[]) {
   runtime.slots = slots;
   runtime.terminalDisplayBySlotId = Object.fromEntries(
-    slots.map((slot) => [slot.id, runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay()])
+    slots.map((slot) => [
+      slot.id,
+      runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay(),
+    ]),
   );
 }
 
@@ -142,16 +145,13 @@ export function addRuntimeSlot(runtime: WorkspaceRuntimeState, slot: SlotState) 
   if (isProjectRuntimeKey(runtime.workspaceId)) {
     runtime.terminalPanel = reconcileProjectTerminalPanelState(
       runtime.terminalPanel,
-      runtime.slots.map((entry) => entry.id)
+      runtime.slots.map((entry) => entry.id),
     );
   }
 }
 
 export function removeRuntimeSlot(runtime: WorkspaceRuntimeState, slotID: string) {
-  const newRoot =
-    runtime.root
-      ? removeTerminalSlotFromTree(runtime.root, slotID)
-      : null;
+  const newRoot = runtime.root ? removeTerminalSlotFromTree(runtime.root, slotID) : null;
   const leaves = newRoot ? getAllLeaves(newRoot) : [];
   const focusedPaneID =
     newRoot && runtime.focusedPaneID
@@ -167,14 +167,14 @@ export function removeRuntimeSlot(runtime: WorkspaceRuntimeState, slotID: string
   if (isProjectRuntimeKey(runtime.workspaceId)) {
     runtime.terminalPanel = reconcileProjectTerminalPanelState(
       runtime.terminalPanel,
-      runtime.slots.filter((slot) => slot.id !== slotID).map((slot) => slot.id)
+      runtime.slots.filter((slot) => slot.id !== slotID).map((slot) => slot.id),
     );
   }
 }
 
 export function updateRuntimeSession(
   runtime: WorkspaceRuntimeState,
-  session: SessionState
+  session: SessionState,
 ): { crashedTerminalSlotId: string | null } {
   const idx = runtime.sessions.findIndex((existing) => existing.id === session.id);
   if (idx >= 0) {
@@ -231,14 +231,14 @@ export function ensureProjectTerminalPanel(runtime: WorkspaceRuntimeState) {
   if (!isProjectRuntimeKey(runtime.workspaceId)) return;
   runtime.terminalPanel = reconcileProjectTerminalPanelState(
     runtime.terminalPanel,
-    runtime.slots.map((slot) => slot.id)
+    runtime.slots.map((slot) => slot.id),
   );
 }
 
 export function applyPersistedWorkspaceLayout(
   runtime: WorkspaceRuntimeState,
   layout: PersistedWorkspaceLayout | null,
-  liveSlotIds: Set<string>
+  liveSlotIds: Set<string>,
 ) {
   const normalizedLayout =
     layout && liveSlotIds.size > 0

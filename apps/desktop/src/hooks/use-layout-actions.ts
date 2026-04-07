@@ -17,7 +17,7 @@ export function useLayoutActions() {
         sourcePaneID: string,
         sourceTabIndex: number,
         axis: "horizontal" | "vertical",
-        position: "before" | "after"
+        position: "before" | "after",
       ) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
@@ -28,109 +28,104 @@ export function useLayoutActions() {
                     sourcePaneID,
                     sourceTabIndex,
                     axis,
-                    position
-                  )
+                    position,
+                  ),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       addTabToPane: (targetPaneID: string, sourcePaneID: string, sourceTabIndex: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.addTabToPane(targetPaneID, sourcePaneID, sourceTabIndex)
+                  session.commands.addTabToPane(targetPaneID, sourcePaneID, sourceTabIndex),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       removePaneTabByIndex: (paneID: string, tabIndex: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.removeTab(paneID, tabIndex)
+                  session.commands.removeTab(paneID, tabIndex),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       selectTabInPane: (paneID: string, index: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.selectTabInPane(paneID, index)
+                  session.commands.selectTabInPane(paneID, index),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       setFocusedPane: (paneId: string) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.focusPane(paneId)
+                  session.commands.focusPane(paneId),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       addEditorTabToPane: (paneID: string, relativePath: string, insertIndex?: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.addEditorTabToPane(paneID, relativePath, insertIndex)
+                  session.commands.addEditorTabToPane(paneID, relativePath, insertIndex),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       splitPaneWithEditor: (
         targetPaneID: string,
         relativePath: string,
         axis: "horizontal" | "vertical",
-        position: "before" | "after"
+        position: "before" | "after",
       ) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.splitPaneWithEditor(
-                    targetPaneID,
-                    relativePath,
-                    axis,
-                    position
-                  )
+                  session.commands.splitPaneWithEditor(targetPaneID, relativePath, axis, position),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       moveTab: (fromPaneID: string, toPaneID: string, fromIndex: number, toIndex: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.moveTab(fromPaneID, toPaneID, fromIndex, toIndex)
+                  session.commands.moveTab(fromPaneID, toPaneID, fromIndex, toIndex),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       reorderTab: (paneID: string, fromIndex: number, toIndex: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             selectedWorkspaceID
               ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
-                  session.commands.reorderTab(paneID, fromIndex, toIndex)
+                  session.commands.reorderTab(paneID, fromIndex, toIndex),
                 )
-              : Effect.void
-          )
+              : Effect.void,
+          ),
         ),
       addDiffTabForPath: (relativePath: string, source: "working" | "staged") =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.addDiffTabForPath(relativePath, source)
-          )
+            service.addDiffTabForPath(relativePath, source),
+          ),
         ),
     }),
-    [run, selectedWorkspaceID]
+    [run, selectedWorkspaceID],
   );
 }

@@ -31,7 +31,9 @@ export function buildGhosttyThemeConfig(theme: TerminalThemeColors): string {
     theme.brightCyan,
     theme.brightWhite,
   ];
-  const lines = paletteEntries.flatMap((value, index) => (value ? [`palette = ${index}=${value}`] : []));
+  const lines = paletteEntries.flatMap((value, index) =>
+    value ? [`palette = ${index}=${value}`] : [],
+  );
   if (theme.background) lines.push(`background = ${theme.background}`);
   if (theme.foreground) lines.push(`foreground = ${theme.foreground}`);
   if (theme.cursor) lines.push(`cursor-color = ${theme.cursor}`);

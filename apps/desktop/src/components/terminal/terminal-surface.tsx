@@ -39,29 +39,33 @@ export default function TerminalSurface({
       hasAnchorElement: Boolean(anchorElement),
     });
 
-    void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (manager) =>
-        manager.upsertSurface({
-          workspaceId,
-          sessionId: sessionID,
-          surfaceId,
-          anchorElement: currentAnchor,
-          visible,
-          focused,
-          onFocus,
-        })
+    void runtime
+      .runPromise(
+        Effect.flatMap(TerminalSurfaceService, (manager) =>
+          manager.upsertSurface({
+            workspaceId,
+            sessionId: sessionID,
+            surfaceId,
+            anchorElement: currentAnchor,
+            visible,
+            focused,
+            onFocus,
+          }),
+        ),
       )
-    ).catch((error) => {
-      console.error("Failed to register native terminal surface:", error);
-    });
+      .catch((error) => {
+        console.error("Failed to register native terminal surface:", error);
+      });
   }, [anchorElement, focused, onFocus, runtime, sessionID, surfaceId, visible, workspaceId]);
 
   useEffect(() => {
     if (!sessionID) return;
     return () => {
-      void runtime.runPromise(
-        Effect.flatMap(TerminalSurfaceService, (manager) => manager.parkSurface(surfaceId))
-      ).catch(() => {});
+      void runtime
+        .runPromise(
+          Effect.flatMap(TerminalSurfaceService, (manager) => manager.parkSurface(surfaceId)),
+        )
+        .catch(() => {});
     };
   }, [runtime, sessionID, surfaceId]);
 

@@ -24,7 +24,7 @@ function isVisibleForHitTest(element: HTMLElement | null): boolean {
 export function hitTestPanes(
   x: number,
   y: number,
-  workspaceId: string | null
+  workspaceId: string | null,
 ): { paneID: string; rect: DOMRect; zone: DropZone } | null {
   const panes = document.querySelectorAll<HTMLElement>("[data-pane-id]");
   for (const pane of panes) {
@@ -65,8 +65,12 @@ function unionRects(elements: HTMLElement[]): DOMRect {
 export function hitTestBottomTerminalSidebar(
   x: number,
   y: number,
-  dragState: DragState
-): BottomTerminalGroupDropTarget | BottomTerminalInsertDropTarget | BottomTerminalSlotDropTarget | null {
+  dragState: DragState,
+):
+  | BottomTerminalGroupDropTarget
+  | BottomTerminalInsertDropTarget
+  | BottomTerminalSlotDropTarget
+  | null {
   const groupRows = [
     ...document.querySelectorAll<HTMLElement>("[data-bottom-terminal-group-block='true']"),
   ].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
@@ -76,7 +80,12 @@ export function hitTestBottomTerminalSidebar(
   const sidebar = document.querySelector<HTMLElement>("[data-bottom-terminal-sidebar='true']");
   const barRect = sidebar?.getBoundingClientRect() ?? unionRects(groupRows);
   const pad = 8;
-  if (x < barRect.left - pad || x > barRect.right + pad || y < barRect.top - pad || y > barRect.bottom + pad) {
+  if (
+    x < barRect.left - pad ||
+    x > barRect.right + pad ||
+    y < barRect.top - pad ||
+    y > barRect.bottom + pad
+  ) {
     return null;
   }
 
@@ -93,7 +102,8 @@ export function hitTestBottomTerminalSidebar(
         runtimeId: slotRow.dataset.bottomTerminalRuntimeId!,
         groupId: slotRow.dataset.bottomTerminalGroupId!,
         groupIndex: Number.parseInt(slotRow.dataset.bottomTerminalGroupIndex ?? "0", 10),
-        insertIndex: Number.parseInt(slotRow.dataset.bottomTerminalSlotIndex ?? "0", 10) + (y >= midY ? 1 : 0),
+        insertIndex:
+          Number.parseInt(slotRow.dataset.bottomTerminalSlotIndex ?? "0", 10) + (y >= midY ? 1 : 0),
         barRect,
         lineY: y >= midY ? rect.bottom : rect.top,
       };
@@ -130,7 +140,10 @@ export function hitTestBottomTerminalSidebar(
   };
 }
 
-export function hitTestBottomTerminalPanes(x: number, y: number): BottomTerminalPaneDropTarget | null {
+export function hitTestBottomTerminalPanes(
+  x: number,
+  y: number,
+): BottomTerminalPaneDropTarget | null {
   const panes = document.querySelectorAll<HTMLElement>("[data-bottom-terminal-pane-id]");
   for (const pane of panes) {
     const rect = pane.getBoundingClientRect();
@@ -151,7 +164,11 @@ export function hitTestBottomTerminalPanes(x: number, y: number): BottomTerminal
   return null;
 }
 
-export function hitTestTabs(x: number, y: number, workspaceId: string | null): TabDropTarget | null {
+export function hitTestTabs(
+  x: number,
+  y: number,
+  workspaceId: string | null,
+): TabDropTarget | null {
   const tabs = document.querySelectorAll<HTMLElement>("[data-tab-pane][data-tab-index]");
   if (tabs.length === 0) return null;
 
@@ -167,7 +184,7 @@ export function hitTestTabs(x: number, y: number, workspaceId: string | null): T
 
   for (const [paneID, paneTabs] of byPane) {
     const sorted = [...paneTabs].sort(
-      (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left
+      (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left,
     );
     const firstRect = sorted[0].getBoundingClientRect();
     const lastRect = sorted[sorted.length - 1].getBoundingClientRect();

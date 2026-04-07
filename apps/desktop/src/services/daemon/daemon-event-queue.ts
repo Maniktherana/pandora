@@ -79,5 +79,5 @@ export const DaemonEventQueueLive = Layer.effect(
       publish: (event) => Queue.offer(queue, event),
       take: () => Queue.take(queue),
     } satisfies DaemonEventQueueService;
-  })
+  }),
 );

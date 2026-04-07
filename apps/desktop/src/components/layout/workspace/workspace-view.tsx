@@ -26,10 +26,7 @@ import type { SessionState } from "@/lib/shared/types";
 import { panelResizeHandleClasses } from "@/components/ui/panel-resize-handle-classes";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
-import type {
-  NativeTerminalRegistration,
-  TerminalAnchorInfo,
-} from "./workspace-view.types";
+import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
 
 const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
 
@@ -166,12 +163,11 @@ function PaneView({
     .filter((x): x is { slotId: string; idx: number } => x !== null);
 
   const anyTerminalRunning = terminalSlots.some(({ slotId }) =>
-    Object.values(sessionsMap).some((s) => s.slotID === slotId && s.status === "running")
+    Object.values(sessionsMap).some((s) => s.slotID === slotId && s.status === "running"),
   );
 
   const onlyEditors =
-    leaf.tabs.length > 0 &&
-    leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff");
+    leaf.tabs.length > 0 && leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff");
 
   const handlePanePointerDownCapture = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
@@ -243,8 +239,9 @@ function PaneView({
           }
           const slot = slotsMap[tab.slotId];
           const sessionForSlot =
-            Object.values(sessionsMap).find((s) => s.slotID === tab.slotId && s.status === "running") ??
-            (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
+            Object.values(sessionsMap).find(
+              (s) => s.slotID === tab.slotId && s.status === "running",
+            ) ?? (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
           const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
           if (!sessionId) return null;
           if (!isActiveTab && !connectedSlotIds.has(tab.slotId)) return null;
@@ -332,7 +329,9 @@ function LayoutRenderer({
         <div key={child.id} className="contents">
           {i > 0 && (
             <PanelResizeHandle
-              className={panelResizeHandleClasses(direction === "horizontal" ? "horizontal" : "vertical")}
+              className={panelResizeHandleClasses(
+                direction === "horizontal" ? "horizontal" : "vertical",
+              )}
               hitAreaMargins={{ coarse: 10, fine: 8 }}
               onDragging={setLocalResizing}
             />
@@ -356,11 +355,7 @@ function LayoutRenderer({
 
 const MemoLayoutRenderer = memo(LayoutRenderer);
 
-function HoistedNativeTerminals({
-  anchors,
-}: {
-  anchors: Record<string, TerminalAnchorInfo>;
-}) {
+function HoistedNativeTerminals({ anchors }: { anchors: Record<string, TerminalAnchorInfo> }) {
   const sessionIds = useMemo(() => Object.keys(anchors), [anchors]);
 
   return (
@@ -405,44 +400,43 @@ export function WorkspaceRuntimeView({
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
   const visibleSlotIds = useMemo(
     () => getVisibleWorkspaceTerminalSlotIds(runtime.root),
-    [runtime.root]
+    [runtime.root],
   );
   const liveSlotIds = useMemo(() => runtime.slots.map((slot) => slot.id), [runtime.slots]);
-  const connectedSlotIds = useLazyTerminalSlotConnections(
-    workspaceId,
-    visibleSlotIds,
-    liveSlotIds
-  );
+  const connectedSlotIds = useLazyTerminalSlotConnections(workspaceId, visibleSlotIds, liveSlotIds);
 
-  const registerTerminalAnchor = useCallback((sessionId: string, info: TerminalAnchorInfo | null) => {
-    setAnchors((prev) => {
-      if (info === null) {
-        if (!(sessionId in prev)) return prev;
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      }
-      const p = prev[sessionId];
-      if (
-        p &&
-        p.el === info.el &&
-        p.visible === info.visible &&
-        p.focused === info.focused &&
-        p.workspaceId === info.workspaceId &&
-        p.onFocus === info.onFocus
-      ) {
-        return prev;
-      }
-      return { ...prev, [sessionId]: info };
-    });
-  }, []);
+  const registerTerminalAnchor = useCallback(
+    (sessionId: string, info: TerminalAnchorInfo | null) => {
+      setAnchors((prev) => {
+        if (info === null) {
+          if (!(sessionId in prev)) return prev;
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        }
+        const p = prev[sessionId];
+        if (
+          p &&
+          p.el === info.el &&
+          p.visible === info.visible &&
+          p.focused === info.focused &&
+          p.workspaceId === info.workspaceId &&
+          p.onFocus === info.onFocus
+        ) {
+          return prev;
+        }
+        return { ...prev, [sessionId]: info };
+      });
+    },
+    [],
+  );
 
   const terminalRegistration = useMemo<NativeTerminalRegistration>(
     () => ({
       register: registerTerminalAnchor,
       workspaceVisible: isVisible,
     }),
-    [registerTerminalAnchor, isVisible]
+    [registerTerminalAnchor, isVisible],
   );
 
   return (
@@ -484,9 +478,7 @@ function EmptyWorkspaceState() {
         <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
           <div className="text-center">
             <p className="text-lg font-medium">No project selected</p>
-            <p className="text-sm mt-1">
-              Add a project from the sidebar to get started
-            </p>
+            <p className="text-sm mt-1">Add a project from the sidebar to get started</p>
           </div>
         </div>
       );
@@ -586,7 +578,7 @@ export default function WorkspaceView() {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
   const runtime = useDesktopView((view) =>
-    view.selectedWorkspaceID ? view.runtimes[view.selectedWorkspaceID] ?? null : null
+    view.selectedWorkspaceID ? (view.runtimes[view.selectedWorkspaceID] ?? null) : null,
   );
   const workspaceCommands = useWorkspaceActions();
   const handleRootPointerDownCapture = useCallback(() => {
@@ -610,10 +602,7 @@ export default function WorkspaceView() {
   }
 
   return (
-    <div
-      className="h-full min-h-0"
-      onPointerDownCapture={handleRootPointerDownCapture}
-    >
+    <div className="h-full min-h-0" onPointerDownCapture={handleRootPointerDownCapture}>
       <WorkspaceRuntimeView
         workspaceId={selectedWorkspaceID!}
         workspaceRoot={selectedWs.worktreePath}

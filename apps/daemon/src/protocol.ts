@@ -10,7 +10,7 @@ export function writeMessage(socket: Socket, message: object): void {
 
 export function createMessageReader(
   onMessage: (message: unknown) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): (chunk: Buffer) => void {
   let buffer = Buffer.alloc(0);
 

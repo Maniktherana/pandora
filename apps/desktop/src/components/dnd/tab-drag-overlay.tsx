@@ -117,14 +117,15 @@ export function TabDragOverlay({
           if (tgt.zone === "center") {
             projectTerminalCommands.selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, null);
           } else {
-            const toIndex = terminalPanel?.groups.findIndex((group) => group.id === tgt.groupId) ?? -1;
+            const toIndex =
+              terminalPanel?.groups.findIndex((group) => group.id === tgt.groupId) ?? -1;
             const fromIndex = drag.groupIndex ?? -1;
             if (toIndex >= 0 && fromIndex >= 0) {
               const insertIndex = tgt.zone === "left" ? toIndex : toIndex + 1;
               projectTerminalCommands.reorderProjectTerminalGroups(
                 tgt.runtimeId,
                 fromIndex,
-                fromIndex < insertIndex ? insertIndex - 1 : insertIndex
+                fromIndex < insertIndex ? insertIndex - 1 : insertIndex,
               );
             }
           }
@@ -147,7 +148,7 @@ export function TabDragOverlay({
             projectTerminalCommands.selectProjectTerminalGroup(
               tgt.runtimeId,
               drag.groupId!,
-              drag.slotId
+              drag.slotId,
             );
             return;
           }
@@ -164,7 +165,7 @@ export function TabDragOverlay({
                 tgt.runtimeId,
                 tgt.groupId,
                 fromIndex,
-                toIndex
+                toIndex,
               );
             }
           } else {
@@ -172,13 +173,13 @@ export function TabDragOverlay({
               tgt.runtimeId,
               drag.slotId,
               tgt.groupId,
-              insertIndex
+              insertIndex,
             );
           }
           projectTerminalCommands.selectProjectTerminalGroup(
             tgt.runtimeId,
             tgt.groupId,
-            drag.slotId
+            drag.slotId,
           );
           return;
         }
@@ -193,14 +194,14 @@ export function TabDragOverlay({
               tgt.runtimeId,
               tgt.groupId,
               fromIndex,
-              toIndex
+              toIndex,
             );
           } else if (drag.groupId !== tgt.groupId) {
             projectTerminalCommands.moveProjectTerminalToGroup(
               tgt.runtimeId,
               drag.slotId,
               tgt.groupId,
-              tgt.insertIndex
+              tgt.insertIndex,
             );
           }
           return;
@@ -211,7 +212,7 @@ export function TabDragOverlay({
             projectTerminalCommands.moveProjectTerminalToGroup(
               tgt.runtimeId,
               drag.slotId,
-              tgt.groupId
+              tgt.groupId,
             );
           }
           return;
@@ -220,13 +221,17 @@ export function TabDragOverlay({
         if (tgt.kind === "bottom-terminal-insert" && tgt.runtimeId === drag.runtimeId) {
           let insertIndex = tgt.insertIndex;
           const sourceGroup = terminalPanel.groups[drag.groupIndex ?? -1];
-          if (sourceGroup && sourceGroup.children.length === 1 && (drag.groupIndex ?? -1) < insertIndex) {
+          if (
+            sourceGroup &&
+            sourceGroup.children.length === 1 &&
+            (drag.groupIndex ?? -1) < insertIndex
+          ) {
             insertIndex -= 1;
           }
           projectTerminalCommands.moveProjectTerminalToNewGroup(
             tgt.runtimeId,
             drag.slotId,
-            insertIndex
+            insertIndex,
           );
         }
         return;
@@ -286,7 +291,12 @@ export function TabDragOverlay({
             layoutCommands.reorderTab(tgt.paneID, fromIndex, toIndex);
           }
         } else {
-          layoutCommands.moveTab(drag.sourcePaneID!, tgt.paneID, drag.sourceIndex!, tgt.insertIndex);
+          layoutCommands.moveTab(
+            drag.sourcePaneID!,
+            tgt.paneID,
+            drag.sourceIndex!,
+            tgt.insertIndex,
+          );
         }
       } else {
         if (tgt.kind !== "pane") return;
@@ -332,15 +342,9 @@ export function TabDragOverlay({
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
     };
-  // target is intentionally read from closure at pointerup time
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    dragState,
-    layoutCommands,
-    onDone,
-    projectTerminalCommands,
-    selectedWorkspaceID,
-  ]);
+    // target is intentionally read from closure at pointerup time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragState, layoutCommands, onDone, projectTerminalCommands, selectedWorkspaceID]);
 
   return createPortal(
     <div className="fixed inset-0 z-[9999]" style={{ cursor: "grabbing" }}>
@@ -371,7 +375,7 @@ export function TabDragOverlay({
               target.zone === "left" && "bottom-1 left-1 top-1 w-[calc(50%-4px)]",
               target.zone === "right" && "bottom-1 right-1 top-1 w-[calc(50%-4px)]",
               target.zone === "top" && "left-1 right-1 top-1 h-[calc(50%-4px)]",
-              target.zone === "bottom" && "bottom-1 left-1 right-1 h-[calc(50%-4px)]"
+              target.zone === "bottom" && "bottom-1 left-1 right-1 h-[calc(50%-4px)]",
             )}
           />
         </div>
@@ -392,7 +396,7 @@ export function TabDragOverlay({
               "absolute rounded border-2 border-blue-500/70 bg-blue-500/10",
               target.zone === "center" && "inset-1",
               target.zone === "left" && "left-1 top-1 bottom-1 w-[calc(50%-4px)]",
-              target.zone === "right" && "right-1 top-1 bottom-1 w-[calc(50%-4px)]"
+              target.zone === "right" && "right-1 top-1 bottom-1 w-[calc(50%-4px)]",
             )}
           />
         </div>
@@ -435,6 +439,6 @@ export function TabDragOverlay({
         />
       ) : null}
     </div>,
-    document.body
+    document.body,
   );
 }

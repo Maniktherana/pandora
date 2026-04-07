@@ -117,7 +117,7 @@ export default function AppHeader({
             onClick={onToggleBottomPanel}
             className={cn(
               "rounded-md p-1.5 text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-              bottomPanelOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+              bottomPanelOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
             )}
             title="Toggle terminal panel (Ctrl+`)"
           >
@@ -128,7 +128,7 @@ export default function AppHeader({
             onClick={onToggleFileTree}
             className={cn(
               "rounded-md p-1.5 text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-              fileTreeOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+              fileTreeOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
             )}
             title="Toggle file tree"
           >

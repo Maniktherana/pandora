@@ -104,7 +104,9 @@ export function getVisualLeaves(node: LayoutNode): LayoutLeaf[] {
 
 export function getAllTerminalSlotIds(node: LayoutNode): string[] {
   if (node.type === "leaf") {
-    return node.tabs.filter((t): t is { kind: "terminal"; slotId: string } => t.kind === "terminal").map((t) => t.slotId);
+    return node.tabs
+      .filter((t): t is { kind: "terminal"; slotId: string } => t.kind === "terminal")
+      .map((t) => t.slotId);
   }
   return node.children.flatMap(getAllTerminalSlotIds);
 }
@@ -135,14 +137,22 @@ export function removeMatchingTabFromTree(node: LayoutNode, tab: PaneTab): Layou
   }
   if (newChildren.length === 0) return null;
   if (newChildren.length === 1) return newChildren[0];
-  return { ...node, children: newChildren, ratios: newChildren.map(() => 1 / newChildren.length) } as LayoutSplit;
+  return {
+    ...node,
+    children: newChildren,
+    ratios: newChildren.map(() => 1 / newChildren.length),
+  } as LayoutSplit;
 }
 
 export function removeTerminalSlotFromTree(node: LayoutNode, slotId: string): LayoutNode | null {
   return removeMatchingTabFromTree(node, { kind: "terminal", slotId });
 }
 
-export function removeTabAtIndexInTree(node: LayoutNode, paneID: string, tabIndex: number): LayoutNode | null {
+export function removeTabAtIndexInTree(
+  node: LayoutNode,
+  paneID: string,
+  tabIndex: number,
+): LayoutNode | null {
   if (node.type === "leaf" && node.id === paneID) {
     const tabs = node.tabs.filter((_, i) => i !== tabIndex);
     if (tabs.length === 0) {
@@ -174,7 +184,7 @@ export function insertTabInPane(
   node: LayoutNode,
   paneID: string,
   tab: PaneTab,
-  insertIndex: number
+  insertIndex: number,
 ): LayoutNode {
   if (node.type === "leaf" && node.id === paneID) {
     const dupIdx = node.tabs.findIndex((t) => tabsEqual(t, tab));
@@ -187,7 +197,10 @@ export function insertTabInPane(
     return { ...node, tabs, selectedIndex: idx };
   }
   if (node.type === "split") {
-    return { ...node, children: node.children.map((c) => insertTabInPane(c, paneID, tab, insertIndex)) };
+    return {
+      ...node,
+      children: node.children.map((c) => insertTabInPane(c, paneID, tab, insertIndex)),
+    };
   }
   return node;
 }
@@ -207,7 +220,7 @@ export function splitPaneAroundTab(
   targetPaneID: string,
   tab: PaneTab,
   axis: LayoutAxis,
-  position: "before" | "after"
+  position: "before" | "after",
 ): LayoutNode {
   const newLeaf = createLeaf([tab]);
 
@@ -236,7 +249,7 @@ export function splitPaneWithinLeaf(
   paneID: string,
   tabIndex: number,
   axis: LayoutAxis,
-  position: "before" | "after"
+  position: "before" | "after",
 ): LayoutNode {
   function splitNode(node: LayoutNode): LayoutNode {
     if (node.type === "leaf" && node.id === paneID) {
@@ -258,7 +271,8 @@ export function splitPaneWithinLeaf(
         selectedIndex: Math.max(0, selectedIndex),
       };
       const movedLeaf = createLeaf([tab]);
-      const children = position === "before" ? [movedLeaf, remainingLeaf] : [remainingLeaf, movedLeaf];
+      const children =
+        position === "before" ? [movedLeaf, remainingLeaf] : [remainingLeaf, movedLeaf];
 
       return {
         type: "split",

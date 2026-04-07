@@ -12,12 +12,12 @@ import {
   removeSessionDefinition,
   removeSlotDefinition,
   updateSessionDefinition,
-  updateSlotDefinition
+  updateSlotDefinition,
 } from "./db";
 import { ProcessManager } from "./process-manager";
 import { logger } from "./logger";
 import { createMessageReader, writeMessage } from "./protocol";
-import type { ClientMessage, DaemonMessage, SessionState, SlotState } from "./types";
+import type { ClientMessage, DaemonMessage, SlotState } from "./types";
 
 export class DaemonServer {
   private readonly db;
@@ -29,15 +29,12 @@ export class DaemonServer {
   constructor(workspacePath: string, defaultCwd?: string, runtimeId?: string) {
     const normalizedPath = path.resolve(workspacePath);
     const rid = runtimeId ?? "legacy";
-    const hash = createHash("sha256")
-      .update(`${normalizedPath}\0${rid}`)
-      .digest("hex")
-      .slice(0, 8);
+    const hash = createHash("sha256").update(`${normalizedPath}\0${rid}`).digest("hex").slice(0, 8);
     this.socketPath = `/tmp/pandora-${hash}.sock`;
     this.db = openDatabase({
       workspacePath: normalizedPath,
       defaultCwd: defaultCwd ?? normalizedPath,
-      runtimeId: rid
+      runtimeId: rid,
     });
 
     const slotDefinitions = listSlotDefinitions(this.db);
@@ -53,15 +50,25 @@ export class DaemonServer {
         broadcastOutputCount++;
         broadcastOutputBytes += data.length;
         if (broadcastOutputCount % 100 === 0) {
-          logger.debug({ tag: "BROADCAST", chunk: broadcastOutputCount, sessionID, bytes: data.length, totalBytes: broadcastOutputBytes, clients: this.clients.size }, "output_chunk");
+          logger.debug(
+            {
+              tag: "BROADCAST",
+              chunk: broadcastOutputCount,
+              sessionID,
+              bytes: data.length,
+              totalBytes: broadcastOutputBytes,
+              clients: this.clients.size,
+            },
+            "output_chunk",
+          );
         }
         this.broadcast({
           type: "output_chunk",
           sessionID,
-          data: data.toString("base64")
+          data: data.toString("base64"),
         });
       },
-      resolvedDefaultCwd
+      resolvedDefaultCwd,
     );
   }
 
@@ -125,7 +132,10 @@ export class DaemonServer {
     this.clients.add(socket);
     logger.info({ tag: "CONN", total: this.clients.size }, "client connected");
     writeMessage(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
-    writeMessage(socket, { type: "session_snapshot", sessions: this.processManager.listSessionStates() });
+    writeMessage(socket, {
+      type: "session_snapshot",
+      sessions: this.processManager.listSessionStates(),
+    });
 
     const reader = createMessageReader(
       (message) => {
@@ -134,7 +144,7 @@ export class DaemonServer {
       (error) => {
         logger.warn({ tag: "CONN", err: error.message }, "message parse error");
         writeMessage(socket, { type: "error", message: error.message });
-      }
+      },
     );
 
     socket.on("data", reader);
@@ -154,7 +164,10 @@ export class DaemonServer {
     }
     switch (message.type) {
       case "request_snapshot":
-        writeMessage(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
+        writeMessage(socket, {
+          type: "slot_snapshot",
+          slots: this.processManager.listSlotStates(),
+        });
         writeMessage(socket, {
           type: "session_snapshot",
           sessions: this.processManager.listSessionStates(),
@@ -169,7 +182,7 @@ export class DaemonServer {
           presentationMode: message.slot.presentationMode,
           primarySessionDefID: message.slot.primarySessionDefID ?? null,
           persisted: message.slot.persisted,
-          sortOrder: message.slot.sortOrder
+          sortOrder: message.slot.sortOrder,
         });
         this.processManager.registerSlot(slot);
         this.broadcast({ type: "slot_added", slot: this.findSlotState(slot.id) });
@@ -184,7 +197,7 @@ export class DaemonServer {
           presentationMode: message.slot.presentationMode,
           primarySessionDefID: message.slot.primarySessionDefID,
           persisted: message.slot.persisted,
-          sortOrder: message.slot.sortOrder
+          sortOrder: message.slot.sortOrder,
         });
         this.broadcast({ type: "slot_state_changed", slot: this.findSlotState(message.slot.id) });
         break;
@@ -205,7 +218,7 @@ export class DaemonServer {
           envOverrides: message.session.envOverrides,
           restartPolicy: message.session.restartPolicy,
           pauseSupported: message.session.pauseSupported,
-          resumeSupported: message.session.resumeSupported
+          resumeSupported: message.session.resumeSupported,
         });
         this.processManager.registerSessionDefinition(session);
         this.broadcastSnapshots();
@@ -223,7 +236,7 @@ export class DaemonServer {
           envOverrides: message.session.envOverrides,
           restartPolicy: message.session.restartPolicy,
           pauseSupported: message.session.pauseSupported,
-          resumeSupported: message.session.resumeSupported
+          resumeSupported: message.session.resumeSupported,
         });
         this.broadcastSnapshots();
         break;
@@ -319,7 +332,16 @@ export class DaemonServer {
     const elapsed = Date.now() - t0;
     // Log if broadcast is slow (>5ms) — indicates socket backpressure
     if (elapsed > 5) {
-      logger.warn({ tag: "BROADCAST", type: message.type, count: this.broadcastCount, clients: this.clients.size, elapsedMs: elapsed }, "slow broadcast");
+      logger.warn(
+        {
+          tag: "BROADCAST",
+          type: message.type,
+          count: this.broadcastCount,
+          clients: this.clients.size,
+          elapsedMs: elapsed,
+        },
+        "slow broadcast",
+      );
     }
   }
 }

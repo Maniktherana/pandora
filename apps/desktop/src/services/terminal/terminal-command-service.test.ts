@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  encodeTerminalInput,
-  resolveNewTerminalRuntimeId,
-} from "./terminal-command-service";
+import { encodeTerminalInput, resolveNewTerminalRuntimeId } from "./terminal-command-service";
 
 describe("terminal-command-service helpers", () => {
   test("encodeTerminalInput preserves command text through base64 encoding", () => {

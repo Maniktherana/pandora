@@ -7,10 +7,10 @@ import {
 export function useLazyTerminalSlotConnections(
   runtimeId: string,
   visibleSlotIds: readonly string[],
-  liveSlotIds: readonly string[]
+  liveSlotIds: readonly string[],
 ): ReadonlySet<string> {
   const [connectedSlotIds, setConnectedSlotIds] = useState<Set<string>>(
-    () => new Set(visibleSlotIds)
+    () => new Set(visibleSlotIds),
   );
 
   useEffect(() => {

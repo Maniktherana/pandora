@@ -9,7 +9,7 @@ import type {
   SessionState,
   SessionStatus,
   SlotDefinition,
-  SlotState
+  SlotState,
 } from "./types";
 
 interface ManagedSession {
@@ -40,14 +40,18 @@ function getForegroundProcess(shellPid: number): string | null {
   }
 }
 
-function capabilitiesForStatus(status: SessionStatus, definition: SessionDefinition): ActionCapabilities {
+function capabilitiesForStatus(
+  status: SessionStatus,
+  definition: SessionDefinition,
+): ActionCapabilities {
   return {
     canFocus: status === "running" || status === "paused",
     canPause: definition.pauseSupported && status === "running",
     canResume: definition.resumeSupported && status === "paused",
     canClear: true,
     canStop: status === "running" || status === "paused" || status === "restarting",
-    canRestart: status === "running" || status === "paused" || status === "crashed" || status === "stopped"
+    canRestart:
+      status === "running" || status === "paused" || status === "crashed" || status === "stopped",
   };
 }
 
@@ -76,7 +80,7 @@ export class ProcessManager {
     sessionDefinitions: SessionDefinition[],
     private readonly onSessionStateChanged: (session: SessionState) => void,
     private readonly onOutput: (sessionID: string, data: Buffer) => void,
-    defaultCwd?: string
+    defaultCwd?: string,
   ) {
     this.defaultCwd = defaultCwd ?? process.cwd();
     for (const slot of slotDefinitions) {
@@ -153,7 +157,7 @@ export class ProcessManager {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(
-          `[process-manager] failed to start session ${definition.id} (${definition.name}) for slot ${slotID}: ${message}`
+          `[process-manager] failed to start session ${definition.id} (${definition.name}) for slot ${slotID}: ${message}`,
         );
       }
     }
@@ -264,11 +268,11 @@ export class ProcessManager {
         exitCode: null,
         startedAt: null,
         lastOutputAt: null,
-        foregroundProcess: null
+        foregroundProcess: null,
       },
       process: null,
       stopTimer: null,
-      fgPollTimer: null
+      fgPollTimer: null,
     };
 
     this.sessions.set(managed.instance.id, managed);
@@ -293,7 +297,16 @@ export class ProcessManager {
   writeToSession(sessionID: string, data: Buffer): void {
     const session = this.sessions.get(sessionID);
     if (session?.process) {
-      logger.debug({ tag: "PTY_WRITE", sessionID, pid: session.instance.pid, cmd: session.definition.command, bytes: data.length }, "pty write");
+      logger.debug(
+        {
+          tag: "PTY_WRITE",
+          sessionID,
+          pid: session.instance.pid,
+          cmd: session.definition.command,
+          bytes: data.length,
+        },
+        "pty write",
+      );
       session.process.terminal?.write(data);
     }
   }
@@ -301,7 +314,17 @@ export class ProcessManager {
   resizeSession(sessionID: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionID);
     if (session) {
-      logger.debug({ tag: "PTY_RESIZE", sessionID, pid: session.instance.pid, cmd: session.definition.command, cols, rows }, "pty resize");
+      logger.debug(
+        {
+          tag: "PTY_RESIZE",
+          sessionID,
+          pid: session.instance.pid,
+          cmd: session.definition.command,
+          cols,
+          rows,
+        },
+        "pty resize",
+      );
     }
     session?.process?.terminal?.resize(Math.max(cols, 1), Math.max(rows, 1));
   }
@@ -315,7 +338,7 @@ export class ProcessManager {
     const env = {
       ...process.env,
       ...session.definition.envOverrides,
-      TERM: "xterm-256color"
+      TERM: "xterm-256color",
     };
 
     const sid = session.instance.id;
@@ -341,8 +364,23 @@ export class ProcessManager {
           outputBytes += buf.length;
           session.instance.lastOutputAt = new Date().toISOString();
           const now = Date.now();
-          if (outputCount <= 5 || outputCount % 50 === 0 || buf.length > 4096 || now - lastLogTime > 500) {
-            logger.debug({ tag: "PTY_OUT", sessionID: sid, cmd, chunk: outputCount, bytes: buf.length, totalBytes: outputBytes }, "pty output");
+          if (
+            outputCount <= 5 ||
+            outputCount % 50 === 0 ||
+            buf.length > 4096 ||
+            now - lastLogTime > 500
+          ) {
+            logger.debug(
+              {
+                tag: "PTY_OUT",
+                sessionID: sid,
+                cmd,
+                chunk: outputCount,
+                bytes: buf.length,
+                totalBytes: outputBytes,
+              },
+              "pty output",
+            );
             lastLogTime = now;
           }
           this.onOutput(sid, buf);
@@ -363,7 +401,17 @@ export class ProcessManager {
     this.startForegroundPolling(session);
 
     void subprocess.exited.then((exitCode) => {
-      logger.info({ tag: "EXIT", sessionID: sid, pid: session.instance.pid, exitCode, outputChunks: outputCount, outputBytes }, "session exited");
+      logger.info(
+        {
+          tag: "EXIT",
+          sessionID: sid,
+          pid: session.instance.pid,
+          exitCode,
+          outputChunks: outputCount,
+          outputBytes,
+        },
+        "session exited",
+      );
       this.stopForegroundPolling(session);
       session.process?.terminal?.close();
       session.process = null;
@@ -382,7 +430,10 @@ export class ProcessManager {
       }
 
       session.instance.status = session.instance.status === "stopped" ? "stopped" : "crashed";
-      logger.info({ tag: "EXIT", sessionID: sid, status: session.instance.status }, "session final status");
+      logger.info(
+        { tag: "EXIT", sessionID: sid, status: session.instance.status },
+        "session final status",
+      );
       this.onSessionStateChanged(this.sessionState(session));
     });
   }
@@ -391,7 +442,11 @@ export class ProcessManager {
     this.stopForegroundPolling(session);
 
     const updateForegroundProcess = () => {
-      if (!session.process || session.instance.pid == null || session.instance.status !== "running") {
+      if (
+        !session.process ||
+        session.instance.pid == null ||
+        session.instance.status !== "running"
+      ) {
         return;
       }
 
@@ -416,15 +471,21 @@ export class ProcessManager {
   }
 
   private sessionDefinitionsForSlot(slotID: string): SessionDefinition[] {
-    return Array.from(this.sessionDefinitions.values()).filter((definition) => definition.slotID === slotID);
+    return Array.from(this.sessionDefinitions.values()).filter(
+      (definition) => definition.slotID === slotID,
+    );
   }
 
   private findSessionsBySlot(slotID: string): ManagedSession[] {
-    return Array.from(this.sessions.values()).filter((session) => session.instance.slotID === slotID);
+    return Array.from(this.sessions.values()).filter(
+      (session) => session.instance.slotID === slotID,
+    );
   }
 
   private findSessionsBySessionDefID(sessionDefID: string): ManagedSession[] {
-    return Array.from(this.sessions.values()).filter((session) => session.instance.sessionDefID === sessionDefID);
+    return Array.from(this.sessions.values()).filter(
+      (session) => session.instance.sessionDefID === sessionDefID,
+    );
   }
 
   private slotState(slot: SlotDefinition): SlotState {
@@ -439,8 +500,8 @@ export class ProcessManager {
         canResume: sessions.some((session) => session.capabilities.canResume),
         canClear: sessions.some((session) => session.capabilities.canClear),
         canStop: sessions.some((session) => session.capabilities.canStop),
-        canRestart: sessions.some((session) => session.capabilities.canRestart)
-      }
+        canRestart: sessions.some((session) => session.capabilities.canRestart),
+      },
     };
   }
 
@@ -450,7 +511,7 @@ export class ProcessManager {
       kind: session.definition.kind,
       name: session.definition.name,
       port: session.definition.port,
-      capabilities: capabilitiesForStatus(session.instance.status, session.definition)
+      capabilities: capabilitiesForStatus(session.instance.status, session.definition),
     };
   }
 }

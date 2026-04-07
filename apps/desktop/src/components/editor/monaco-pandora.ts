@@ -29,7 +29,11 @@ export const pandoraMonacoBeforeMount: BeforeMount & DiffBeforeMount = (monaco) 
   for (const d of [monaco.css.cssDefaults, monaco.css.scssDefaults, monaco.css.lessDefaults]) {
     d.setModeConfiguration({ ...d.modeConfiguration, diagnostics: false });
   }
-  for (const d of [monaco.html.htmlDefaults, monaco.html.handlebarDefaults, monaco.html.razorDefaults]) {
+  for (const d of [
+    monaco.html.htmlDefaults,
+    monaco.html.handlebarDefaults,
+    monaco.html.razorDefaults,
+  ]) {
     d.setModeConfiguration({ ...d.modeConfiguration, diagnostics: false });
   }
 

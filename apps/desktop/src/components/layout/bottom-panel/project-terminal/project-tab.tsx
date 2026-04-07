@@ -56,7 +56,7 @@ export function ProjectTab({
         active
           ? "border-b-neutral-400 bg-neutral-900 text-neutral-100"
           : "text-neutral-400 hover:bg-neutral-800/30 hover:text-neutral-200",
-        isBeingDragged && "opacity-30"
+        isBeingDragged && "opacity-30",
       )}
       onPointerDown={(e) => onPointerDown(e, row)}
       onPointerUp={() => onPointerUp(row)}

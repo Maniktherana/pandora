@@ -4,7 +4,10 @@ import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffOptions } from "@pierre/diffs";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
-import { readWorkspaceTextFile, scmReadGitBlob } from "@/components/layout/right-sidebar/scm/scm.utils";
+import {
+  readWorkspaceTextFile,
+  scmReadGitBlob,
+} from "@/components/layout/right-sidebar/scm/scm.utils";
 import {
   createPierreDiffOptions,
   createPierreFile,
@@ -116,7 +119,7 @@ export default function DiffViewer({
         diffMetadata: parseDiffFromFile(
           createPierreFile(relativePath, original),
           createPierreFile(relativePath, modified),
-          ignoreTrimWhitespace ? { ignoreWhitespace: true } : undefined
+          ignoreTrimWhitespace ? { ignoreWhitespace: true } : undefined,
         ),
         parseError: null as string | null,
       };
@@ -174,7 +177,7 @@ export default function DiffViewer({
           size="sm"
           className={cn(
             "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+            sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
           )}
           title={sideBySide ? "Split diff (on)" : "Split diff"}
           aria-label={sideBySide ? "Split diff (on)" : "Split diff"}
@@ -189,7 +192,7 @@ export default function DiffViewer({
           size="sm"
           className={cn(
             "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            !sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+            !sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
           )}
           title={!sideBySide ? "Unified diff (on)" : "Unified diff"}
           aria-label={!sideBySide ? "Unified diff (on)" : "Unified diff"}
@@ -204,18 +207,10 @@ export default function DiffViewer({
           size="sm"
           className={cn(
             "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            ignoreTrimWhitespace && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
+            ignoreTrimWhitespace && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
           )}
-          title={
-            ignoreTrimWhitespace
-              ? "Ignore whitespace (on)"
-              : "Ignore whitespace"
-          }
-          aria-label={
-            ignoreTrimWhitespace
-              ? "Ignore whitespace (on)"
-              : "Ignore whitespace"
-          }
+          title={ignoreTrimWhitespace ? "Ignore whitespace (on)" : "Ignore whitespace"}
+          aria-label={ignoreTrimWhitespace ? "Ignore whitespace (on)" : "Ignore whitespace"}
           onClick={() => setIgnoreTrimPersist(!ignoreTrimWhitespace)}
           disabled={loading}
         >
@@ -246,7 +241,9 @@ export default function DiffViewer({
           <div className="p-3 text-sm text-[var(--theme-text-subtle)]">Loading diff…</div>
         )}
         {!displayError && !loading && noDiff && (
-          <div className="p-3 text-sm text-[var(--theme-text-subtle)]">No changes to show for this file.</div>
+          <div className="p-3 text-sm text-[var(--theme-text-subtle)]">
+            No changes to show for this file.
+          </div>
         )}
         {!displayError && !loading && diffMetadata && (
           <PierreFileDiff

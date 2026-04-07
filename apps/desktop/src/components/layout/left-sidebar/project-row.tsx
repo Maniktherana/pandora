@@ -25,9 +25,9 @@ export function ProjectRow({ project }: ProjectRowProps) {
   const workspaces = useMemo(
     () =>
       allWorkspaces.filter(
-        (workspace) => workspace.projectId === project.id && workspace.status !== "archived"
+        (workspace) => workspace.projectId === project.id && workspace.status !== "archived",
       ),
-    [allWorkspaces, project.id]
+    [allWorkspaces, project.id],
   );
 
   const isSelected = project.id === selectedProjectID;
@@ -37,7 +37,7 @@ export function ProjectRow({ project }: ProjectRowProps) {
       <div
         className={cn(
           "group flex select-none cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5",
-          isSelected ? "bg-[var(--theme-panel-hover)]" : "hover:bg-[var(--theme-panel-hover)]"
+          isSelected ? "bg-[var(--theme-panel-hover)]" : "hover:bg-[var(--theme-panel-hover)]",
         )}
         onClick={() => {
           workspaceCommands.selectProject(project.id);
@@ -125,4 +125,3 @@ export function ProjectRow({ project }: ProjectRowProps) {
     </div>
   );
 }
-

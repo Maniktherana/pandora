@@ -12,7 +12,9 @@ function interpretUnsavedResult(result: string): "save" | "discard" | "cancel" {
   return "cancel";
 }
 
-export async function promptUnsavedChangesBeforeClose(displayName: string): Promise<"save" | "discard" | "cancel"> {
+export async function promptUnsavedChangesBeforeClose(
+  displayName: string,
+): Promise<"save" | "discard" | "cancel"> {
   const result = await message(`Save changes to "${displayName}" before closing?`, {
     title: "Unsaved changes",
     kind: "warning",
@@ -31,7 +33,8 @@ export async function tryCloseEditorTab(params: {
   displayName: string;
   closeTab: (paneID: string, tabIndex: number) => Promise<void> | void;
 }): Promise<void> {
-  const { workspaceId, workspaceRoot, paneID, tabIndex, relativePath, displayName, closeTab } = params;
+  const { workspaceId, workspaceRoot, paneID, tabIndex, relativePath, displayName, closeTab } =
+    params;
   const editor = useEditorStore.getState();
 
   if (!editor.isFileDirty(workspaceId, relativePath)) {

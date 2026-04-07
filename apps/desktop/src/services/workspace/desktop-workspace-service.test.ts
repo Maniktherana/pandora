@@ -24,7 +24,7 @@ describe("shouldAutoOpenTerminalSlot", () => {
           canStop: true,
           canRestart: true,
         },
-      })
+      }),
     ).toBe(true);
   });
 
@@ -50,7 +50,7 @@ describe("shouldAutoOpenTerminalSlot", () => {
           canStop: true,
           canRestart: true,
         },
-      })
+      }),
     ).toBe(false);
 
     expect(
@@ -74,7 +74,7 @@ describe("shouldAutoOpenTerminalSlot", () => {
           canStop: true,
           canRestart: true,
         },
-      })
+      }),
     ).toBe(false);
   });
 });

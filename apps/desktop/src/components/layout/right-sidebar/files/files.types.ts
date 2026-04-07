@@ -1,6 +1,4 @@
-import type {
-  TreeScmDecoration,
-} from "@/components/layout/right-sidebar/scm/scm.types";
+import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
 
 export const TREE_ROW_SELECTOR = "[data-tree-row-path]";
 export const INTERNAL_DRAG_THRESHOLD_PX = 4;
@@ -71,7 +69,7 @@ export type ExpansionCtx = {
 export type ScmDecorationResolver = (
   relPath: string,
   isDirectory: boolean,
-  isIgnored?: boolean
+  isIgnored?: boolean,
 ) => TreeScmDecoration;
 
 export type FileTreeRowHandle = {
@@ -81,5 +79,3 @@ export type FileTreeRowHandle = {
   label: string;
   absolutePath: string;
 };
-
-

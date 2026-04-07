@@ -10,7 +10,7 @@ import type {
 export function scmGitDiff(
   worktreePath: string,
   relativePath: string,
-  staged: boolean
+  staged: boolean,
 ): Promise<ScmDiffResult> {
   return invoke<ScmDiffResult>("scm_git_diff", {
     worktreePath,
@@ -22,7 +22,6 @@ export function scmGitDiff(
 export function scmStatus(worktreePath: string): Promise<ScmStatusEntry[]> {
   return invoke<ScmStatusEntry[]>("scm_status", { worktreePath });
 }
-
 
 export const SCM_TONE_HEX = {
   added: "#D0FDC6",
@@ -63,7 +62,7 @@ export function statusTone(entry: ScmStatusEntry): TreeScmTone {
 
 export function decorationForScmEntry(
   entry: ScmStatusEntry,
-  opts?: { includeDeleted?: boolean }
+  opts?: { includeDeleted?: boolean },
 ): TreeScmDecoration {
   const includeDeleted = opts?.includeDeleted ?? true;
   if (entry.untracked) {
@@ -112,11 +111,14 @@ export function scmCommit(worktreePath: string, message: string): Promise<void> 
 export function scmReadGitBlob(
   worktreePath: string,
   relativePath: string,
-  source: ScmGitBlobSource
+  source: ScmGitBlobSource,
 ): Promise<string> {
   return invoke<string>("scm_read_git_blob", { worktreePath, relativePath, source });
 }
 
-export function readWorkspaceTextFile(workspaceRoot: string, relativePath: string): Promise<string> {
+export function readWorkspaceTextFile(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<string> {
   return invoke<string>("read_workspace_text_file", { workspaceRoot, relativePath });
 }

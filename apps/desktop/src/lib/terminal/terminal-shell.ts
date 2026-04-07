@@ -5,7 +5,9 @@ export interface TerminalShellAppearance {
   className: string;
 }
 
-export function terminalShellAppearance(rawName: string | null | undefined): TerminalShellAppearance {
+export function terminalShellAppearance(
+  rawName: string | null | undefined,
+): TerminalShellAppearance {
   const name = rawName?.toLowerCase() ?? "";
 
   if (name.includes("powershell") || name.includes("pwsh")) {

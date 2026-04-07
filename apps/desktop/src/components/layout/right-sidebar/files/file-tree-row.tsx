@@ -44,7 +44,9 @@ export function FileTreeRow({
   isHoverSuppressed,
 }: FileTreeRowProps) {
   const isHighlightedLeaf =
-    rowKind === "file" && highlightedLeafDirectory !== null && parentRelPath === highlightedLeafDirectory;
+    rowKind === "file" &&
+    highlightedLeafDirectory !== null &&
+    parentRelPath === highlightedLeafDirectory;
 
   const handle: FileTreeRowHandle = {
     kind: rowKind,
@@ -62,7 +64,7 @@ export function FileTreeRow({
         <span
           className={cn(
             "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-            scmToneTextClass(decoration.tone, false)
+            scmToneTextClass(decoration.tone, false),
           )}
         >
           {decoration.badge}
@@ -78,7 +80,7 @@ export function FileTreeRow({
     decoration.dimmed && "opacity-55",
     active && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
     isHighlightedLeaf && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
-    className
+    className,
   );
 
   if (onOpen) {
@@ -118,4 +120,3 @@ export function FileTreeRow({
     </div>
   );
 }
-
