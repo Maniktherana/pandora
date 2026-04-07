@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, Plus, X } from "lucide-react";
-import { FileTypeIcon } from "@/components/files/file-type-icon";
+import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useEditorStore } from "@/stores/editor-store";
-import { tabKey } from "@/lib/layout/layout-tree";
+import { tabKey } from "@/components/layout/workspace/layout-tree";
 import type {
   PaneTab,
   SessionState,
@@ -16,7 +16,8 @@ import type {
 } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { scmStatus, scmToneTextClass, statusTone, type ScmStatusEntry } from "@/lib/workspace/scm";
+import { scmStatus, scmToneTextClass, statusTone } from "@/components/layout/right-sidebar/scm/scm.utils";
+import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
 import { useTabDrag } from "./tab-drag-layer";
 
 interface TabBarProps {

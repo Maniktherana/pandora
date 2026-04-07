@@ -7,7 +7,7 @@ import {
   insertTabInPane,
   splitPaneAroundTab,
   tabsEqual,
-} from "@/lib/layout/layout-tree";
+} from "@/components/layout/workspace/layout-tree";
 
 type RuntimeLayoutSnapshot = {
   root: LayoutNode;

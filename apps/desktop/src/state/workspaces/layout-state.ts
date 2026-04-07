@@ -9,7 +9,7 @@ import {
   removeTabAtIndexInTree,
   splitPaneAroundTab,
   splitPaneWithinLeaf,
-} from "@/lib/layout/layout-tree";
+} from "@/components/layout/workspace/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 
 export type WorkspaceLayoutChange = {

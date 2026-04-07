@@ -5,7 +5,7 @@ import {
   loadPersistedSidebarVisible,
   persistFileTreeOpenForWorkspace,
   persistSidebarVisible,
-} from "@/lib/workspace/ui-persistence";
+} from "@/components/layout/right-sidebar/files/files-persistence.utils";
 import type { UiPreferencesView } from "@/state/desktop-view-projections";
 import { emptyUiPreferencesView } from "@/state/desktop-view-projections";
 import { useDesktopViewStore } from "@/state/desktop-view-store";

@@ -1,4 +1,4 @@
-import { getAllTerminalSlotIds, getVisualLeaves } from "@/lib/layout/layout-tree";
+import { getAllTerminalSlotIds, getVisualLeaves } from "@/components/layout/workspace/layout-tree";
 import type { LayoutNode, TerminalPanelState } from "@/lib/shared/types";
 
 export function getVisibleWorkspaceTerminalSlotIds(root: LayoutNode | null): string[] {

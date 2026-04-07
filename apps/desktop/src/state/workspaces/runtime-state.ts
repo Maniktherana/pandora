@@ -13,7 +13,7 @@ import {
   getAllLeaves,
   getAllTerminalSlotIds,
   removeTerminalSlotFromTree,
-} from "@/lib/layout/layout-tree";
+} from "@/components/layout/workspace/layout-tree";
 import { defaultTerminalDisplay } from "@/lib/terminal/terminal-identity";
 import {
   addTerminalGroup,

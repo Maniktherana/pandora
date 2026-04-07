@@ -4,13 +4,13 @@ import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffOptions } from "@pierre/diffs";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
-import { readWorkspaceTextFile, scmReadGitBlob } from "@/lib/workspace/scm";
+import { readWorkspaceTextFile, scmReadGitBlob } from "@/components/layout/right-sidebar/scm/scm.utils";
 import {
   createPierreDiffOptions,
   createPierreFile,
   getLargeDiffOptions,
   getPierreSurfaceStyle,
-} from "@/lib/editor/pierre-pandora";
+} from "@/components/editor/pierre-pandora";
 import { defaultTheme } from "@/lib/theme/themes";
 import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";

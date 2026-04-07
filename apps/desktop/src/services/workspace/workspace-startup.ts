@@ -10,8 +10,8 @@ import type {
 import { LayoutLoadError, RuntimeStartError } from "@/lib/runtime/errors";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { createEmptyTerminalPanel } from "@/lib/terminal/bottom-terminal-panel";
-import { createLeaf } from "@/lib/layout/layout-tree";
-import { migratePersistedLayout } from "@/lib/layout/layout-migrate";
+import { createLeaf } from "@/components/layout/workspace/layout-tree";
+import { migratePersistedLayout } from "@/components/layout/workspace/layout-migrate";
 
 export interface WorkspaceStartupState {
   projects: ProjectRecord[];

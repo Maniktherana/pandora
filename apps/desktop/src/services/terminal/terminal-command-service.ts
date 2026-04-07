@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect";
-import { findLeaf } from "@/lib/layout/layout-migrate";
+import { findLeaf } from "@/components/layout/workspace/layout-migrate";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
+import { tryCloseEditorTab } from "@/components/editor/close-dirty-editor";
 import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 import { DaemonGateway } from "@/services/daemon/daemon-gateway";
 import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";

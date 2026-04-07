@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { useMemo } from "react";
-import { tryCloseEditorTab } from "@/lib/editor/close-dirty-editor";
+import { tryCloseEditorTab } from "@/components/editor/close-dirty-editor";
 import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 import { useEditorStore } from "@/stores/editor-store";
 import { useDesktopEffectRunner } from "./use-bootstrap-desktop";

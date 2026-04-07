@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PanelResizeHandle, ImperativePanelHandle } from "react-resizable-panels";
-import Sidebar from "@/components/navigation/sidebar";
-import BottomPanel from "@/components/panels/bottom-panel";
-import WorkspaceFileTreePanel from "@/components/files/workspace-file-tree-panel";
+import LeftSidebar from "@/components/layout/left-sidebar/left-sidebar";
+import BottomPanel from "@/components/layout/bottom-panel";
+import RightSidebar from "@/components/layout/right-sidebar/right-sidebar";
 import { TabDragProvider } from "@/components/dnd/tab-drag-layer";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
-import WorkspaceView from "@/components/workspace/workspace-view";
+import WorkspaceView from "@/components/layout/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
-import AppToolbar from "@/components/layout/app-toolbar";
+import AppHeader from "@/components/layout/app-header";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
@@ -95,7 +95,7 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {sidebarVisible && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
-          <Sidebar onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)} />
+          <LeftSidebar onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)} />
           <div
             role="separator"
             aria-orientation="vertical"
@@ -147,7 +147,7 @@ export default function App() {
       )}
 
       <div className="flex h-full min-w-0 flex-1 flex-col bg-[#151515]">
-        <AppToolbar
+        <AppHeader
           sidebarVisible={sidebarVisible}
           selectedWorkspace={selectedWs}
           bottomPanelOpen={bottomPanelOpen}
@@ -204,7 +204,7 @@ export default function App() {
                     >
                       <ErrorBoundary name="file-tree">
                         {fileTreeOpen && selectedWs?.status === "ready" ? (
-                          <WorkspaceFileTreePanel
+                          <RightSidebar
                             key={selectedWs.id}
                             workspaceRoot={selectedWs.worktreePath}
                             workspaceId={selectedWs.id}
@@ -244,8 +244,6 @@ export default function App() {
             </ResizablePanelGroup>
           </TabDragProvider>
         </div>
-
-        {/* Removed status strip to match new bottom layout direction. */}
       </div>
     </div>
   );
