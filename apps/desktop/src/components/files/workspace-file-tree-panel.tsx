@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronRight } from "lucide-react";
 import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -522,6 +522,9 @@ export default function WorkspaceFileTreePanel({
   const expandedPathsRef = useRef(expandedPaths);
   const expansionLoadedRef = useRef(false);
   const workspaceRootRef = useRef(workspaceRoot);
+  const leftModeRef = useRef(leftMode);
+  const pendingPointerDragRef = useRef<PendingPointerDrag | null>(pendingPointerDrag);
+  const dragSessionRef = useRef<TreeDragSession | null>(dragSession);
   const suppressClickUntilRef = useRef(0);
   const suppressHoverTimerRef = useRef<number | null>(null);
   const externalTargetRef = useRef<TreeDropTarget | null>(null);
@@ -529,6 +532,9 @@ export default function WorkspaceFileTreePanel({
 
   expandedPathsRef.current = expandedPaths;
   workspaceRootRef.current = workspaceRoot;
+  leftModeRef.current = leftMode;
+  pendingPointerDragRef.current = pendingPointerDrag;
+  dragSessionRef.current = dragSession;
 
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
@@ -559,7 +565,11 @@ export default function WorkspaceFileTreePanel({
   }, []);
 
   const setExternalDragTarget = useCallback(
-    (target: TreeDropTarget | null, pointer: DragPointer) => {
+    (
+      target: TreeDropTarget | null,
+      pointer: DragPointer,
+      paths?: string[]
+    ) => {
       if (externalLeaveTimerRef.current !== null) {
         window.clearTimeout(externalLeaveTimerRef.current);
         externalLeaveTimerRef.current = null;
@@ -577,7 +587,9 @@ export default function WorkspaceFileTreePanel({
         }
         return {
           kind: "external-native",
-          paths: current?.kind === "external-native" ? current.paths : [],
+          paths:
+            paths ??
+            (current?.kind === "external-native" ? current.paths : []),
           pointer,
           target,
         };
@@ -650,6 +662,14 @@ export default function WorkspaceFileTreePanel({
         position.y / window.devicePixelRatio
       ),
     [computeDropTargetFromPoint]
+  );
+
+  const nativePositionToPointer = useCallback(
+    (position: { x: number; y: number }): DragPointer => ({
+      x: position.x / window.devicePixelRatio,
+      y: position.y / window.devicePixelRatio,
+    }),
+    []
   );
 
   const isPointWithinTreeBody = useCallback((clientX: number, clientY: number) => {
@@ -910,13 +930,33 @@ export default function WorkspaceFileTreePanel({
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    void getCurrentWebview().onDragDropEvent((event: { payload: NativeDragPayload }) => {
-      if (leftMode !== "files") return;
-      if (dragSession?.kind === "internal") return;
+    void getCurrentWindow().onDragDropEvent((event: { payload: NativeDragPayload }) => {
+      if (leftModeRef.current !== "files") return;
+      if (
+        pendingPointerDragRef.current !== null ||
+        dragSessionRef.current?.kind === "internal"
+      ) {
+        return;
+      }
 
       const payload = event.payload;
 
-      if (payload.type === "enter" || payload.type === "over") {
+      if (payload.type === "enter") {
+        const pointer = nativePositionToPointer(payload.position);
+        setExternalDragTarget(
+          computeDropTargetFromNativePosition(payload.position),
+          pointer,
+          payload.paths
+        );
+        return;
+      }
+
+      if (payload.type === "over") {
+        const pointer = nativePositionToPointer(payload.position);
+        setExternalDragTarget(
+          computeDropTargetFromNativePosition(payload.position),
+          pointer
+        );
         return;
       }
 
@@ -928,7 +968,9 @@ export default function WorkspaceFileTreePanel({
       if (payload.type !== "drop") return;
 
       const target =
-        externalTargetRef.current ?? computeDropTargetFromNativePosition(payload.position);
+        externalTargetRef.current ??
+        computeDropTargetFromNativePosition(payload.position) ??
+        { mode: "root", targetRelPath: null };
       const destRelativePath = resolveDestinationDirectory(target);
       clearAllDragState();
 
@@ -943,6 +985,7 @@ export default function WorkspaceFileTreePanel({
         if (path.startsWith(rootPrefix)) {
           const sourceRelPath = path.slice(rootPrefix.length);
           if (destRelativePath === getParentRelPath(sourceRelPath)) {
+            externalPaths.push(path);
             continue;
           }
           if (
@@ -984,10 +1027,10 @@ export default function WorkspaceFileTreePanel({
   }, [
     clearAllDragState,
     computeDropTargetFromNativePosition,
-    dragSession,
-    leftMode,
+    nativePositionToPointer,
     refreshTree,
     resolveDestinationDirectory,
+    setExternalDragTarget,
   ]);
 
   useEffect(() => {
@@ -1220,7 +1263,13 @@ export default function WorkspaceFileTreePanel({
               if (pendingPointerDrag || dragSession?.kind === "internal") return;
               if (!isExternalFileDrag(event)) return;
               if (isPointWithinTreeBody(event.clientX, event.clientY)) return;
-              clearAllDragState();
+              if (externalLeaveTimerRef.current !== null) {
+                window.clearTimeout(externalLeaveTimerRef.current);
+              }
+              externalLeaveTimerRef.current = window.setTimeout(() => {
+                clearAllDragState();
+                externalLeaveTimerRef.current = null;
+              }, 60);
             }}
             onDrop={(event) => {
               if (pendingPointerDrag || dragSession?.kind === "internal") return;

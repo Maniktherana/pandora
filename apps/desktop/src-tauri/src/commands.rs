@@ -711,6 +711,49 @@ fn copy_path_recursive(src: &Path, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn copy_name_destination(original_dest: &Path, copy_index: usize) -> Result<PathBuf, String> {
+    let parent = original_dest
+        .parent()
+        .ok_or_else(|| format!("Cannot determine parent for '{}'", original_dest.display()))?;
+    let file_name = original_dest
+        .file_name()
+        .ok_or_else(|| format!("Cannot determine filename for '{}'", original_dest.display()))?;
+    let file_name = file_name.to_string_lossy();
+
+    let suffix = if copy_index == 1 {
+        " copy".to_string()
+    } else {
+        format!(" copy {}", copy_index)
+    };
+
+    let candidate_name = if original_dest.is_dir() || original_dest.extension().is_none() {
+        format!("{file_name}{suffix}")
+    } else {
+        let stem = original_dest
+            .file_stem()
+            .ok_or_else(|| format!("Cannot determine file stem for '{}'", original_dest.display()))?
+            .to_string_lossy();
+        let extension = original_dest
+            .extension()
+            .ok_or_else(|| format!("Cannot determine extension for '{}'", original_dest.display()))?
+            .to_string_lossy();
+        format!("{stem}{suffix}.{extension}")
+    };
+
+    Ok(parent.join(candidate_name))
+}
+
+fn next_copy_destination(dest: &Path) -> Result<PathBuf, String> {
+    let mut copy_index = 1;
+    loop {
+        let candidate = copy_name_destination(dest, copy_index)?;
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+        copy_index += 1;
+    }
+}
+
 #[tauri::command]
 pub fn copy_into_workspace(
     workspace_root: String,
@@ -747,7 +790,13 @@ pub fn copy_into_workspace(
         let name = src
             .file_name()
             .ok_or_else(|| format!("Cannot determine filename for: {src_str}"))?;
-        copy_path_recursive(src, &dest_dir.join(name))?;
+        let requested_dest = dest_dir.join(name);
+        let final_dest = if requested_dest.exists() {
+            next_copy_destination(&requested_dest)?
+        } else {
+            requested_dest
+        };
+        copy_path_recursive(src, &final_dest)?;
     }
 
     Ok(())
