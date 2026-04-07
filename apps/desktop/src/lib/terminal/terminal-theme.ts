@@ -99,11 +99,11 @@ export function parseGhosttyTheme(config: string): TerminalThemeColors {
     } else if (key === "selection-foreground") {
       theme.selectionForeground = value;
     } else if (key === "font-family") {
-      theme.typography = { ...(theme.typography ?? {}), fontFamily: value };
+      theme.typography = { ...theme.typography, fontFamily: value };
     } else if (key === "font-size") {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) {
-        theme.typography = { ...(theme.typography ?? {}), fontSize: parsed };
+        theme.typography = { ...theme.typography, fontSize: parsed };
       }
     }
   }
