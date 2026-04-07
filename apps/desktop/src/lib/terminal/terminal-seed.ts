@@ -14,7 +14,7 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
   const { shellPath } = defaultShellInfo();
   const label = name ?? "Terminal";
 
-  client.send(runtimeId, {
+  void client.send(runtimeId, {
     type: "create_slot",
     slot: {
       id: slotID,
@@ -27,26 +27,25 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
       persisted: false,
       sortOrder: Date.now(),
     },
-  });
+  }).then(() =>
+    client.send(runtimeId, {
+      type: "create_session_def",
+      session: {
+        id: sessionDefID,
+        slotID,
+        kind: "terminal",
+        name: label,
+        command: `exec ${shellPath} -i`,
+        cwd: null,
+        port: null,
+        envOverrides: {},
+        restartPolicy: "manual",
+        pauseSupported: false,
+        resumeSupported: false,
+      },
+    })
+  ).then(() => client.openSessionInstance(runtimeId, sessionDefID));
 
-  client.send(runtimeId, {
-    type: "create_session_def",
-    session: {
-      id: sessionDefID,
-      slotID,
-      kind: "terminal",
-      name: label,
-      command: `exec ${shellPath} -i`,
-      cwd: null,
-      port: null,
-      envOverrides: {},
-      restartPolicy: "manual",
-      pauseSupported: false,
-      resumeSupported: false,
-    },
-  });
-
-  setTimeout(() => client.openSessionInstance(runtimeId, sessionDefID), 100);
   return { slotID, sessionDefID, shellName: "terminal" };
 }
 

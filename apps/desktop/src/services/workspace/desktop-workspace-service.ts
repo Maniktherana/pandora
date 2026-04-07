@@ -336,6 +336,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       layoutTargetRuntimeId: null,
       prAwaitingWorkspaceIds: new Set<string>(),
     };
+    const connectionWaiters = new Map<string, Array<() => void>>();
     const publish = () => publishDesktopView(desktopStateSnapshot);
     const getEffectiveLayoutRuntimeId = () =>
       desktopStateSnapshot.layoutTargetRuntimeId ?? desktopStateSnapshot.selectedWorkspaceID;
@@ -458,23 +459,48 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       });
 
     const waitForWorkspaceConnection = (
-      workspaceId: string,
-      attemptsLeft = 50
+      workspaceId: string
     ): Effect.Effect<void, WorkspaceSelectionError> =>
       Effect.gen(function* () {
-        const runtime = desktopStateSnapshot.runtimes[workspaceId];
-        if (runtime?.connectionState === "connected") return;
-        if (attemptsLeft <= 0) {
-          yield* Effect.fail(
-            workspaceSelectionError(
-              new Error(`Workspace runtime did not connect for ${workspaceId}`),
-              workspaceId
-            )
-          );
-        }
+        if (desktopStateSnapshot.runtimes[workspaceId]?.connectionState === "connected") return;
 
-        yield* Effect.sleep("100 millis");
-        yield* waitForWorkspaceConnection(workspaceId, attemptsLeft - 1);
+        yield* Effect.async<void, WorkspaceSelectionError>((resume) => {
+          const timeoutId = setTimeout(() => {
+            const waiters = connectionWaiters.get(workspaceId);
+            if (waiters) {
+              const idx = waiters.indexOf(onConnected);
+              if (idx !== -1) waiters.splice(idx, 1);
+              if (waiters.length === 0) connectionWaiters.delete(workspaceId);
+            }
+            resume(
+              Effect.fail(
+                workspaceSelectionError(
+                  new Error(`Workspace runtime did not connect for ${workspaceId}`),
+                  workspaceId
+                )
+              )
+            );
+          }, 5000);
+
+          const onConnected = () => {
+            clearTimeout(timeoutId);
+            resume(Effect.void);
+          };
+
+          const existing = connectionWaiters.get(workspaceId) ?? [];
+          existing.push(onConnected);
+          connectionWaiters.set(workspaceId, existing);
+
+          return Effect.sync(() => {
+            clearTimeout(timeoutId);
+            const waiters = connectionWaiters.get(workspaceId);
+            if (waiters) {
+              const idx = waiters.indexOf(onConnected);
+              if (idx !== -1) waiters.splice(idx, 1);
+              if (waiters.length === 0) connectionWaiters.delete(workspaceId);
+            }
+          });
+        });
       });
 
     const ensureWorkspaceRuntimeConnected = (workspaceId: string) =>
@@ -647,6 +673,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               setRuntimeConnectionStateState(runtime, event.state);
             });
             if (event.state === "connected") {
+              const waiters = connectionWaiters.get(event.workspaceId);
+              if (waiters?.length) {
+                connectionWaiters.delete(event.workspaceId);
+                waiters.forEach((fn) => fn());
+              }
               const client = yield* daemonGateway.getClient();
               if (client) {
                 yield* Effect.sync(() => {
