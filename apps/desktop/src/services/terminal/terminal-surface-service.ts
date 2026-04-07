@@ -88,6 +88,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
   Effect.gen(function* () {
     const entries = new Map<string, ManagedSurfaceEntry>();
     let nativeSupportPromise: Promise<boolean> | null = null;
+    let createQueue: Promise<void> = Promise.resolve();
 
     const getNativeSupport = () => {
       if (!nativeSupportPromise) {
@@ -101,6 +102,24 @@ export const TerminalSurfaceServiceLive = Layer.effect(
         try: () => getNativeSupport(),
         catch: (cause) => nativeSurfaceError(cause, "native-terminal-support"),
       });
+
+    const waitForNextFrame = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
+    const enqueueSurfaceCreate = async (
+      surfaceId: string,
+      task: () => Promise<void>
+    ) => {
+      const queued = createQueue.then(async () => {
+        console.debug("[terminal-surface]", "create queued", { surfaceId });
+        await waitForNextFrame();
+        await task();
+      });
+      createQueue = queued.catch(() => {});
+      await queued;
+    };
 
     const clearScheduledSync = (entry: ManagedSurfaceEntry) => {
       if (entry.rafId != null) {
@@ -162,26 +181,35 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       }
 
       if (!entry.created || forceCreate) {
-        console.debug("[terminal-surface]", "create attempted", {
-          workspaceId: entry.workspaceId,
-          sessionId: entry.sessionId,
-          surfaceId: entry.surfaceId,
-          forceCreate,
-        });
-        entry.lastSignature = null;
-        entry.pendingCreate = false;
-        entry.created = true;
-        try {
-          await invoke("terminal_surface_create", {
+        await enqueueSurfaceCreate(entry.surfaceId, async () => {
+          if (entries.get(entry.surfaceId) !== entry) return;
+
+          const createPayload = buildPayload(entry);
+          if (!createPayload) return;
+          if (entry.created && !forceCreate) return;
+
+          console.debug("[terminal-surface]", "create attempted", {
             workspaceId: entry.workspaceId,
             sessionId: entry.sessionId,
             surfaceId: entry.surfaceId,
-            rect: payload.rect,
+            forceCreate,
           });
-        } catch (cause) {
-          entry.created = false;
-          throw nativeSurfaceError(cause, entry.surfaceId);
-        }
+          entry.lastSignature = null;
+          entry.pendingCreate = false;
+          entry.created = true;
+          try {
+            await invoke("terminal_surface_create", {
+              workspaceId: entry.workspaceId,
+              sessionId: entry.sessionId,
+              surfaceId: entry.surfaceId,
+              rect: createPayload.rect,
+            });
+          } catch (cause) {
+            entry.created = false;
+            throw nativeSurfaceError(cause, entry.surfaceId);
+          }
+        });
+        if (!entry.created) return;
       } else {
         console.debug("[terminal-surface]", "create skipped", {
           workspaceId: entry.workspaceId,
