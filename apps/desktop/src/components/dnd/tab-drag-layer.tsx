@@ -32,6 +32,7 @@ import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
+import { useEditorStore } from "@/stores/editor-store";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { findLeaf } from "@/lib/layout/layout-migrate";
 import { tabsEqual } from "@/lib/layout/layout-tree";
@@ -42,7 +43,7 @@ import { cn } from "@/lib/shared/utils";
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface DragState {
-  kind: "pane-tab" | "bottom-terminal-group" | "bottom-terminal-slot";
+  kind: "pane-tab" | "bottom-terminal-group" | "bottom-terminal-slot" | "file-tree-file";
   tabLabel: string;
   sourcePaneID?: string;
   sourceIndex?: number;
@@ -51,6 +52,9 @@ export interface DragState {
   groupIndex?: number;
   slotId?: string;
   slotIndex?: number;
+  workspaceId?: string;
+  workspaceRoot?: string;
+  relativePath?: string;
 }
 
 type DropZone = "center" | "left" | "right" | "top" | "bottom";
@@ -353,24 +357,22 @@ function TabDragOverlay({
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
       setCursor({ x: e.clientX, y: e.clientY });
+      const canDropIntoWorkspace =
+        dragState.kind === "pane-tab" || dragState.kind === "file-tree-file";
 
-      if (dragState.kind !== "pane-tab") {
+      if (!canDropIntoWorkspace) {
         const bottomPaneHit = hitTestBottomTerminalPanes(e.clientX, e.clientY);
         if (bottomPaneHit) {
           targetRef.current = bottomPaneHit;
           setTarget(bottomPaneHit);
           return;
         }
-      }
-
-      const bottomSidebarHit = hitTestBottomTerminalSidebar(e.clientX, e.clientY, dragState);
-      if (bottomSidebarHit) {
-        targetRef.current = bottomSidebarHit;
-        setTarget(bottomSidebarHit);
-        return;
-      }
-
-      if (dragState.kind !== "pane-tab") {
+        const bottomSidebarHit = hitTestBottomTerminalSidebar(e.clientX, e.clientY, dragState);
+        if (bottomSidebarHit) {
+          targetRef.current = bottomSidebarHit;
+          setTarget(bottomSidebarHit);
+          return;
+        }
         targetRef.current = null;
         setTarget(null);
         return;
@@ -415,6 +417,23 @@ function TabDragOverlay({
       const terminalPanel = drag.runtimeId
         ? desktopView.runtimes[drag.runtimeId]?.terminalPanel
         : null;
+      const ensureDraggedFileLoaded = (afterLoad: () => void) => {
+        if (
+          drag.kind !== "file-tree-file" ||
+          !drag.workspaceId ||
+          !drag.workspaceRoot ||
+          !drag.relativePath
+        ) {
+          return;
+        }
+        void useEditorStore
+          .getState()
+          .ensureFileLoaded(drag.workspaceId, drag.workspaceRoot, drag.relativePath)
+          .then((ok) => {
+            if (ok) afterLoad();
+          })
+          .catch(console.error);
+      };
 
       if (drag.kind === "bottom-terminal-group") {
         if (tgt.kind === "bottom-terminal-pane" && drag.runtimeId === tgt.runtimeId) {
@@ -533,6 +552,49 @@ function TabDragOverlay({
             insertIndex
           );
         }
+        return;
+      }
+
+      if (drag.kind === "file-tree-file") {
+        if (!drag.relativePath) return;
+
+        if (tgt.kind === "tab") {
+          ensureDraggedFileLoaded(() => {
+            layoutCommands.addEditorTabToPane(tgt.paneID, drag.relativePath!, tgt.insertIndex);
+          });
+          return;
+        }
+
+        if (tgt.kind !== "pane") return;
+        const { zone, paneID } = tgt;
+        if (zone === "center") {
+          ensureDraggedFileLoaded(() => {
+            layoutCommands.addEditorTabToPane(paneID, drag.relativePath!);
+          });
+          return;
+        }
+
+        const axisMap: Record<string, LayoutAxis> = {
+          left: "horizontal",
+          right: "horizontal",
+          top: "vertical",
+          bottom: "vertical",
+        };
+        const posMap: Record<string, "before" | "after"> = {
+          left: "before",
+          right: "after",
+          top: "before",
+          bottom: "after",
+        };
+        let axis: LayoutAxis = axisMap[zone];
+        let position: "before" | "after" = posMap[zone];
+        if (rid && isProjectRuntimeKey(rid) && (zone === "top" || zone === "bottom")) {
+          axis = "horizontal";
+          position = zone === "top" ? "before" : "after";
+        }
+        ensureDraggedFileLoaded(() => {
+          layoutCommands.splitPaneWithEditor(paneID, drag.relativePath!, axis, position);
+        });
         return;
       }
 

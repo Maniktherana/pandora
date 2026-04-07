@@ -23,7 +23,9 @@ import { DaemonGateway } from "@/services/daemon/daemon-gateway";
 import {
   addDiffTabToWorkspaceRuntime,
   addEditorTabToWorkspaceRuntime,
+  addEditorTabToPaneInWorkspaceRuntime,
   addTerminalTabToWorkspaceRuntime,
+  splitPaneWithEditorInWorkspaceRuntime,
 } from "@/state/workspaces/workspace-layout-state";
 import {
   addTabToPaneInWorkspaceRuntime,
@@ -111,6 +113,17 @@ export interface WorkspaceSessionService {
     ) => Effect.Effect<void>;
     readonly closeTab: (paneID: string, tabIndex: number) => Effect.Effect<void>;
     readonly addEditorTab: (relativePath: string) => Effect.Effect<void>;
+    readonly addEditorTabToPane: (
+      paneID: string,
+      relativePath: string,
+      insertIndex?: number
+    ) => Effect.Effect<void>;
+    readonly splitPaneWithEditor: (
+      targetPaneID: string,
+      relativePath: string,
+      axis: "horizontal" | "vertical",
+      position: "before" | "after"
+    ) => Effect.Effect<void>;
     readonly addDiffTab: (relativePath: string, source: DiffSource) => Effect.Effect<void>;
     readonly addTerminalTab: (slotId: string) => Effect.Effect<void>;
     readonly seedTerminal: () => Effect.Effect<void>;
@@ -1112,6 +1125,20 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             addEditorTab: (relativePath) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
                 addEditorTabToWorkspaceRuntime(runtime, relativePath)
+              ),
+            addEditorTabToPane: (paneID, relativePath, insertIndex) =>
+              updateWorkspaceRuntime(workspaceId, (runtime) =>
+                addEditorTabToPaneInWorkspaceRuntime(runtime, paneID, relativePath, insertIndex)
+              ),
+            splitPaneWithEditor: (targetPaneID, relativePath, axis, position) =>
+              updateWorkspaceRuntime(workspaceId, (runtime) =>
+                splitPaneWithEditorInWorkspaceRuntime(
+                  runtime,
+                  targetPaneID,
+                  relativePath,
+                  axis,
+                  position
+                )
               ),
             addDiffTab: (relativePath, source) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>

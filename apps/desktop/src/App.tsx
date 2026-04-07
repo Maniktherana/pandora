@@ -168,6 +168,8 @@ export default function App() {
                   <ResizablePanel defaultSize={72} minSize={45}>
                     <div
                       className="h-full min-h-0 min-w-0"
+                      data-workspace-drop-root="true"
+                      data-workspace-id={selectedWs?.status === "ready" ? selectedWs.id : undefined}
                       onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
                     >
                       <ErrorBoundary name="workspace">

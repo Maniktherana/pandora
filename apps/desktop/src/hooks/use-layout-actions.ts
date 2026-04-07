@@ -74,6 +74,36 @@ export function useLayoutActions() {
               : Effect.void
           )
         ),
+      addEditorTabToPane: (paneID: string, relativePath: string, insertIndex?: number) =>
+        run(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            selectedWorkspaceID
+              ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
+                  session.commands.addEditorTabToPane(paneID, relativePath, insertIndex)
+                )
+              : Effect.void
+          )
+        ),
+      splitPaneWithEditor: (
+        targetPaneID: string,
+        relativePath: string,
+        axis: "horizontal" | "vertical",
+        position: "before" | "after"
+      ) =>
+        run(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            selectedWorkspaceID
+              ? Effect.flatMap(service.getWorkspaceSession(selectedWorkspaceID), (session) =>
+                  session.commands.splitPaneWithEditor(
+                    targetPaneID,
+                    relativePath,
+                    axis,
+                    position
+                  )
+                )
+              : Effect.void
+          )
+        ),
       moveTab: (fromPaneID: string, toPaneID: string, fromIndex: number, toIndex: number) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>

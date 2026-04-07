@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronRight } from "lucide-react";
+import { useTabDrag } from "@/components/dnd/tab-drag-layer";
 import WorkspaceChangesPanel from "@/components/scm/workspace-changes-panel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
@@ -538,6 +539,7 @@ export default function WorkspaceFileTreePanel({
 
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
+  const { startDrag } = useTabDrag();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
 
   const activePath = useMemo(() => {
@@ -683,6 +685,26 @@ export default function WorkspaceFileTreePanel({
       clientY <= bodyRect.bottom
     );
   }, []);
+
+  const isPointWithinWorkspaceDropRoot = useCallback(
+    (clientX: number, clientY: number) => {
+      const roots = document.querySelectorAll<HTMLElement>("[data-workspace-drop-root='true']");
+      for (const root of roots) {
+        if (root.dataset.workspaceId !== workspaceId) continue;
+        const rect = root.getBoundingClientRect();
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          return true;
+        }
+      }
+      return false;
+    },
+    [workspaceId]
+  );
 
   const resolveDestinationDirectory = useCallback(
     (target: TreeDropTarget | null): string | null => {
@@ -855,6 +877,22 @@ export default function WorkspaceFileTreePanel({
         void handoffInternalDragToNative(dragSession);
         return;
       }
+      if (
+        dragSession.sourceKind === "file" &&
+        !isPointWithinTreeBody(pointer.x, pointer.y) &&
+        isPointWithinWorkspaceDropRoot(pointer.x, pointer.y)
+      ) {
+        const nextDragSession = dragSession;
+        clearPointerDragState();
+        startDrag({
+          kind: "file-tree-file",
+          tabLabel: nextDragSession.label,
+          workspaceId,
+          workspaceRoot,
+          relativePath: nextDragSession.sourceRelPath,
+        });
+        return;
+      }
       setDragSession((current) =>
         current?.kind === "internal"
           ? {
@@ -910,8 +948,13 @@ export default function WorkspaceFileTreePanel({
     computeDropTargetFromPoint,
     dragSession,
     handoffInternalDragToNative,
+    isPointWithinTreeBody,
+    isPointWithinWorkspaceDropRoot,
     pendingPointerDrag,
     performInternalMove,
+    startDrag,
+    workspaceId,
+    workspaceRoot,
   ]);
 
   useEffect(() => {

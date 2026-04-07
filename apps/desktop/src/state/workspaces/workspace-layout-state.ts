@@ -1,5 +1,13 @@
 import type { DiffSource, LayoutNode, PaneTab, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { addTerminalTabToNode, createLeaf, findLeaf, getAllLeaves, insertTabInPane } from "@/lib/layout/layout-tree";
+import {
+  addTerminalTabToNode,
+  createLeaf,
+  findLeaf,
+  getAllLeaves,
+  insertTabInPane,
+  splitPaneAroundTab,
+  tabsEqual,
+} from "@/lib/layout/layout-tree";
 
 type RuntimeLayoutSnapshot = {
   root: LayoutNode;
@@ -127,5 +135,58 @@ export function addTerminalTabToWorkspaceRuntime(
 
   runtime.root = addTerminalTabToNode(runtime.root, paneID, slotId);
   runtime.focusedPaneID = paneID;
+  return true;
+}
+
+function addTabToSpecificPane(
+  runtime: WorkspaceRuntimeState,
+  paneID: string,
+  tab: PaneTab,
+  insertIndex?: number
+): boolean {
+  const layout = ensureWorkspaceRoot(runtime);
+  const leaf = findLeaf(layout.root, paneID);
+  if (!leaf) return false;
+
+  const dupIndex = leaf.tabs.findIndex((candidate) => tabsEqual(candidate, tab));
+  if (dupIndex >= 0) {
+    runtime.root = selectTabInLayout(layout.root, paneID, dupIndex);
+    runtime.focusedPaneID = paneID;
+    return false;
+  }
+
+  runtime.root = insertTabInPane(layout.root, paneID, tab, insertIndex ?? leaf.tabs.length);
+  runtime.focusedPaneID = paneID;
+  return true;
+}
+
+export function addEditorTabToPaneInWorkspaceRuntime(
+  runtime: WorkspaceRuntimeState,
+  paneID: string,
+  relativePath: string,
+  insertIndex?: number
+): boolean {
+  return addTabToSpecificPane(runtime, paneID, { kind: "editor", path: relativePath }, insertIndex);
+}
+
+export function splitPaneWithEditorInWorkspaceRuntime(
+  runtime: WorkspaceRuntimeState,
+  targetPaneID: string,
+  relativePath: string,
+  axis: "horizontal" | "vertical",
+  position: "before" | "after"
+): boolean {
+  if (!runtime.root) return false;
+  if (!findLeaf(runtime.root, targetPaneID)) return false;
+
+  const tab: PaneTab = { kind: "editor", path: relativePath };
+  const previousLeafIds = new Set(getAllLeaves(runtime.root).map((leaf) => leaf.id));
+  const nextRoot = splitPaneAroundTab(runtime.root, targetPaneID, tab, axis, position);
+  const insertedLeaf = getAllLeaves(nextRoot).find(
+    (leaf) => !previousLeafIds.has(leaf.id) && leaf.tabs.some((candidate) => tabsEqual(candidate, tab))
+  );
+
+  runtime.root = nextRoot;
+  runtime.focusedPaneID = insertedLeaf?.id ?? targetPaneID;
   return true;
 }
