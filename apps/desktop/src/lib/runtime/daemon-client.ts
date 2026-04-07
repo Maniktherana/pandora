@@ -7,7 +7,7 @@ import type {
   SessionState,
   SlotState,
 } from "../shared/types";
-import { DaemonConnectionError, DaemonSendError } from "./errors";
+import { DaemonSendError } from "./errors";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
 
@@ -34,50 +34,32 @@ export class DaemonClient {
   }
 
   async connect() {
-    const connectEffect = Effect.tryPromise({
-      try: async () => {
-        const unlisten1 = await listen<string>("daemon-connection", (event) => {
-          try {
-            const data = JSON.parse(event.payload);
-            const workspaceId = data.workspaceId as string;
-            const state = data.state as ConnectionState;
-            this.callbacks.onConnectionStateChange(workspaceId, state);
-          } catch (cause) {
-            console.error("Failed to parse daemon connection event:", cause);
-          }
-        });
+    try {
+      const unlisten1 = await listen<string>("daemon-connection", (event) => {
+        try {
+          const data = JSON.parse(event.payload);
+          const workspaceId = data.workspaceId as string;
+          const state = data.state as ConnectionState;
+          this.callbacks.onConnectionStateChange(workspaceId, state);
+        } catch (cause) {
+          console.error("Failed to parse daemon connection event:", cause);
+        }
+      });
 
-        const unlisten2 = await listen<string>("daemon-message", (event) => {
-          try {
-            const message = JSON.parse(event.payload) as DaemonMessage;
-            const workspaceId = message.workspaceId ?? "";
-            this.handleMessage(workspaceId, message);
-          } catch (cause) {
-            console.error("Failed to parse daemon message:", cause);
-          }
-        });
+      const unlisten2 = await listen<string>("daemon-message", (event) => {
+        try {
+          const message = JSON.parse(event.payload) as DaemonMessage;
+          const workspaceId = message.workspaceId ?? "";
+          this.handleMessage(workspaceId, message);
+        } catch (cause) {
+          console.error("Failed to parse daemon message:", cause);
+        }
+      });
 
-        return [unlisten1, unlisten2] satisfies UnlistenFn[];
-      },
-      catch: (cause) =>
-        new DaemonConnectionError({
-          workspaceId: "global",
-          cause,
-        }),
-    }).pipe(
-      Effect.tap((unlisteners) =>
-        Effect.sync(() => {
-          this.unlisteners = unlisteners;
-        })
-      ),
-      Effect.catchAll((error) =>
-        Effect.sync(() => {
-          console.error("Failed to connect daemon client:", error);
-        })
-      )
-    );
-
-    await Effect.runPromise(connectEffect);
+      this.unlisteners = [unlisten1, unlisten2];
+    } catch (cause) {
+      console.error("Failed to connect daemon client:", cause);
+    }
   }
 
   disconnect() {

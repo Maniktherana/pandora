@@ -64,8 +64,7 @@ import {
   splitProjectTerminalGroupInRuntime,
 } from "@/state/workspaces/project-terminal-panel-state";
 import {
-  interruptWorkspaceStartup,
-  startWorkspaceStartup,
+  createWorkspaceStartupController,
   syncProjectScopedRuntime,
   type WorkspaceStartupGet,
   type WorkspaceStartupSet,
@@ -427,6 +426,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       }
       publish();
     }) as WorkspaceStartupSet;
+
+    const { startWorkspaceStartup, interruptWorkspaceStartup } = createWorkspaceStartupController();
 
     const readSessionRuntimeState = (workspaceId: string) => {
       const existing = desktopStateSnapshot.runtimes[workspaceId];

@@ -85,7 +85,7 @@ function snapRect(el: HTMLElement): NativeSyncPayload | null {
 
 export const TerminalSurfaceServiceLive = Layer.effect(
   TerminalSurfaceService,
-  Effect.sync(() => {
+  Effect.gen(function* () {
     const entries = new Map<string, ManagedSurfaceEntry>();
     let nativeSupportPromise: Promise<boolean> | null = null;
 

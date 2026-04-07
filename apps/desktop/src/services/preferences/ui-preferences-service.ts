@@ -57,92 +57,77 @@ export const UiPreferencesServiceLive = Layer.effect(
 
     return {
       hydrate: () =>
-        Effect.tryPromise({
-          try: async () => {
-            const [sidebarVisible, fileTreeOpenMap] = await Promise.all([
-              loadPersistedSidebarVisible(),
-              loadPersistedFileTreeOpenMap(),
-            ]);
-            fileTreeOpenByWorkspace.clear();
-            for (const [workspaceId, open] of Object.entries(fileTreeOpenMap)) {
-              fileTreeOpenByWorkspace.set(workspaceId, open);
-            }
-            globalFileTreeOpen = Object.values(fileTreeOpenMap).some(Boolean);
-            const next: UiPreferencesView = {
-              ...emptyUiPreferencesView,
-              sidebarVisible,
-              sidebarHydrated: true,
-              fileTreeOpen: globalFileTreeOpen,
-              fileTreeHydrated: true,
-              fileTreeWorkspaceId: null,
-            };
-            publishUiPreferences(next);
-            await Effect.runPromise(Ref.set(currentViewRef, next));
-          },
-          catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
+        Effect.gen(function* () {
+          const [sidebarVisible, fileTreeOpenMap] = yield* Effect.tryPromise({
+            try: () =>
+              Promise.all([loadPersistedSidebarVisible(), loadPersistedFileTreeOpenMap()]),
+            catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
+          });
+          fileTreeOpenByWorkspace.clear();
+          for (const [workspaceId, open] of Object.entries(fileTreeOpenMap)) {
+            fileTreeOpenByWorkspace.set(workspaceId, open);
+          }
+          globalFileTreeOpen = Object.values(fileTreeOpenMap).some(Boolean);
+          const next: UiPreferencesView = {
+            ...emptyUiPreferencesView,
+            sidebarVisible,
+            sidebarHydrated: true,
+            fileTreeOpen: globalFileTreeOpen,
+            fileTreeHydrated: true,
+            fileTreeWorkspaceId: null,
+          };
+          publishUiPreferences(next);
+          yield* Ref.set(currentViewRef, next);
         }),
       setSidebarVisible: (visible) =>
-        Effect.tryPromise({
-          try: async () => {
-            await persistSidebarVisible(visible);
-            await Effect.runPromise(
-              updateView((current) => ({
-                ...current,
-                sidebarVisible: visible,
-                sidebarHydrated: true,
-              }))
-            );
-          },
-          catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
+        Effect.gen(function* () {
+          yield* Effect.tryPromise({
+            try: () => persistSidebarVisible(visible),
+            catch: (cause) => new UiPreferenceError({ cause, key: "sidebarVisible" }),
+          });
+          yield* updateView((current) => ({
+            ...current,
+            sidebarVisible: visible,
+            sidebarHydrated: true,
+          }));
         }),
       setFileTreeOpenForWorkspace: (workspaceId, open) =>
-        Effect.tryPromise({
-          try: async () => {
-            fileTreeOpenByWorkspace.set(workspaceId, open);
-            globalFileTreeOpen = open;
-            await Effect.runPromise(
-              updateView((current) => ({
-                ...current,
-                fileTreeOpen: open,
-                fileTreeHydrated: true,
-                fileTreeWorkspaceId: workspaceId,
-              }))
-            );
-            await persistFileTreeOpenForWorkspace(workspaceId, open);
-          },
-          catch: (cause) => new UiPreferenceError({ cause, key: `fileTree:${workspaceId}` }),
+        Effect.gen(function* () {
+          fileTreeOpenByWorkspace.set(workspaceId, open);
+          globalFileTreeOpen = open;
+          yield* updateView((current) => ({
+            ...current,
+            fileTreeOpen: open,
+            fileTreeHydrated: true,
+            fileTreeWorkspaceId: workspaceId,
+          }));
+          yield* Effect.tryPromise({
+            try: () => persistFileTreeOpenForWorkspace(workspaceId, open),
+            catch: (cause) => new UiPreferenceError({ cause, key: `fileTree:${workspaceId}` }),
+          });
         }),
       syncSelectedWorkspace: (workspaceId, ready) =>
-        Effect.tryPromise({
-          try: async () => {
-            const current = useDesktopViewStore.getState().uiPreferences;
+        Effect.gen(function* () {
+          const current = yield* Ref.get(currentViewRef);
 
-            if (!workspaceId || !ready) {
-              await Effect.runPromise(
-                updateView(() => ({
-                  ...current,
-                  fileTreeOpen: globalFileTreeOpen,
-                  fileTreeHydrated: true,
-                  fileTreeWorkspaceId: workspaceId,
-                }))
-              );
-              return;
-            }
+          if (!workspaceId || !ready) {
+            yield* updateView(() => ({
+              ...current,
+              fileTreeOpen: globalFileTreeOpen,
+              fileTreeHydrated: true,
+              fileTreeWorkspaceId: workspaceId,
+            }));
+            return;
+          }
 
-            const open =
-              fileTreeOpenByWorkspace.get(workspaceId) ?? globalFileTreeOpen;
-            await Effect.runPromise(
-              updateView(() => ({
-                sidebarVisible: current.sidebarVisible,
-                sidebarHydrated: true,
-                fileTreeOpen: open,
-                fileTreeHydrated: true,
-                fileTreeWorkspaceId: workspaceId,
-              }))
-            );
-          },
-          catch: (cause) =>
-            new UiPreferenceError({ cause, key: `selectedWorkspace:${workspaceId ?? "none"}` }),
+          const open = fileTreeOpenByWorkspace.get(workspaceId) ?? globalFileTreeOpen;
+          yield* updateView(() => ({
+            sidebarVisible: current.sidebarVisible,
+            sidebarHydrated: true,
+            fileTreeOpen: open,
+            fileTreeHydrated: true,
+            fileTreeWorkspaceId: workspaceId,
+          }));
         }),
       saveSelection: (projectId, workspaceId) =>
         Effect.tryPromise({

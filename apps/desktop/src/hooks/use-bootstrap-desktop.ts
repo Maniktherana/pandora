@@ -15,7 +15,7 @@ export function useDesktopEffectRunner() {
 
   const run = useCallback(
     <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-      void runtime.runPromise(effect as Effect.Effect<A, E, never>);
+      runtime.runPromise(effect as Effect.Effect<A, E, never>).catch(console.error);
     },
     [runtime]
   );
@@ -36,7 +36,7 @@ export function useBootstrapDesktop() {
   useEffect(() => {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
-    void runtime.runPromise(
+    runtime.runPromise(
       Effect.gen(function* () {
         const daemonGateway = yield* DaemonGateway;
         const desktopWorkspace = yield* DesktopWorkspaceService;
@@ -45,7 +45,7 @@ export function useBootstrapDesktop() {
         yield* desktopWorkspace.loadDesktopState();
         yield* uiPreferences.hydrate();
       })
-    );
+    ).catch(console.error);
 
     const teardown = () => {
       void runtime.runPromise(

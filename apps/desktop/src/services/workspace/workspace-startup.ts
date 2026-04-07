@@ -26,12 +26,18 @@ export type WorkspaceStartupSet = {
 
 export type WorkspaceStartupGet = () => WorkspaceStartupState;
 
-let currentWorkspaceStartup:
-  | {
-      workspaceId: string;
-      fiber: Fiber.RuntimeFiber<void, never>;
-    }
-  | null = null;
+export interface WorkspaceStartupController {
+  startWorkspaceStartup: (
+    set: WorkspaceStartupSet,
+    get: WorkspaceStartupGet,
+    workspace: WorkspaceRecord
+  ) => void;
+  interruptWorkspaceStartup: (
+    set: WorkspaceStartupSet,
+    workspaceId: string,
+    disconnected?: boolean
+  ) => void;
+}
 
 export function createWorkspaceRuntimeState(
   workspaceId: string,
@@ -219,43 +225,46 @@ export function ensureWorkspaceStartupRuntime(
   });
 }
 
-export function interruptWorkspaceStartup(
-  set: WorkspaceStartupSet,
-  workspaceId: string,
-  disconnected = false
-) {
-  if (currentWorkspaceStartup?.workspaceId !== workspaceId) return;
+export function createWorkspaceStartupController(): WorkspaceStartupController {
+  let current: { workspaceId: string; fiber: Fiber.RuntimeFiber<void, never> } | null = null;
 
-  resetWorkspaceStartupState(set, workspaceId, disconnected);
-  void Effect.runFork(Fiber.interrupt(currentWorkspaceStartup.fiber));
-  currentWorkspaceStartup = null;
-}
+  function interruptWorkspaceStartup(
+    set: WorkspaceStartupSet,
+    workspaceId: string,
+    disconnected = false
+  ) {
+    if (current?.workspaceId !== workspaceId) return;
 
-export function startWorkspaceStartup(
-  set: WorkspaceStartupSet,
-  get: WorkspaceStartupGet,
-  workspace: WorkspaceRecord
-) {
-  if (currentWorkspaceStartup && currentWorkspaceStartup.workspaceId !== workspace.id) {
-    interruptWorkspaceStartup(set, currentWorkspaceStartup.workspaceId);
+    resetWorkspaceStartupState(set, workspaceId, disconnected);
+    void Effect.runFork(Fiber.interrupt(current.fiber));
+    current = null;
   }
 
-  if (workspace.status !== "ready") return;
-
-  const runtime = get().runtimes[workspace.id];
-  if (runtime?.layoutLoaded) return;
-  if (runtime?.layoutLoading && currentWorkspaceStartup?.workspaceId === workspace.id) return;
-
-  ensureWorkspaceStartupRuntime(set, get, workspace);
-
-  const fiber = Effect.runFork(startWorkspaceRuntimeEffect(get, set, workspace));
-  fiber.addObserver(() => {
-    if (currentWorkspaceStartup?.fiber === fiber) {
-      currentWorkspaceStartup = null;
+  function startWorkspaceStartup(
+    set: WorkspaceStartupSet,
+    get: WorkspaceStartupGet,
+    workspace: WorkspaceRecord
+  ) {
+    if (current && current.workspaceId !== workspace.id) {
+      interruptWorkspaceStartup(set, current.workspaceId);
     }
-  });
-  currentWorkspaceStartup = {
-    workspaceId: workspace.id,
-    fiber,
-  };
+
+    if (workspace.status !== "ready") return;
+
+    const runtime = get().runtimes[workspace.id];
+    if (runtime?.layoutLoaded) return;
+    if (runtime?.layoutLoading && current?.workspaceId === workspace.id) return;
+
+    ensureWorkspaceStartupRuntime(set, get, workspace);
+
+    const fiber = Effect.runFork(startWorkspaceRuntimeEffect(get, set, workspace));
+    fiber.addObserver(() => {
+      if (current?.fiber === fiber) {
+        current = null;
+      }
+    });
+    current = { workspaceId: workspace.id, fiber };
+  }
+
+  return { startWorkspaceStartup, interruptWorkspaceStartup };
 }
