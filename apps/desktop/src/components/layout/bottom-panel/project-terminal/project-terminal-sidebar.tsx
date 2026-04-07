@@ -2,7 +2,6 @@ import { useCallback, useMemo, useRef } from "react";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import type { WorkspaceRuntimeState } from "@/lib/shared/types";
-import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import type { SidebarRow } from "../project-terminal.types";
 import { createSessionMap, createSlotMap, buildSidebarRows, PROJECT_TERMINAL_DRAG_THRESHOLD } from "../project-terminal.utils";

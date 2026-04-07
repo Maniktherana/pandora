@@ -1,5 +1,3 @@
-import type { SessionState } from "@/lib/shared/types";
-
 export type BottomTab = "terminal" | "ports";
 
 export function clampPort(n: number): number | null {

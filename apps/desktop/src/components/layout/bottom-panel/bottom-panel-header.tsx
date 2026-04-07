@@ -1,7 +1,7 @@
 import { ChevronDown, Plus, SplitSquareHorizontal } from "lucide-react";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/shared/utils";
-import type { BottomTab } from "./bottom-panel.types";
+import type { BottomTab } from "./bottom-panel.utils";
 
 type BottomPanelHeaderProps = {
   tab: BottomTab;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { PortDataRow } from "./port-data-row";
 import type { SessionState } from "@/lib/shared/types";
-import { parseUserPort } from "../bottom-panel.types";
+import { parseUserPort } from "../bottom-panel.utils";
 
 type PortsTabContentProps = {
   projectSessions: SessionState[];

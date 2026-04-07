@@ -14,7 +14,7 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { PortsTabContent } from "./ports/ports-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
-import type { BottomTab } from "./bottom-panel.types";
+import type { BottomTab } from "./bottom-panel.utils";
 
 type BottomPanelProps = {
   onCollapse: () => void;
