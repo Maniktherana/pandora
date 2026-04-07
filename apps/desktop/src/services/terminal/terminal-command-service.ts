@@ -55,7 +55,7 @@ export function resolveNewTerminalRuntimeId(state: {
   return state.effectiveLayoutRuntimeId() ?? state.selectedWorkspaceID;
 }
 
-export const TerminalCommandServiceLive = Layer.effect(
+export const TerminalCommandServiceLive = Layer.scoped(
   TerminalCommandService,
   Effect.gen(function* () {
     const daemonGateway = yield* DaemonGateway;
@@ -153,7 +153,6 @@ export const TerminalCommandServiceLive = Layer.effect(
             cause instanceof TerminalCommandError ? cause : new TerminalCommandError({ cause, runtimeId })
           )
         ),
-
       createProjectTerminal,
 
       splitProjectTerminalGroup: (runtimeId, groupId) =>

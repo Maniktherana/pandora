@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Cache, Context, Effect, Layer } from "effect";
+import { Cache, Context, Effect, Fiber, Layer } from "effect";
 import type { WritableDraft } from "immer";
 import type {
   AppState,
@@ -71,6 +71,13 @@ import {
   type WorkspaceStartupState,
 } from "@/services/workspace/workspace-startup";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import {
+  getOrderedProjectTerminalSlotIds,
+  getOrderedWorkspaceTerminalSlotIds,
+  getVisibleProjectTerminalSlotIds,
+  getVisibleWorkspaceTerminalSlotIds,
+} from "@/lib/terminal/lazy-terminal-connections";
+import { seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export interface WorkspaceSessionService {
@@ -337,9 +344,17 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       prAwaitingWorkspaceIds: new Set<string>(),
     };
     const connectionWaiters = new Map<string, Array<() => void>>();
+    const pendingDefaultTerminalSeeds = new Set<string>();
     const publish = () => publishDesktopView(desktopStateSnapshot);
     const getEffectiveLayoutRuntimeId = () =>
       desktopStateSnapshot.layoutTargetRuntimeId ?? desktopStateSnapshot.selectedWorkspaceID;
+    const pendingSessionOpens = new Set<string>();
+    const hiddenWarmupFibers = new Map<string, Fiber.RuntimeFiber<void, never>>();
+    const hiddenWarmupPendingSlots = new Map<string, string>();
+    const hiddenWarmupGeneration = new Map<string, number>();
+    const hiddenWarmupDelay = "120 millis";
+    let requestActiveTerminalStartupRefresh: (() => void) | null = null;
+    let activeTerminalStartupRefreshQueued = false;
 
     const applyAppState = (appState: AppState) => {
       desktopStateSnapshot.projects = structuredClone(appState.projects);
@@ -389,13 +404,34 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       if (runtime.layoutLoading) return;
       if (runtime.connectionState !== "connected") return;
       if (runtime.slots.some((s) => s.kind === "terminal_slot")) return;
-      void Promise.all([import("@/app/desktop-runtime"), import("@/services/terminal/terminal-command-service")]).then(
-        ([{ getDesktopRuntime }, { TerminalCommandService }]) => {
-          getDesktopRuntime().runFork(
-            Effect.flatMap(TerminalCommandService, (svc) => svc.createWorkspaceTerminal(workspaceId))
-          );
-        }
-      );
+      if (pendingDefaultTerminalSeeds.has(workspaceId)) return;
+      pendingDefaultTerminalSeeds.add(workspaceId);
+      void import("@/app/desktop-runtime")
+        .then(({ getDesktopRuntime }) =>
+          getDesktopRuntime().runPromise(
+            Effect.gen(function* () {
+              const alreadySeeded = yield* Effect.sync(() =>
+                desktopStateSnapshot.runtimes[workspaceId]?.slots.some(
+                  (slot) => slot.kind === "terminal_slot"
+                ) ?? false
+              );
+              if (alreadySeeded) return;
+
+              const client = yield* daemonGateway.getClient();
+              if (!client) return;
+
+              const seeded = seedWorkspaceTerminal(client, workspaceId);
+              const session = yield* sessionCache.get(workspaceId);
+              yield* session.commands.addTerminalTab(seeded.slotID);
+            })
+          )
+        )
+        .catch((error) => {
+          console.warn("Failed to seed default workspace terminal:", error);
+        })
+        .finally(() => {
+          pendingDefaultTerminalSeeds.delete(workspaceId);
+        });
     };
 
     const ensureRuntimeLayoutForWorkspace = (workspaceId: string) => {
@@ -426,6 +462,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Object.assign(desktopStateSnapshot, update);
       }
       publish();
+      requestActiveTerminalStartupRefresh?.();
     }) as WorkspaceStartupSet;
 
     const { startWorkspaceStartup, interruptWorkspaceStartup } = createWorkspaceStartupController();
@@ -443,6 +480,254 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const writeSessionRuntimeState = (workspaceId: string, runtime: WorkspaceRuntimeState) => {
       desktopStateSnapshot.runtimes[workspaceId] = runtime;
       publish();
+    };
+
+    const terminalStartupKey = (runtimeId: string, slotId: string) => `${runtimeId}:${slotId}`;
+
+    const selectedRuntimeIds = () => {
+      const runtimeIds: string[] = [];
+      if (desktopStateSnapshot.selectedWorkspaceID) {
+        runtimeIds.push(desktopStateSnapshot.selectedWorkspaceID);
+      }
+      if (desktopStateSnapshot.selectedProjectID) {
+        runtimeIds.push(projectRuntimeKey(desktopStateSnapshot.selectedProjectID));
+      }
+      return runtimeIds;
+    };
+
+    const isRuntimeStartupActive = (runtimeId: string) => {
+      if (isProjectRuntimeKey(runtimeId)) {
+        return (
+          desktopStateSnapshot.selectedProjectID !== null &&
+          runtimeId === projectRuntimeKey(desktopStateSnapshot.selectedProjectID)
+        );
+      }
+      return desktopStateSnapshot.selectedWorkspaceID === runtimeId;
+    };
+
+    const clearPendingSessionOpensForRuntime = (runtimeId: string) => {
+      for (const key of Array.from(pendingSessionOpens)) {
+        if (key.startsWith(`${runtimeId}:`)) {
+          pendingSessionOpens.delete(key);
+        }
+      }
+    };
+
+    const getRuntimeSlotState = (runtimeId: string, slotId: string) =>
+      desktopStateSnapshot.runtimes[runtimeId]?.slots.find((slot) => slot.id === slotId);
+
+    const reconcilePendingSessionOpens = (runtimeId: string) => {
+      for (const key of Array.from(pendingSessionOpens)) {
+        if (!key.startsWith(`${runtimeId}:`)) continue;
+        const slotId = key.slice(runtimeId.length + 1);
+        if (!shouldAutoOpenTerminalSlot(getRuntimeSlotState(runtimeId, slotId))) {
+          pendingSessionOpens.delete(key);
+        }
+      }
+    };
+
+    const reconcileHiddenWarmupPendingSlot = (runtimeId: string) => {
+      const pendingSlotId = hiddenWarmupPendingSlots.get(runtimeId);
+      if (!pendingSlotId) return;
+      if (!shouldAutoOpenTerminalSlot(getRuntimeSlotState(runtimeId, pendingSlotId))) {
+        hiddenWarmupPendingSlots.delete(runtimeId);
+      }
+    };
+
+    const cancelHiddenWarmup = (runtimeId: string) =>
+      Effect.sync(() => {
+        hiddenWarmupGeneration.set(runtimeId, (hiddenWarmupGeneration.get(runtimeId) ?? 0) + 1);
+        hiddenWarmupPendingSlots.delete(runtimeId);
+        const fiber = hiddenWarmupFibers.get(runtimeId);
+        if (!fiber) return;
+        hiddenWarmupFibers.delete(runtimeId);
+        void Effect.runFork(Fiber.interrupt(fiber));
+      });
+
+    const clearRuntimeTerminalStartupTracking = (runtimeId: string) =>
+      Effect.gen(function* () {
+        yield* cancelHiddenWarmup(runtimeId);
+        clearPendingSessionOpensForRuntime(runtimeId);
+        hiddenWarmupPendingSlots.delete(runtimeId);
+        hiddenWarmupGeneration.delete(runtimeId);
+      });
+
+    const getVisibleRuntimeTerminalSlotIds = (runtimeId: string) => {
+      if (!isRuntimeStartupActive(runtimeId)) return [];
+      const runtime = desktopStateSnapshot.runtimes[runtimeId];
+      if (!runtime || runtime.connectionState !== "connected") return [];
+      return isProjectRuntimeKey(runtimeId)
+        ? getVisibleProjectTerminalSlotIds(runtime.terminalPanel)
+        : getVisibleWorkspaceTerminalSlotIds(runtime.root);
+    };
+
+    const getOrderedRuntimeTerminalSlotIds = (runtimeId: string) => {
+      if (!isRuntimeStartupActive(runtimeId)) return [];
+      const runtime = desktopStateSnapshot.runtimes[runtimeId];
+      if (!runtime || runtime.connectionState !== "connected") return [];
+      return isProjectRuntimeKey(runtimeId)
+        ? getOrderedProjectTerminalSlotIds(runtime.terminalPanel)
+        : getOrderedWorkspaceTerminalSlotIds(runtime.root);
+    };
+
+    const ensureTerminalSlotSession = (runtimeId: string, slotId: string): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const runtime = desktopStateSnapshot.runtimes[runtimeId];
+        if (!runtime || runtime.connectionState !== "connected") return false;
+
+        reconcilePendingSessionOpens(runtimeId);
+        const slot = runtime.slots.find((candidate) => candidate.id === slotId);
+        if (!shouldAutoOpenTerminalSlot(slot)) return false;
+        if (!slot) return false;
+
+        const requestKey = terminalStartupKey(runtimeId, slotId);
+        if (pendingSessionOpens.has(requestKey)) return false;
+
+        const sessionDefID = slot.sessionDefIDs[0];
+        if (!sessionDefID) return false;
+
+        pendingSessionOpens.add(requestKey);
+        const client = yield* daemonGateway.getClient();
+        if (!client) {
+          pendingSessionOpens.delete(requestKey);
+          return false;
+        }
+
+        yield* client.sendEffect(runtimeId, {
+          type: "open_session_instance",
+          sessionDefID,
+        });
+        return true;
+      });
+
+    const ensureVisibleTerminalSessions = (runtimeId: string) =>
+      Effect.all(
+        [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))].map((slotId) =>
+          ensureTerminalSlotSession(runtimeId, slotId)
+        ),
+        { concurrency: "unbounded", discard: true }
+      );
+
+    const scheduleHiddenWarmup = (runtimeId: string) =>
+      Effect.gen(function* () {
+        const runtime = desktopStateSnapshot.runtimes[runtimeId];
+        if (!runtime || runtime.connectionState !== "connected" || !isRuntimeStartupActive(runtimeId)) {
+          yield* cancelHiddenWarmup(runtimeId);
+          return;
+        }
+
+        reconcilePendingSessionOpens(runtimeId);
+        reconcileHiddenWarmupPendingSlot(runtimeId);
+
+        if (hiddenWarmupFibers.has(runtimeId) || hiddenWarmupPendingSlots.has(runtimeId)) return;
+
+        const visibleSlotIds = [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))];
+        if (
+          visibleSlotIds.some((slotId) =>
+            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId))
+          )
+        ) {
+          return;
+        }
+
+        const visibleSlotIdSet = new Set(visibleSlotIds);
+        const hiddenSlotId = getOrderedRuntimeTerminalSlotIds(runtimeId).find(
+          (slotId) =>
+            !visibleSlotIdSet.has(slotId) &&
+            shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId))
+        );
+        if (!hiddenSlotId) return;
+
+        const generation = hiddenWarmupGeneration.get(runtimeId) ?? 0;
+        yield* Effect.sync(() => {
+          const fiber = Effect.runFork(
+            Effect.gen(function* () {
+              yield* Effect.sleep(hiddenWarmupDelay);
+              reconcilePendingSessionOpens(runtimeId);
+              reconcileHiddenWarmupPendingSlot(runtimeId);
+
+              if ((hiddenWarmupGeneration.get(runtimeId) ?? 0) !== generation) return;
+              if (!isRuntimeStartupActive(runtimeId)) return;
+
+              const opened = yield* ensureTerminalSlotSession(runtimeId, hiddenSlotId);
+              if (opened) {
+                hiddenWarmupPendingSlots.set(runtimeId, hiddenSlotId);
+              }
+            })
+          );
+
+          hiddenWarmupFibers.set(runtimeId, fiber);
+          fiber.addObserver(() => {
+            if (hiddenWarmupFibers.get(runtimeId) === fiber) {
+              hiddenWarmupFibers.delete(runtimeId);
+            }
+          });
+        });
+      });
+
+    const refreshRuntimeTerminalStartup = (
+      runtimeId: string,
+      options?: { rebuildHiddenQueue?: boolean }
+    ) =>
+      Effect.gen(function* () {
+        const runtime = desktopStateSnapshot.runtimes[runtimeId];
+        if (options?.rebuildHiddenQueue) {
+          yield* cancelHiddenWarmup(runtimeId);
+        }
+
+        if (!runtime || runtime.connectionState !== "connected" || !isRuntimeStartupActive(runtimeId)) {
+          if (!runtime || runtime.connectionState !== "connected") {
+            clearPendingSessionOpensForRuntime(runtimeId);
+          }
+          yield* cancelHiddenWarmup(runtimeId);
+          return;
+        }
+
+        reconcilePendingSessionOpens(runtimeId);
+        reconcileHiddenWarmupPendingSlot(runtimeId);
+        yield* ensureVisibleTerminalSessions(runtimeId);
+        yield* scheduleHiddenWarmup(runtimeId);
+      });
+
+    const refreshActiveRuntimeTerminalStartup = (options?: { rebuildHiddenQueues?: boolean }) =>
+      Effect.gen(function* () {
+        const activeRuntimeIds = selectedRuntimeIds();
+        const activeRuntimeIdSet = new Set(activeRuntimeIds);
+
+        for (const runtimeId of new Set([
+          ...hiddenWarmupFibers.keys(),
+          ...hiddenWarmupPendingSlots.keys(),
+        ])) {
+          if (!activeRuntimeIdSet.has(runtimeId)) {
+            yield* cancelHiddenWarmup(runtimeId);
+          }
+        }
+
+        yield* Effect.all(
+          activeRuntimeIds.map((runtimeId) =>
+            refreshRuntimeTerminalStartup(runtimeId, {
+              rebuildHiddenQueue: options?.rebuildHiddenQueues === true,
+            })
+          ),
+          { concurrency: "unbounded", discard: true }
+        );
+      });
+
+    requestActiveTerminalStartupRefresh = () => {
+      if (activeTerminalStartupRefreshQueued) return;
+      activeTerminalStartupRefreshQueued = true;
+      queueMicrotask(() => {
+        activeTerminalStartupRefreshQueued = false;
+        void import("@/app/desktop-runtime")
+          .then(({ getDesktopRuntime }) =>
+            getDesktopRuntime().runPromise(
+              refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true })
+            )
+          )
+          .catch((error) => {
+            console.warn("Failed to refresh terminal startup state:", error);
+          });
+      });
     };
 
     const hydrateProjectRuntimePanel = (runtimeId: string) =>
@@ -567,6 +852,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               });
               yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
             }
+            yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
           })
         )
       );
@@ -582,23 +868,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           startWorkspaceStartup(startupSet, startupGet, workspace);
         });
         yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
-      });
-
-    const maybeOpenSessionInstances = (workspaceId: string, slotIds: string[]) =>
-      Effect.gen(function* () {
-        if (slotIds.length === 0) return;
-        const client = yield* daemonGateway.getClient();
-        if (!client) return;
-
-        const runtime = readSessionRuntimeState(workspaceId);
-        if (!runtime) return;
-
-        for (const slotId of slotIds) {
-          const slot = runtime.slots.find((entry) => entry.id === slotId);
-          if (slot && shouldAutoOpenTerminalSlot(slot)) {
-            client.openSessionInstance(workspaceId, slot.sessionDefIDs[0]);
-          }
-        }
+        yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
       });
 
     const updateWorkspaceRuntime = (
@@ -615,6 +885,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           changed && !isProjectRuntimeKey(workspaceId)
             ? persistWorkspaceLayout(desktopStateSnapshot, workspaceId)
             : Effect.void
+        ),
+        Effect.tap(() =>
+          refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
         )
       );
 
@@ -686,6 +959,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               }
               yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
             }
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "slot_snapshot":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -704,21 +978,20 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                 ensureRuntimeLayoutState(runtime);
               }
             });
-            yield* maybeOpenSessionInstances(
-              event.workspaceId,
-              event.slots.map((slot) => slot.id)
-            );
             yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "session_snapshot":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               replaceRuntimeSessions(runtime, event.sessions);
             });
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "slot_state_changed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               updateRuntimeSlotState(runtime, event.slot);
             });
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "session_state_changed":
             {
@@ -731,6 +1004,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                 });
               }
             }
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "slot_added":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -741,23 +1015,26 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                 ensureRuntimeLayoutState(runtime);
               }
             });
-            yield* maybeOpenSessionInstances(event.workspaceId, [event.slot.id]);
             yield* Effect.sync(() => ensureWorkspaceDefaultTerminal(event.workspaceId));
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "slot_removed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               removeRuntimeSlotState(runtime, event.slotID);
             });
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "session_opened":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               addRuntimeSessionState(runtime, event.session);
             });
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "session_closed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               removeRuntimeSessionState(runtime, event.sessionID);
             });
+            yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
           case "output_chunk":
             yield* handleTerminalOutput(event.workspaceId, decodeOutputChunk(event.data));
@@ -865,6 +1142,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.gen(function* () {
           yield* loadAppStateFromBackend();
           yield* maybeStartSelectedWorkspace();
+          yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
         }),
       addProject: (path) =>
         Effect.tryPromise({
@@ -891,25 +1169,32 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           catch: (cause) => new DesktopStateLoadError({ cause }),
         }),
       removeProject: (projectId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const runtimeId = `project:${projectId}`;
-            await invoke("stop_project_runtime", { projectId }).catch(() => {});
-            delete desktopStateSnapshot.runtimes[runtimeId];
-            if (desktopStateSnapshot.layoutTargetRuntimeId === runtimeId) {
-              desktopStateSnapshot.layoutTargetRuntimeId = null;
-            }
-            publish();
-            await invoke("remove_project", { projectId });
-            const appState = await invoke<AppState>("load_app_state");
-            applyAppState(appState);
-          },
-          catch: (cause) => new DesktopStateLoadError({ cause }),
+        Effect.gen(function* () {
+          const runtimeId = `project:${projectId}`;
+          yield* clearRuntimeTerminalStartupTracking(runtimeId);
+          yield* Effect.tryPromise({
+            try: async () => {
+              await invoke("stop_project_runtime", { projectId }).catch(() => {});
+              delete desktopStateSnapshot.runtimes[runtimeId];
+              if (desktopStateSnapshot.layoutTargetRuntimeId === runtimeId) {
+                desktopStateSnapshot.layoutTargetRuntimeId = null;
+              }
+              publish();
+              await invoke("remove_project", { projectId });
+              const appState = await invoke<AppState>("load_app_state");
+              applyAppState(appState);
+            },
+            catch: (cause) => new DesktopStateLoadError({ cause }),
+          });
+          yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
         }),
       selectProject: (projectId) =>
         updateDesktopState((state) => {
           state.selectedProjectID = projectId;
         }).pipe(
+          Effect.tap(() =>
+            refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true })
+          ),
           Effect.tap(() =>
             Effect.tryPromise({
               try: () =>
@@ -978,6 +1263,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           yield* mutateRuntimeState(runtimeId, (current) => {
             cycleRuntimeTabs(current, direction);
           }).pipe(Effect.asVoid);
+          yield* refreshRuntimeTerminalStartup(runtimeId, { rebuildHiddenQueue: true });
         }),
       addEditorTabForPath: (relativePath) =>
         Effect.gen(function* () {
@@ -1056,43 +1342,93 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       addProjectTerminalGroup: (workspaceId, slotId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           addProjectTerminalGroupInRuntime(runtime, slotId, index);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       splitProjectTerminalGroup: (workspaceId, groupId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           splitProjectTerminalGroupInRuntime(runtime, groupId, slotId);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       closeProjectTerminal: (workspaceId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           closeProjectTerminalInRuntime(runtime, slotId);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       selectProjectTerminalGroup: (workspaceId, groupId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           selectProjectTerminalGroupInRuntime(runtime, groupId, slotId);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       focusProjectTerminal: (workspaceId, slotId) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           focusProjectTerminalInRuntime(runtime, slotId);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       setProjectTerminalPanelVisible: (workspaceId, visible) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           setProjectTerminalPanelVisibleInRuntime(runtime, visible);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       reorderProjectTerminalGroups: (workspaceId, fromIndex, toIndex) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           reorderProjectTerminalGroupsInRuntime(runtime, fromIndex, toIndex);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       reorderProjectTerminalGroupChildren: (workspaceId, groupId, fromIndex, toIndex) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           reorderProjectTerminalGroupChildrenInRuntime(runtime, groupId, fromIndex, toIndex);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       moveProjectTerminalToGroup: (workspaceId, slotId, targetGroupId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           moveProjectTerminalToGroupInRuntime(runtime, slotId, targetGroupId, index);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       moveProjectTerminalToNewGroup: (workspaceId, slotId, index) =>
         mutateRuntimeState(workspaceId, (runtime) => {
           moveProjectTerminalToNewGroupInRuntime(runtime, slotId, index);
-        }).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.tap(() =>
+            refreshRuntimeTerminalStartup(workspaceId, { rebuildHiddenQueue: true })
+          ),
+          Effect.asVoid
+        ),
       createWorkspace: (projectId, workspaceKind) =>
         Effect.tryPromise({
           try: async () => {
@@ -1125,6 +1461,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           yield* terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).pipe(
             Effect.orElseSucceed(() => undefined)
           );
+          yield* clearRuntimeTerminalStartupTracking(workspaceId);
           yield* Effect.sync(() => {
             interruptWorkspaceStartup(startupSet, workspaceId);
             delete desktopStateSnapshot.runtimes[workspaceId];
@@ -1138,6 +1475,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             catch: (cause) => workspaceSelectionError(cause, workspaceId),
           });
           yield* maybeStartSelectedWorkspace();
+          yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
         }),
       markWorkspaceOpened: (workspaceId) =>
         Effect.tryPromise({

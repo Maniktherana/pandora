@@ -1,29 +1,23 @@
+import { getAllTerminalSlotIds, getVisualLeaves } from "@/lib/layout/layout-tree";
 import type { LayoutNode, TerminalPanelState } from "@/lib/shared/types";
 
 export function getVisibleWorkspaceTerminalSlotIds(root: LayoutNode | null): string[] {
   if (!root) return [];
 
   const slotIds = new Set<string>();
-  const stack: LayoutNode[] = [root];
-
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) continue;
-
-    if (node.type === "leaf") {
-      const activeTab = node.tabs[node.selectedIndex] ?? node.tabs[0];
-      if (activeTab?.kind === "terminal") {
-        slotIds.add(activeTab.slotId);
-      }
-      continue;
-    }
-
-    for (const child of node.children) {
-      stack.push(child);
+  for (const leaf of getVisualLeaves(root)) {
+    const activeTab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
+    if (activeTab?.kind === "terminal") {
+      slotIds.add(activeTab.slotId);
     }
   }
 
   return [...slotIds];
+}
+
+export function getOrderedWorkspaceTerminalSlotIds(root: LayoutNode | null): string[] {
+  if (!root) return [];
+  return [...new Set(getAllTerminalSlotIds(root))];
 }
 
 export function getVisibleProjectTerminalSlotIds(panel: TerminalPanelState | null): string[] {
@@ -33,6 +27,11 @@ export function getVisibleProjectTerminalSlotIds(panel: TerminalPanelState | nul
   if (!activeGroup) return [];
 
   return [...new Set(activeGroup.children)];
+}
+
+export function getOrderedProjectTerminalSlotIds(panel: TerminalPanelState | null): string[] {
+  if (!panel) return [];
+  return [...new Set(panel.groups.flatMap((group) => group.children))];
 }
 
 export function mergeConnectedTerminalSlotIds(

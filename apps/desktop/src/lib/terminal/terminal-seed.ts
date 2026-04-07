@@ -8,7 +8,11 @@ function defaultShellInfo(): { shellPath: string; shellName: string } {
   return { shellPath, shellName };
 }
 
-export function seedTerminalWithName(client: DaemonClient, runtimeId: string, name?: string) {
+export function seedTerminalWithName(
+  client: DaemonClient,
+  runtimeId: string,
+  name?: string
+) {
   const slotID = crypto.randomUUID();
   const sessionDefID = crypto.randomUUID();
   const { shellPath } = defaultShellInfo();
@@ -44,7 +48,9 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
         resumeSupported: false,
       },
     })
-  ).then(() => client.openSessionInstance(runtimeId, sessionDefID));
+  ).then(() => {
+    client.openSessionInstance(runtimeId, sessionDefID);
+  });
 
   return { slotID, sessionDefID, shellName: "terminal" };
 }

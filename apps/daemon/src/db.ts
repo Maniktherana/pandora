@@ -79,6 +79,10 @@ function setRuntimeMetadata(db: Database, key: string, value: string): void {
   ).run(key, value);
 }
 
+function disableTerminalSlotAutostart(db: Database): void {
+  db.query("UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0").run();
+}
+
 export function openDatabase(options?: {
   dbPath?: string;
   workspacePath?: string;
@@ -136,6 +140,7 @@ export function openDatabase(options?: {
   `);
   db.query(`UPDATE slot_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
   db.query(`UPDATE session_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
+  disableTerminalSlotAutostart(db);
   db.exec("PRAGMA user_version = 3;");
   if (options?.dbPath === undefined || options?.workspacePath !== undefined || options?.defaultCwd !== undefined) {
     ensureSeedData(db, options?.defaultCwd ?? options?.workspacePath ?? homedir());
@@ -162,7 +167,7 @@ function ensureSeedData(db: Database, defaultCwd: string): void {
     slotID,
     "terminal_slot",
     "Terminal",
-    1,
+    0,
     "single",
     sessionID,
     1,
