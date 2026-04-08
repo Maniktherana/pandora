@@ -172,22 +172,11 @@ export const TerminalCommandServiceLive = Layer.scoped(
       renameTerminal: (runtimeId, slotId, name) =>
         Effect.gen(function* () {
           const client = yield* getClient(runtimeId);
-          const slot = yield* workspaceService.getSlotState(runtimeId, slotId);
 
           yield* client
             .sendEffect(runtimeId, {
               type: "update_slot",
               slot: { id: slotId, name },
-            })
-            .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
-
-          const sessionDefId = slot?.sessionDefIDs[0];
-          if (!sessionDefId) return;
-
-          yield* client
-            .sendEffect(runtimeId, {
-              type: "update_session_def",
-              session: { id: sessionDefId, name },
             })
             .pipe(Effect.mapError((cause) => new TerminalCommandError({ cause, runtimeId })));
         }),

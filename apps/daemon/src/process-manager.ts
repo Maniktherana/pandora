@@ -103,8 +103,36 @@ export class ProcessManager {
     this.slotDefinitions.set(slot.id, slot);
   }
 
+  updateSlotDefinition(slot: Partial<SlotDefinition> & { id: string }): void {
+    const existing = this.slotDefinitions.get(slot.id);
+    if (!existing) {
+      return;
+    }
+    this.slotDefinitions.set(slot.id, {
+      ...existing,
+      ...slot,
+      sessionDefIDs: existing.sessionDefIDs,
+    });
+  }
+
   registerSessionDefinition(definition: SessionDefinition): void {
     this.sessionDefinitions.set(definition.id, definition);
+  }
+
+  updateSessionDefinition(definition: Partial<SessionDefinition> & { id: string }): void {
+    const existing = this.sessionDefinitions.get(definition.id);
+    if (!existing) {
+      return;
+    }
+    const next = {
+      ...existing,
+      ...definition,
+    };
+    this.sessionDefinitions.set(definition.id, next);
+    for (const session of this.findSessionsBySessionDefID(definition.id)) {
+      session.definition = next;
+      this.onSessionStateChanged(this.sessionState(session));
+    }
   }
 
   removeSlot(slotID: string): void {

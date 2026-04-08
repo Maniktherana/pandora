@@ -54,7 +54,17 @@ export function terminalDisplayForSlot(
   session: SessionState | undefined,
   detected: TerminalDisplayState | undefined,
 ): TerminalDisplayState {
+  const customLabel = customSlotLabel(slot);
   const liveDetected = detectTerminalDisplayFromProcess(session?.foregroundProcess);
+  if (customLabel) {
+    if (liveDetected && liveDetected.kind !== "terminal") {
+      return { kind: liveDetected.kind, label: customLabel };
+    }
+    if (detected && detected.kind !== "terminal") {
+      return { kind: detected.kind, label: customLabel };
+    }
+    return { kind: "terminal", label: customLabel };
+  }
   if (liveDetected && liveDetected.kind !== "terminal") {
     return liveDetected;
   }
@@ -62,20 +72,11 @@ export function terminalDisplayForSlot(
   // If the daemon says there's no live foreground app, don't resurrect a stale
   // regex-detected identity from earlier terminal input/output.
   if (session) {
-    const customLabel = customSlotLabel(slot);
-    if (customLabel) {
-      return { kind: "terminal", label: customLabel };
-    }
     return { kind: "terminal", label: TERMINAL_LABEL };
   }
 
   if (detected && detected.kind !== "terminal") {
     return detected;
-  }
-
-  const customLabel = customSlotLabel(slot);
-  if (customLabel) {
-    return { kind: "terminal", label: customLabel };
   }
 
   return detected ?? { kind: "terminal", label: TERMINAL_LABEL };

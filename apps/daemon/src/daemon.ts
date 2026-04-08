@@ -199,6 +199,7 @@ export class DaemonServer {
           persisted: message.slot.persisted,
           sortOrder: message.slot.sortOrder,
         });
+        this.processManager.updateSlotDefinition(message.slot);
         this.broadcast({ type: "slot_state_changed", slot: this.findSlotState(message.slot.id) });
         break;
       case "remove_slot":
@@ -238,6 +239,7 @@ export class DaemonServer {
           pauseSupported: message.session.pauseSupported,
           resumeSupported: message.session.resumeSupported,
         });
+        this.processManager.updateSessionDefinition(message.session);
         this.broadcastSnapshots();
         break;
       case "remove_session_def":

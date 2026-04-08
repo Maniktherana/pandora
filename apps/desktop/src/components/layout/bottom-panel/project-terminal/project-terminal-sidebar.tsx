@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import type { WorkspaceRuntimeState } from "@/lib/shared/types";
@@ -40,6 +40,7 @@ export default function ProjectTerminalSidebar({
     startX: number;
     startY: number;
   } | null>(null);
+  const [renameState, setRenameState] = useState<{ slotId: string; value: string } | null>(null);
 
   const onSelectRow = useCallback(
     (row: SidebarRow) => {
@@ -88,20 +89,19 @@ export default function ProjectTerminalSidebar({
     [onSelectRow],
   );
 
-  const promptRename = useCallback(
-    (slotId: string) => {
-      const slot = slotMap.get(slotId);
-      const current = terminalDisplayForSlot(
-        slot,
-        sessionsMap.get(slotId),
-        displayMap[slotId],
-      ).label;
-      const next = window.prompt("Rename terminal", current)?.trim();
-      if (!next || next === current) return;
-      projectTerminalCommands.renameTerminal(workspaceId, slotId, next);
-    },
-    [displayMap, projectTerminalCommands, sessionsMap, slotMap, workspaceId],
-  );
+  const submitRename = useCallback(() => {
+    if (!renameState) return;
+    const slot = slotMap.get(renameState.slotId);
+    const current = terminalDisplayForSlot(
+      slot,
+      sessionsMap.get(renameState.slotId),
+      displayMap[renameState.slotId],
+    ).label;
+    const next = renameState.value.trim();
+    setRenameState(null);
+    if (!next || next === current) return;
+    projectTerminalCommands.renameTerminal(workspaceId, renameState.slotId, next);
+  }, [displayMap, projectTerminalCommands, renameState, sessionsMap, slotMap, workspaceId]);
 
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent, row: SidebarRow) => {
@@ -116,9 +116,15 @@ export default function ProjectTerminalSidebar({
   const handleRenameClick = useCallback(
     (event: React.MouseEvent, slotId: string) => {
       event.stopPropagation();
-      promptRename(slotId);
+      const slot = slotMap.get(slotId);
+      const current = terminalDisplayForSlot(
+        slot,
+        sessionsMap.get(slotId),
+        displayMap[slotId],
+      ).label;
+      setRenameState({ slotId, value: current });
     },
-    [promptRename],
+    [displayMap, sessionsMap, slotMap],
   );
 
   const handleCloseClick = useCallback(
@@ -171,11 +177,18 @@ export default function ProjectTerminalSidebar({
                     workspaceId={workspaceId}
                     active={active}
                     isBeingDragged={isBeingDragged}
+                    isRenaming={renameState?.slotId === row.slotId}
+                    renameValue={renameState?.slotId === row.slotId ? renameState.value : ""}
                     onPointerDown={handlePointerDown}
                     onPointerUp={handlePointerUp}
                     onKeyDown={handleRowKeyDown}
                     onRenameClick={handleRenameClick}
                     onCloseClick={handleCloseClick}
+                    onRenameValueChange={(value) => {
+                      setRenameState((prev) => (prev && prev.slotId === row.slotId ? { ...prev, value } : prev));
+                    }}
+                    onRenameSubmit={submitRename}
+                    onRenameCancel={() => setRenameState(null)}
                   />
                 );
               })}

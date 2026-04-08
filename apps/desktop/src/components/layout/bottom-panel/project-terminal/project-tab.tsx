@@ -1,4 +1,6 @@
 import { Pencil, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { cn } from "@/lib/shared/utils";
 import type { SidebarRow } from "../project-terminal.types";
@@ -8,11 +10,16 @@ type ProjectTabProps = {
   workspaceId: string;
   active: boolean;
   isBeingDragged: boolean;
+  isRenaming: boolean;
+  renameValue: string;
   onPointerDown: (event: React.PointerEvent, row: SidebarRow) => void;
   onPointerUp: (row: SidebarRow) => void;
   onKeyDown: (event: React.KeyboardEvent, row: SidebarRow) => void;
   onRenameClick: (event: React.MouseEvent, slotId: string) => void;
   onCloseClick: (event: React.MouseEvent, slotId: string) => void;
+  onRenameValueChange: (value: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
 };
 
 function TreeGutter({ treeState }: { treeState: SidebarRow["treeState"] }) {
@@ -36,11 +43,16 @@ export function ProjectTab({
   workspaceId,
   active,
   isBeingDragged,
+  isRenaming,
+  renameValue,
   onPointerDown,
   onPointerUp,
   onKeyDown,
   onRenameClick,
   onCloseClick,
+  onRenameValueChange,
+  onRenameSubmit,
+  onRenameCancel,
 }: ProjectTabProps) {
   return (
     <div
@@ -65,38 +77,69 @@ export function ProjectTab({
     >
       <TreeGutter treeState={row.treeState} />
       <TerminalIdentityIcon identity={row.display} className="size-4" />
-      <span className="min-w-0 flex-1 truncate">{row.display.label}</span>
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
-          "bg-gradient-to-l to-transparent",
-          {
-            "from-neutral-900": active,
-            "from-neutral-800/30": !active,
-          },
-        )}
-      />
-      <div className="relative z-10 ml-1 flex h-full items-center pl-1">
-        <button
-          type="button"
-          className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => onRenameClick(e, row.slotId)}
-          title="Rename terminal"
-        >
-          <Pencil className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => onCloseClick(e, row.slotId)}
-          title="Close terminal"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      </div>
+      {isRenaming ? (
+        <Input
+          type="text"
+          value={renameValue}
+          className="h-6 min-w-0 flex-1 border-neutral-700 bg-neutral-950 px-1.5 text-[11px] text-neutral-100 focus-visible:border-neutral-500 focus-visible:ring-0"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onRenameValueChange(event.target.value)}
+          onBlur={onRenameSubmit}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onRenameSubmit();
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onRenameCancel();
+            }
+          }}
+          autoFocus
+        />
+      ) : (
+        <>
+          <span className="min-w-0 flex-1 truncate">{row.display.label}</span>
+          <div
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
+              "bg-gradient-to-l to-transparent",
+              {
+                "from-neutral-900": active,
+                "from-neutral-800/30": !active,
+              },
+            )}
+          />
+          <div className="relative z-10 ml-1 flex h-full items-center pl-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => onRenameClick(e, row.slotId)}
+              title="Rename terminal"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => onCloseClick(e, row.slotId)}
+              title="Close terminal"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
