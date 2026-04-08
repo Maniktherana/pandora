@@ -167,6 +167,19 @@ export default function WorkspaceTabBar({
   const plusWrapRef = useRef<HTMLDivElement>(null);
   const [pinPlus, setPinPlus] = useState(false);
 
+  useLayoutEffect(() => {
+    const tabsWrap = tabsWrapRef.current;
+    if (!tabsWrap) return;
+    const activeTab = tabsWrap.querySelector<HTMLElement>(
+      `[data-tab-pane="${paneID}"][data-tab-index="${selectedIndex}"]`,
+    );
+    if (!activeTab) return;
+    activeTab.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [paneID, selectedIndex, tabs, workspaceId]);
+
   const measurePlusPin = useCallback(() => {
     const row = rowRef.current;
     const tabsWrap = tabsWrapRef.current;

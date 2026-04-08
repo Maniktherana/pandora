@@ -12,6 +12,7 @@ import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
 import { useDesktopView } from "@/hooks/use-desktop-view";
+import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
@@ -21,6 +22,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const [isResizingPanels, setIsResizingPanels] = useState(false);
+  const [rightSidebarMode, setRightSidebarMode] = useState<LeftPanelMode>("files");
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
@@ -54,6 +56,16 @@ export default function App() {
   const handleToggleSidebar = useCallback(() => {
     uiPreferencesCommands.setSidebarVisible(!sidebarVisible);
   }, [sidebarVisible, uiPreferencesCommands]);
+
+  const handleSelectRightSidebarMode = useCallback(
+    (mode: LeftPanelMode) => {
+      if (selectedWs?.status !== "ready") return;
+      const shouldOpen = !fileTreeOpen || rightSidebarMode !== mode;
+      setRightSidebarMode(mode);
+      uiPreferencesCommands.setFileTreeOpenForWorkspace(selectedWs.id, shouldOpen);
+    },
+    [fileTreeOpen, rightSidebarMode, selectedWs, uiPreferencesCommands],
+  );
 
   useKeyboardShortcuts({
     onNewTerminal: handleNewTerminalShortcut,
@@ -153,12 +165,10 @@ export default function App() {
           selectedWorkspace={selectedWs}
           bottomPanelOpen={bottomPanelOpen}
           fileTreeOpen={fileTreeOpen}
+          rightSidebarMode={rightSidebarMode}
           onToggleSidebar={handleShowSidebar}
           onToggleBottomPanel={toggleBottomPanel}
-          onToggleFileTree={() => {
-            if (selectedWs?.status !== "ready") return;
-            uiPreferencesCommands.setFileTreeOpenForWorkspace(selectedWs.id, !fileTreeOpen);
-          }}
+          onSelectRightSidebarMode={handleSelectRightSidebarMode}
         />
 
         <div className="flex-1 min-h-0 flex flex-col">
@@ -210,6 +220,7 @@ export default function App() {
                             workspaceId={selectedWs.id}
                             workspaceName={selectedWs.name}
                             projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
+                            mode={rightSidebarMode}
                           />
                         ) : null}
                       </ErrorBoundary>

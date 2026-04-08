@@ -39,12 +39,12 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
   }, [projectKey, projectRuntime?.terminalPanel, projectTerminalCommands]);
 
   if (!project || selectedWs?.status !== "ready") {
-    return <div className="h-full min-h-[120px] bg-neutral-950" />;
+    return <div className="h-full min-h-[120px] bg-[var(--theme-bg)]" />;
   }
 
   if (!projectRuntime) {
     return (
-      <div className="flex h-full min-h-[120px] items-center justify-center bg-neutral-950 text-sm text-neutral-500">
+      <div className="flex h-full min-h-[120px] items-center justify-center bg-[var(--theme-bg)] text-sm text-[var(--theme-text-muted)]">
         Starting project shell...
       </div>
     );
@@ -63,7 +63,7 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
   return (
     <Tabs
       value={tab}
-      className="flex h-full min-h-0 flex-col gap-0 bg-neutral-950"
+      className="flex h-full min-h-0 flex-col gap-0 bg-[var(--theme-bg)]"
       onValueChange={(next) => {
         if (next === "terminal" || next === "ports") {
           handleTabChange(next);

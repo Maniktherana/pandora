@@ -176,6 +176,7 @@ fn main() {
             commands::scm_commit,
             // PR + archive
             commands::pr_gather_context,
+            commands::header_branch_context,
             commands::pr_check_status,
             commands::pr_write_instruction,
             commands::pr_link,

@@ -66,8 +66,8 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
 
   if (!showTable) {
     return (
-      <div className="px-4 py-5">
-        <p className="mb-4 max-w-lg text-sm text-neutral-400">
+      <div className="bg-[var(--theme-bg)] px-4 py-5">
+        <p className="mb-4 max-w-lg text-sm text-[var(--theme-text-muted)]">
           No forwarded ports. Forward a port to access your locally running services over the
           internet.
         </p>
@@ -83,31 +83,31 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--theme-bg)]">
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-neutral-800 text-[11px] uppercase tracking-wide text-neutral-500">
+            <tr className="border-b border-[var(--theme-border)] text-[11px] uppercase tracking-wide text-[var(--theme-text-muted)]">
               <th className="px-3 py-2 font-medium">Port</th>
               <th className="py-2 font-medium">Forwarded Address</th>
               <th className="py-2 font-medium">Running Process</th>
               <th className="py-2 pr-3 font-medium">Origin</th>
             </tr>
           </thead>
-          <tbody className="text-neutral-300">
+          <tbody className="text-[var(--theme-text)]">
             {forwardUiOpen && (
-              <tr className="border-b border-neutral-800/80 bg-neutral-900/40">
+              <tr className="border-b border-[var(--theme-border)] bg-[var(--theme-bg)]">
                 <td className="px-3 py-2 align-middle">
                   <input
                     value={draft}
                     onChange={handleDraftChange}
                     onKeyDown={handleDraftKeyDown}
                     placeholder="Port number or address (e.g. 3000 or localhost:3000)"
-                    className="w-full min-w-[200px] rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600"
+                    className="w-full min-w-[200px] rounded border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1.5 text-xs text-[var(--theme-text)] placeholder:text-[var(--theme-text-faint)]"
                   />
                 </td>
-                <td className="py-2 align-middle text-neutral-600">—</td>
-                <td className="py-2 align-middle text-neutral-600">—</td>
+                <td className="py-2 align-middle text-[var(--theme-text-faint)]">—</td>
+                <td className="py-2 align-middle text-[var(--theme-text-faint)]">—</td>
                 <td className="py-2 pr-3 align-middle">
                   <button
                     type="button"
@@ -119,7 +119,7 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
                   <button
                     type="button"
                     onClick={handleCancelForwardUi}
-                    className="ml-3 text-xs text-neutral-500 hover:text-neutral-300"
+                    className="ml-3 text-xs text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
                   >
                     Cancel
                   </button>
@@ -147,7 +147,7 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
         </table>
       </div>
       {hasAnyRows && (
-        <div className="shrink-0 border-t border-neutral-800 px-3 py-2">
+        <div className="shrink-0 border-t border-[var(--theme-border)] bg-[var(--theme-bg)] px-3 py-2">
           <button
             type="button"
             onClick={handleOpenForwardUi}

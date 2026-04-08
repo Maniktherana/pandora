@@ -137,8 +137,8 @@ export default function ProjectTerminalSidebar({
 
   if (!panel || panel.groups.length === 0) {
     return (
-      <div className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-neutral-800 bg-neutral-900/90">
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-neutral-500">
+      <div className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-[var(--theme-border)] bg-[var(--theme-bg)]">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-[var(--theme-text-muted)]">
           No terminals
         </div>
       </div>
@@ -148,7 +148,7 @@ export default function ProjectTerminalSidebar({
   return (
     <div
       data-bottom-terminal-sidebar="true"
-      className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-neutral-800 bg-neutral-900/90"
+      className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-[var(--theme-border)] bg-[var(--theme-bg)]"
       onPointerMove={handlePointerMove}
       onPointerLeave={() => {
         pendingDragRef.current = null;
@@ -165,7 +165,7 @@ export default function ProjectTerminalSidebar({
           >
             {rows
               .filter((row) => row.groupId === group.id)
-              .map((row) => {
+              .map((row, rowIndex, groupRows) => {
                 const active =
                   groupIndex === panel.activeGroupIndex && panel.activeSlotId === row.slotId;
                 const isBeingDragged =
@@ -176,6 +176,8 @@ export default function ProjectTerminalSidebar({
                     row={row}
                     workspaceId={workspaceId}
                     active={active}
+                    isFirst={rowIndex === 0}
+                    isLast={rowIndex === groupRows.length - 1}
                     isBeingDragged={isBeingDragged}
                     isRenaming={renameState?.slotId === row.slotId}
                     renameValue={renameState?.slotId === row.slotId ? renameState.value : ""}

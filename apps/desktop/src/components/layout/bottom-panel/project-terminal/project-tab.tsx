@@ -9,6 +9,8 @@ type ProjectTabProps = {
   row: SidebarRow;
   workspaceId: string;
   active: boolean;
+  isFirst: boolean;
+  isLast: boolean;
   isBeingDragged: boolean;
   isRenaming: boolean;
   renameValue: string;
@@ -42,6 +44,8 @@ export function ProjectTab({
   row,
   workspaceId,
   active,
+  isFirst,
+  isLast,
   isBeingDragged,
   isRenaming,
   renameValue,
@@ -64,10 +68,12 @@ export function ProjectTab({
       data-bottom-terminal-slot-id={row.slotId}
       data-bottom-terminal-slot-index={row.slotIndex}
       className={cn(
-        "group/tab relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border border-neutral-800 border-l-transparent border-b-2 border-b-transparent px-2 text-left text-[11px] outline-none",
+        "group/tab relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border-r border-[var(--theme-border)] px-2 text-left text-[11px] outline-none",
         {
-          "border-b-neutral-400 bg-neutral-900 text-neutral-100": active,
-          "text-neutral-400 hover:bg-neutral-800/30 hover:text-neutral-200": !active,
+          "border-t border-[var(--theme-border)]": !isFirst,
+          "border-b border-[var(--theme-border)]": isLast,
+          "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]": active,
+          "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]": !active,
           "opacity-30": isBeingDragged,
         },
       )}
@@ -109,8 +115,8 @@ export function ProjectTab({
               "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
               "bg-gradient-to-l to-transparent",
               {
-                "from-neutral-900": active,
-                "from-neutral-800/30": !active,
+                "from-[var(--theme-panel-hover)]": active,
+                "from-[var(--theme-panel-hover)]/40": !active,
               },
             )}
           />

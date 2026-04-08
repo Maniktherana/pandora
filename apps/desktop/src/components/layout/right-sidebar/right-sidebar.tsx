@@ -3,7 +3,6 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
-import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
@@ -122,13 +121,14 @@ export default function RightSidebar({
   workspaceId,
   workspaceName,
   projectDisplayName,
+  mode,
 }: {
   workspaceRoot: string;
   workspaceId: string;
   workspaceName: string;
   projectDisplayName: string;
+  mode: LeftPanelMode;
 }) {
-  const [leftMode, setLeftMode] = useState<LeftPanelMode>("files");
   const [rootEntries, setRootEntries] = useState<DirEntry[] | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -152,7 +152,7 @@ export default function RightSidebar({
   const expandedPathsRef = useRef(expandedPaths);
   const expansionLoadedRef = useRef(false);
   const workspaceRootRef = useRef(workspaceRoot);
-  const leftModeRef = useRef(leftMode);
+  const leftModeRef = useRef(mode);
   const pendingPointerDragRef = useRef<PendingPointerDrag | null>(pendingPointerDrag);
   const dragSessionRef = useRef<TreeDragSession | null>(dragSession);
   const suppressClickUntilRef = useRef(0);
@@ -162,7 +162,7 @@ export default function RightSidebar({
 
   expandedPathsRef.current = expandedPaths;
   workspaceRootRef.current = workspaceRoot;
-  leftModeRef.current = leftMode;
+  leftModeRef.current = mode;
   pendingPointerDragRef.current = pendingPointerDrag;
   dragSessionRef.current = dragSession;
 
@@ -426,7 +426,7 @@ export default function RightSidebar({
 
   const onRowPointerDown = useCallback(
     (event: React.PointerEvent, handle: FileTreeRowHandle) => {
-      if (event.button !== 0 || leftMode !== "files") return;
+      if (event.button !== 0 || mode !== "files") return;
       setSelectedTreePath(handle.relPath);
       setSelectedTreeKind(handle.kind);
       setPendingPointerDrag({
@@ -438,7 +438,7 @@ export default function RightSidebar({
       });
       setDragSession((current) => (current?.kind === "external-native" ? null : current));
     },
-    [leftMode],
+    [mode],
   );
 
   const onRowClickCapture = useCallback(
@@ -1107,38 +1107,7 @@ export default function RightSidebar({
     <div className="flex h-full min-w-0 flex-col bg-[#151515] select-none">
       {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
 
-      <div className="flex shrink-0 gap-0 border-b border-[var(--theme-border)] p-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 flex-1 rounded-md text-[11px] font-medium",
-            leftMode === "files"
-              ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
-              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-          )}
-          onClick={() => setLeftMode("files")}
-        >
-          Files
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 flex-1 rounded-md text-[11px] font-medium",
-            leftMode === "changes"
-              ? "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]"
-              : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-          )}
-          onClick={() => setLeftMode("changes")}
-        >
-          Changes
-        </Button>
-      </div>
-
-      {leftMode === "changes" ? (
+      {mode === "changes" ? (
         <WorkspaceChangesPanel
           workspaceRoot={workspaceRoot}
           workspaceId={workspaceId}

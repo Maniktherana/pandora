@@ -105,6 +105,13 @@ export interface PrContext {
   hasCommits: boolean;
 }
 
+export interface HeaderBranchContext {
+  owner: string | null;
+  currentBranch: string;
+  defaultTargetBranch: string;
+  availableBranches: string[];
+}
+
 export type WorkspaceKind = "linked" | "worktree";
 
 export interface ProjectRecord {

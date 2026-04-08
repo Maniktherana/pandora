@@ -55,9 +55,9 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
 
   return (
     <div className="group">
-      <Button
-        variant="ghost"
-        size="sidebar"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => {
           workspaceCommands.selectWorkspace(workspace.id);
           workspaceCommands.setNavigationArea("sidebar");
@@ -66,8 +66,14 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
           workspaceCommands.selectWorkspace(workspace.id);
           workspaceCommands.setNavigationArea("workspace");
         }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          workspaceCommands.selectWorkspace(workspace.id);
+          workspaceCommands.setNavigationArea("sidebar");
+        }}
         className={cn(
-          "flex w-full select-none items-center gap-2 rounded-md px-2.5 text-left transition-colors border border-transparent",
+          "flex h-10 w-full cursor-pointer select-none items-center gap-2 rounded-md border border-transparent px-2.5 text-left transition-colors outline-none focus-visible:border-[var(--theme-border)]",
           {
             "bg-[var(--theme-panel-hover)]": isActive || isSelected,
             "hover:bg-[var(--theme-panel-hover)]": !isActive && !isSelected,
@@ -114,7 +120,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
         {isFailed && (
           <span className="font-mono text-[11px] text-red-400/80">failed</span>
         )}
-      </Button>
+      </div>
       {workspace.status === "failed" && workspace.failureMessage && isSelected && (
         <div className="px-7 pb-1 text-[11px] text-red-400/80 truncate">
           {workspace.failureMessage}

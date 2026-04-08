@@ -1,5 +1,6 @@
 use crate::database::now_iso8601;
 use crate::models::*;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -977,6 +978,15 @@ pub struct PrContext {
     pub has_commits: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeaderBranchContext {
+    pub owner: Option<String>,
+    pub current_branch: String,
+    pub default_target_branch: String,
+    pub available_branches: Vec<String>,
+}
+
 /// Determine the default branch (main or master) for a repository.
 fn default_branch(worktree_path: &str) -> String {
     // Check remote HEAD first
@@ -991,6 +1001,48 @@ fn default_branch(worktree_path: &str) -> String {
         return "main".into();
     }
     "master".into()
+}
+
+fn normalize_branch_name(raw: &str) -> Option<String> {
+    let branch = raw.trim();
+    if branch.is_empty() || branch == "HEAD" || branch == "origin/HEAD" {
+        return None;
+    }
+    let branch = branch.strip_prefix("origin/").unwrap_or(branch).trim();
+    if branch.is_empty() || branch == "HEAD" {
+        return None;
+    }
+    Some(branch.to_string())
+}
+
+fn list_available_branches(worktree_path: &str, default_target_branch: &str) -> Result<Vec<String>, String> {
+    verify_git_worktree(worktree_path)?;
+
+    let mut branches = BTreeSet::new();
+
+    let local_refs = run_git(&["-C", worktree_path, "for-each-ref", "refs/heads", "--format=%(refname:short)"])?;
+    for branch in local_refs.lines().filter_map(normalize_branch_name) {
+        branches.insert(branch);
+    }
+
+    let remote_refs = run_git(&[
+        "-C",
+        worktree_path,
+        "for-each-ref",
+        "refs/remotes/origin",
+        "--format=%(refname:short)",
+    ])
+    .unwrap_or_default();
+    for branch in remote_refs.lines().filter_map(normalize_branch_name) {
+        branches.insert(branch);
+    }
+
+    if !default_target_branch.trim().is_empty() {
+        branches.insert(default_target_branch.trim().to_string());
+    }
+    branches.insert("main".to_string());
+
+    Ok(branches.into_iter().collect())
 }
 
 pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
@@ -1024,6 +1076,23 @@ pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
         diff_stat,
         is_default_branch,
         has_commits,
+    })
+}
+
+pub fn gather_header_branch_context(
+    worktree_path: &str,
+    owner: Option<String>,
+) -> Result<HeaderBranchContext, String> {
+    verify_git_worktree(worktree_path)?;
+    let current_branch = current_branch(worktree_path)?;
+    let default_target_branch = "main".to_string();
+    let available_branches = list_available_branches(worktree_path, &default_target_branch)?;
+
+    Ok(HeaderBranchContext {
+        owner,
+        current_branch,
+        default_target_branch,
+        available_branches,
     })
 }
 

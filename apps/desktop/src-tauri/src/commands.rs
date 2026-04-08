@@ -685,6 +685,27 @@ pub fn pr_gather_context(
 }
 
 #[tauri::command]
+pub fn header_branch_context(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+) -> Result<git::HeaderBranchContext, String> {
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+    let owner = db
+        .0
+        .load_projects()
+        .into_iter()
+        .find(|p| p.id == workspace.project_id)
+        .and_then(|p| p.git_remote_owner)
+        .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
+    git::gather_header_branch_context(&workspace.worktree_path, owner)
+}
+
+#[tauri::command]
 pub fn pr_check_status(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
