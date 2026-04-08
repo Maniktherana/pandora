@@ -146,7 +146,8 @@ export type DiffSource = "working" | "staged";
 export type PaneTab =
   | { kind: "terminal"; slotId: string }
   | { kind: "editor"; path: string }
-  | { kind: "diff"; path: string; source: DiffSource };
+  | { kind: "diff"; path: string; source: DiffSource }
+  | { kind: "review" };
 
 export interface LayoutLeaf {
   type: "leaf";

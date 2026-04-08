@@ -102,12 +102,15 @@ const pierreUnsafeCSS = `
 
 type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
 
-export function createPierreDiffOptions(diffStyle: PierreDiffStyle): FileDiffOptions<unknown> {
+export function createPierreDiffOptions(
+  diffStyle: PierreDiffStyle,
+  wrapLines: boolean,
+): FileDiffOptions<unknown> {
   return {
     theme: PANDORA_PIERRE_THEME,
     themeType: "dark",
     disableLineNumbers: false,
-    overflow: "wrap",
+    overflow: wrapLines ? "wrap" : "scroll",
     diffStyle,
     diffIndicators: "bars",
     disableBackground: false,

@@ -508,6 +508,14 @@ pub struct ScmLineStats {
     pub removed: u64,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmPathLineStats {
+    pub path: String,
+    pub added: u64,
+    pub removed: u64,
+}
+
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 fn parse_numstat(raw: &str) -> ScmLineStats {
@@ -526,6 +534,28 @@ fn parse_numstat(raw: &str) -> ScmLineStats {
         if let Ok(value) = removed.parse::<u64>() {
             stats.removed += value;
         }
+    }
+    stats
+}
+
+fn parse_numstat_by_path(raw: &str) -> Vec<ScmPathLineStats> {
+    let mut stats = Vec::new();
+    for line in raw.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let Some(added) = parts.next() else {
+            continue;
+        };
+        let Some(removed) = parts.next() else {
+            continue;
+        };
+        let Some(path) = parts.next() else {
+            continue;
+        };
+
+        let added = added.parse::<u64>().unwrap_or(0);
+        let removed = removed.parse::<u64>().unwrap_or(0);
+        let path = path.rsplit('\t').next().unwrap_or(path).to_string();
+        stats.push(ScmPathLineStats { path, added, removed });
     }
     stats
 }
@@ -597,6 +627,111 @@ pub fn git_line_stats(worktree_path: &str) -> Result<ScmLineStats, String> {
     );
     stats.added += count_untracked_added_lines(worktree_path)?;
     Ok(stats)
+}
+
+pub fn git_path_line_stats(
+    worktree_path: &str,
+    relative_path: &str,
+    staged: bool,
+) -> Result<ScmLineStats, String> {
+    verify_git_worktree(worktree_path)?;
+    sanitize_repo_relative_path(relative_path)?;
+
+    if staged {
+        return Ok(parse_numstat(&run_git(&[
+            "-C",
+            worktree_path,
+            "diff",
+            "--cached",
+            "--numstat",
+            "--",
+            relative_path,
+        ])
+        .unwrap_or_default()));
+    }
+
+    let stats = parse_numstat(
+        &run_git(&["-C", worktree_path, "diff", "--numstat", "--", relative_path])
+            .unwrap_or_default(),
+    );
+    if stats.added > 0 || stats.removed > 0 {
+        return Ok(stats);
+    }
+
+    let tracked = Command::new("git")
+        .args([
+            "-C",
+            worktree_path,
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            relative_path,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+    if tracked.status.success() {
+        return Ok(stats);
+    }
+
+    let full_path = Path::new(worktree_path).join(relative_path);
+    if !full_path.is_file() {
+        return Ok(stats);
+    }
+
+    Ok(ScmLineStats {
+        added: count_text_lines(&full_path),
+        removed: 0,
+    })
+}
+
+pub fn git_path_line_stats_bulk(
+    worktree_path: &str,
+    relative_paths: &[String],
+    staged: bool,
+    untracked_paths: &[String],
+) -> Result<Vec<ScmPathLineStats>, String> {
+    verify_git_worktree(worktree_path)?;
+    for path in relative_paths {
+        sanitize_repo_relative_path(path)?;
+    }
+    for path in untracked_paths {
+        sanitize_repo_relative_path(path)?;
+    }
+
+    if relative_paths.is_empty() && untracked_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = if relative_paths.is_empty() {
+        Vec::new()
+    } else {
+        let mut args = vec!["-C", worktree_path, "diff"];
+        if staged {
+            args.push("--cached");
+        }
+        args.push("--numstat");
+        args.push("--");
+        for path in relative_paths {
+            args.push(path.as_str());
+        }
+        parse_numstat_by_path(&run_git(&args).unwrap_or_default())
+    };
+
+    if !staged {
+      for path in untracked_paths {
+          let full_path = Path::new(worktree_path).join(path);
+          if !full_path.is_file() {
+              continue;
+          }
+          results.push(ScmPathLineStats {
+              path: path.clone(),
+              added: count_text_lines(&full_path),
+              removed: 0,
+          });
+      }
+    }
+
+    Ok(results)
 }
 
 fn dequote_git_path(raw: &str) -> String {

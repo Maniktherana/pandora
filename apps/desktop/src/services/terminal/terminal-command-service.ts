@@ -221,7 +221,7 @@ export const TerminalCommandServiceLive = Layer.scoped(
             return;
           }
 
-          if (tab.kind === "diff") {
+          if (tab.kind === "diff" || tab.kind === "review") {
             const session = yield* workspaceService.getWorkspaceSession(runtimeId);
             yield* session.commands.closeTab(focusedPaneID, index);
             return;

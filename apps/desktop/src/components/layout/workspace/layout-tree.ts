@@ -11,6 +11,8 @@ export function tabKey(tab: PaneTab): string {
       return `d:${tab.source}:${tab.path}`;
     case "editor":
       return `e:${tab.path}`;
+    case "review":
+      return "review";
   }
 }
 
@@ -23,6 +25,9 @@ export function tabsEqual(a: PaneTab, b: PaneTab): boolean {
   }
   if (a.kind === "editor" && b.kind === "editor") {
     return a.path === b.path;
+  }
+  if (a.kind === "review" && b.kind === "review") {
+    return true;
   }
   return false;
 }

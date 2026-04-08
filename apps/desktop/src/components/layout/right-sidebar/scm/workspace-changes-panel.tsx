@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { FilePlusIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import { FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { GitPullRequest } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
@@ -103,6 +103,10 @@ export default function WorkspaceChangesPanel({
 
   const onOpenDiff = (path: string, source: DiffSource) => {
     layoutCommands.addDiffTabForPath(path, source);
+  };
+
+  const onOpenReview = () => {
+    layoutCommands.addReviewTab();
   };
 
   const onDiscard = (entry: ScmStatusEntry) => {
@@ -219,6 +223,18 @@ export default function WorkspaceChangesPanel({
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
         <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">{workspaceLabel}</span>
         <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 px-2 text-[11px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
+            disabled={!entries || entries.length === 0}
+            title="Review all changes"
+            onClick={onOpenReview}
+          >
+            <HugeiconsIcon icon={GitCompareIcon} strokeWidth={1.5} className="size-3.5" />
+            Review
+          </Button>
           <Button
             type="button"
             variant="ghost"

@@ -47,6 +47,9 @@ function tabLabel(
   if (tab.kind === "terminal") {
     return terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap).label;
   }
+  if (tab.kind === "review") {
+    return "Review";
+  }
   const base = tab.path.split("/").pop() ?? tab.path;
   if (tab.kind === "diff") {
     return tab.source === "staged" ? `${base} · staged` : `${base} · diff`;

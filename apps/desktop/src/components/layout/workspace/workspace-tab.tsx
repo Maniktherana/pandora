@@ -1,4 +1,6 @@
 import { GitCompare, X } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
@@ -58,6 +60,9 @@ function tabLabel(
 ): string {
   if (tab.kind === "terminal") {
     return terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap).label;
+  }
+  if (tab.kind === "review") {
+    return "Review";
   }
   const base = tab.path.split("/").pop() ?? tab.path;
   if (tab.kind === "diff") {
@@ -182,6 +187,12 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
           })}
           aria-hidden
         />
+      ) : tab.kind === "review" ? (
+        <HugeiconsIcon
+          icon={GitCompareIcon}
+          strokeWidth={1.5}
+          className="size-3.5 shrink-0 text-neutral-500"
+        />
       ) : terminalDisplay ? (
         <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
       ) : null}
@@ -216,7 +227,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
             label={label}
             isActive={isActive}
           />
-        ) : tab.kind === "diff" ? (
+        ) : tab.kind === "diff" || tab.kind === "review" ? (
           <div
             role="button"
             tabIndex={-1}

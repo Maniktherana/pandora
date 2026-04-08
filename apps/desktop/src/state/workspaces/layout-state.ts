@@ -359,3 +359,33 @@ export function openDiffTabInWorkspaceRuntime(
     return { root, focusedPaneID: paneID };
   });
 }
+
+export function openReviewTabInWorkspaceRuntime(runtime: WorkspaceRuntimeState) {
+  const snapshot = ensureWorkspaceRoot(snapshotRuntime(runtime));
+  if (!snapshot.root) return false;
+
+  for (const leaf of getAllLeaves(snapshot.root)) {
+    const reviewIndex = leaf.tabs.findIndex((tab) => tab.kind === "review");
+    if (reviewIndex >= 0) {
+      return (
+        selectTabInPaneInWorkspaceRuntime(runtime, leaf.id, reviewIndex) &&
+        setFocusedPaneInWorkspaceRuntime(runtime, leaf.id)
+      );
+    }
+  }
+
+  const leaves = getAllLeaves(snapshot.root);
+  let paneID = snapshot.focusedPaneID;
+  if (!paneID || !findLeaf(snapshot.root, paneID)) {
+    paneID = leaves[0]?.id ?? null;
+  }
+  if (!paneID) return false;
+
+  return withLayoutSnapshot(runtime, (current) => {
+    if (!current.root) return null;
+    const leaf = findLeaf(current.root, paneID!);
+    const insertAt = leaf?.tabs.length ?? 0;
+    const root = insertTabInPane(current.root, paneID!, { kind: "review" }, insertAt);
+    return { root, focusedPaneID: paneID };
+  });
+}

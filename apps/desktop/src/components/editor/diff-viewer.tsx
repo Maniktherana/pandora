@@ -1,56 +1,73 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FileDiff as PierreFileDiff } from "@pierre/diffs/react";
 import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffOptions } from "@pierre/diffs";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import {
-  readWorkspaceTextFile,
-  scmReadGitBlob,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
-import {
   createPierreDiffOptions,
   createPierreFile,
   getLargeDiffOptions,
   getPierreSurfaceStyle,
 } from "@/components/editor/pierre-pandora";
+import { diffContentsQueryKey, fetchDiffContents } from "@/components/editor/diff-data";
 import { defaultTheme } from "@/lib/theme";
-import { AlertCircle, Columns2, Eraser, RefreshCw, Rows3 } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
-const STORAGE_TRIM = "pandora.diff.ignoreTrimWhitespace";
+const STORAGE_WRAP = "pandora.diff.wrapLines";
 
 function loadSideBySide(): boolean {
   if (typeof window === "undefined") return true;
   return window.localStorage.getItem(STORAGE_SIDE) !== "inline";
 }
 
-function loadIgnoreTrim(): boolean {
+function loadWrapLines(): boolean {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(STORAGE_TRIM) === "1";
+  return window.localStorage.getItem(STORAGE_WRAP) === "1";
 }
 
 type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
+
+export type DiffViewerStats = {
+  additions: number;
+  deletions: number;
+  hasDiff: boolean;
+  loading: boolean;
+  error: string | null;
+};
 
 export default function DiffViewer({
   workspaceRoot,
   relativePath,
   source,
   isActive = true,
+  showHeader = true,
+  fillHeight = true,
+  className,
+  diffStyle: controlledDiffStyle,
+  wrapLines: controlledWrapLines,
+  reloadKey = 0,
+  onStatsChange,
 }: {
   workspaceRoot: string;
   relativePath: string;
   source: DiffSource;
   isActive?: boolean;
+  showHeader?: boolean;
+  fillHeight?: boolean;
+  className?: string;
+  diffStyle?: PierreDiffStyle;
+  wrapLines?: boolean;
+  reloadKey?: number;
+  onStatsChange?: (stats: DiffViewerStats) => void;
 }) {
   const staged = source === "staged";
-  const [original, setOriginal] = useState("");
-  const [modified, setModified] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [sideBySide, setSideBySide] = useState(loadSideBySide);
-  const [ignoreTrimWhitespace, setIgnoreTrimWhitespace] = useState(loadIgnoreTrim);
+  const [storedWrapLines, setStoredWrapLines] = useState(loadWrapLines);
 
   const setSideBySidePersist = useCallback((next: boolean) => {
     setSideBySide(next);
@@ -61,53 +78,37 @@ export default function DiffViewer({
     }
   }, []);
 
-  const setIgnoreTrimPersist = useCallback((next: boolean) => {
-    setIgnoreTrimWhitespace(next);
+  const setWrapLinesPersist = useCallback((next: boolean) => {
+    setStoredWrapLines(next);
     try {
-      window.localStorage.setItem(STORAGE_TRIM, next ? "1" : "0");
+      window.localStorage.setItem(STORAGE_WRAP, next ? "1" : "0");
     } catch {
       /* ignore */
     }
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (staged) {
-        const [headText, indexText] = await Promise.all([
-          scmReadGitBlob(workspaceRoot, relativePath, "head"),
-          scmReadGitBlob(workspaceRoot, relativePath, "index"),
-        ]);
-        setOriginal(headText);
-        setModified(indexText);
-      } else {
-        const headText = await scmReadGitBlob(workspaceRoot, relativePath, "head");
-        let workText = "";
-        try {
-          workText = await readWorkspaceTextFile(workspaceRoot, relativePath);
-        } catch {
-          workText = "";
-        }
-        setOriginal(headText);
-        setModified(workText);
-      }
-    } catch (e) {
-      setError(String(e));
-      setOriginal("");
-      setModified("");
-    } finally {
-      setLoading(false);
-    }
-  }, [relativePath, staged, workspaceRoot]);
+  const diffQuery = useQuery({
+    queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source),
+    queryFn: () => fetchDiffContents(workspaceRoot, relativePath, source),
+    enabled: isActive,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
 
   useEffect(() => {
-    if (!isActive) return;
-    void load();
-  }, [isActive, load]);
+    if (!isActive || reloadKey === 0) return;
+    void diffQuery.refetch();
+  }, [diffQuery, isActive, reloadKey]);
+
+  const original = diffQuery.data?.original ?? "";
+  const modified = diffQuery.data?.modified ?? "";
+  const loading = diffQuery.status === "pending" && diffQuery.data == null;
+  const error = diffQuery.error ? String(diffQuery.error) : null;
 
   const noDiff = !loading && !error && original === modified;
-  const diffStyle: PierreDiffStyle = sideBySide ? "split" : "unified";
+  const diffStyle: PierreDiffStyle =
+    controlledDiffStyle ?? (sideBySide ? "split" : "unified");
+  const wrapLines = controlledWrapLines ?? storedWrapLines;
   const isLarge = Math.max(original.length, modified.length) > 500_000;
 
   const parsed = useMemo(() => {
@@ -119,22 +120,48 @@ export default function DiffViewer({
         diffMetadata: parseDiffFromFile(
           createPierreFile(relativePath, original),
           createPierreFile(relativePath, modified),
-          ignoreTrimWhitespace ? { ignoreWhitespace: true } : undefined,
         ),
         parseError: null as string | null,
       };
     } catch (parseError) {
       return { diffMetadata: null, parseError: String(parseError) };
     }
-  }, [error, ignoreTrimWhitespace, loading, modified, original, relativePath]);
+  }, [error, loading, modified, original, relativePath]);
 
   const diffMetadata = parsed.diffMetadata;
   const displayError = error ?? parsed.parseError;
 
   const options = useMemo(() => {
-    const base = createPierreDiffOptions(diffStyle);
+    const base = createPierreDiffOptions(diffStyle, wrapLines);
     return isLarge ? { ...base, ...getLargeDiffOptions(diffStyle) } : base;
-  }, [diffStyle, isLarge]);
+  }, [diffStyle, isLarge, wrapLines]);
+
+  useEffect(() => {
+    if (!onStatsChange) return;
+    if (loading) {
+      onStatsChange({ additions: 0, deletions: 0, hasDiff: false, loading: true, error: null });
+      return;
+    }
+    if (displayError) {
+      onStatsChange({
+        additions: 0,
+        deletions: 0,
+        hasDiff: false,
+        loading: false,
+        error: displayError,
+      });
+      return;
+    }
+    const additions = diffMetadata?.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0) ?? 0;
+    const deletions = diffMetadata?.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0) ?? 0;
+    onStatsChange({
+      additions,
+      deletions,
+      hasDiff: Boolean(diffMetadata),
+      loading: false,
+      error: null,
+    });
+  }, [diffMetadata, displayError, loading, onStatsChange]);
 
   if (!isActive) {
     return (
@@ -148,87 +175,82 @@ export default function DiffViewer({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className={cn("flex min-h-0 flex-col", fillHeight && "h-full", className)}
       style={{
         ...getPierreSurfaceStyle(),
         backgroundColor: defaultTheme.codeEditor.surface.base,
       }}
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--theme-text-subtle)]"
-          title={relativePath}
-        >
-          {relativePath}
-        </span>
-        {staged ? (
-          <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-text-muted)]">
-            Staged
+      {showHeader && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--theme-text-subtle)]"
+            title={relativePath}
+          >
+            {relativePath}
           </span>
-        ) : null}
-        {isLarge && (
-          <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-warning)]">
-            Large diff
-          </span>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
+          {staged ? (
+            <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-text-muted)]">
+              Staged
+            </span>
+          ) : null}
+          {isLarge && (
+            <span className="shrink-0 rounded bg-[var(--theme-panel-elevated)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--theme-warning)]">
+              Large diff
+            </span>
           )}
-          title={sideBySide ? "Split diff (on)" : "Split diff"}
-          aria-label={sideBySide ? "Split diff (on)" : "Split diff"}
-          onClick={() => setSideBySidePersist(true)}
-          disabled={loading}
-        >
-          <Columns2 className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            !sideBySide && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
-          )}
-          title={!sideBySide ? "Unified diff (on)" : "Unified diff"}
-          aria-label={!sideBySide ? "Unified diff (on)" : "Unified diff"}
-          onClick={() => setSideBySidePersist(false)}
-          disabled={loading}
-        >
-          <Rows3 className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
-            ignoreTrimWhitespace && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
-          )}
-          title={ignoreTrimWhitespace ? "Ignore whitespace (on)" : "Ignore whitespace"}
-          aria-label={ignoreTrimWhitespace ? "Ignore whitespace (on)" : "Ignore whitespace"}
-          onClick={() => setIgnoreTrimPersist(!ignoreTrimWhitespace)}
-          disabled={loading}
-        >
-          <Eraser className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
-          title="Refresh"
-          aria-label="Refresh"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-        </Button>
-      </div>
+          <ToggleGroup
+            type="single"
+            value={diffStyle}
+            onValueChange={(value) => {
+              if (typeof value !== "string" || controlledDiffStyle) return;
+              setSideBySidePersist(value === "split");
+            }}
+            variant="diff"
+            size="sm"
+            className="shrink-0"
+            aria-label="Diff layout"
+          >
+            <ToggleGroupItem value="split" disabled={loading}>
+              Split
+            </ToggleGroupItem>
+            <ToggleGroupItem value="unified" disabled={loading}>
+              Unified
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "shrink-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]",
+              wrapLines &&
+                "border-[var(--theme-code-diff-modified-base)] bg-[var(--theme-code-diff-modified-fill)] text-[var(--theme-text)] hover:bg-[var(--theme-code-diff-modified-fill)]",
+            )}
+            title={wrapLines ? "Line wrap (on)" : "Line wrap"}
+            aria-label={wrapLines ? "Line wrap (on)" : "Line wrap"}
+            onClick={() => {
+              if (controlledWrapLines !== undefined) return;
+              setWrapLinesPersist(!wrapLines);
+            }}
+            disabled={loading}
+          >
+            Line wrap
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
+            title="Refresh"
+            aria-label="Refresh"
+            onClick={() => void diffQuery.refetch()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          </Button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {displayError && (

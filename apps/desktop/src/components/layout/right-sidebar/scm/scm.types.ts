@@ -22,6 +22,10 @@ export type ScmLineStats = {
   removed: number;
 };
 
+export type ScmPathLineStats = ScmLineStats & {
+  path: string;
+};
+
 export type TreeScmTone =
   | "added"
   | "modified"

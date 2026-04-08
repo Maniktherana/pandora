@@ -26,6 +26,9 @@ function migratePaneTab(t: unknown): PaneTab | null {
     const src = o.source === "staged" ? "staged" : "working";
     return path ? { kind: "diff", path, source: src } : null;
   }
+  if (k === "review") {
+    return { kind: "review" };
+  }
   return null;
 }
 

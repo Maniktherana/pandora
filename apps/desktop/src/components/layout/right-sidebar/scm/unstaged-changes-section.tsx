@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ChevronRight } from "lucide-react";
-import { FilePlusIcon, PlusSignIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import { ArrowTurnBackwardIcon, FilePlusIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -96,7 +96,7 @@ export function UnstagedChangesSection({
                     onDiscardAll();
                   }}
                 >
-                  <HugeiconsIcon icon={Refresh01Icon} strokeWidth={1.5} className="size-3.5" />
+                  <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.5} className="size-3.5" />
                 </TooltipTrigger>
                 <TooltipContent>Discard all files</TooltipContent>
               </Tooltip>
@@ -192,7 +192,11 @@ export function UnstagedChangesSection({
                             onDiscard(entry);
                           }}
                         >
-                          <HugeiconsIcon icon={Refresh01Icon} strokeWidth={1.5} className="size-3.5" />
+                          <HugeiconsIcon
+                            icon={ArrowTurnBackwardIcon}
+                            strokeWidth={1.5}
+                            className="size-3.5"
+                          />
                         </TooltipTrigger>
                         <TooltipContent>{entry.untracked ? "Delete untracked" : "Discard changes"}</TooltipContent>
                       </Tooltip>

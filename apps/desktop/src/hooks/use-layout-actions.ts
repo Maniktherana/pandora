@@ -125,6 +125,8 @@ export function useLayoutActions() {
             service.addDiffTabForPath(relativePath, source),
           ),
         ),
+      addReviewTab: () =>
+        run(Effect.flatMap(DesktopWorkspaceService, (service) => service.addReviewTab())),
     }),
     [run, selectedWorkspaceID],
   );

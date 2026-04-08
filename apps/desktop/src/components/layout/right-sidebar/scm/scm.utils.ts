@@ -3,6 +3,7 @@ import type {
   ScmDiffResult,
   ScmGitBlobSource,
   ScmLineStats,
+  ScmPathLineStats,
   ScmStatusEntry,
   TreeScmDecoration,
   TreeScmTone,
@@ -26,6 +27,32 @@ export function scmStatus(worktreePath: string): Promise<ScmStatusEntry[]> {
 
 export function scmLineStats(worktreePath: string): Promise<ScmLineStats> {
   return invoke<ScmLineStats>("scm_line_stats", { worktreePath });
+}
+
+export function scmPathLineStats(
+  worktreePath: string,
+  relativePath: string,
+  staged: boolean,
+): Promise<ScmLineStats> {
+  return invoke<ScmLineStats>("scm_path_line_stats", {
+    worktreePath,
+    relativePath,
+    staged,
+  });
+}
+
+export function scmPathLineStatsBulk(
+  worktreePath: string,
+  relativePaths: string[],
+  staged: boolean,
+  untrackedPaths: string[] = [],
+): Promise<ScmPathLineStats[]> {
+  return invoke<ScmPathLineStats[]>("scm_path_line_stats_bulk", {
+    worktreePath,
+    relativePaths,
+    staged,
+    untrackedPaths,
+  });
 }
 
 export const SCM_TONE_HEX = {

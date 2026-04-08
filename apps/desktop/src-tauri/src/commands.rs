@@ -615,6 +615,25 @@ pub fn scm_line_stats(worktree_path: String) -> Result<git::ScmLineStats, String
 }
 
 #[tauri::command]
+pub fn scm_path_line_stats(
+    worktree_path: String,
+    relative_path: String,
+    staged: bool,
+) -> Result<git::ScmLineStats, String> {
+    git::git_path_line_stats(&worktree_path, &relative_path, staged)
+}
+
+#[tauri::command]
+pub fn scm_path_line_stats_bulk(
+    worktree_path: String,
+    relative_paths: Vec<String>,
+    staged: bool,
+    untracked_paths: Vec<String>,
+) -> Result<Vec<git::ScmPathLineStats>, String> {
+    git::git_path_line_stats_bulk(&worktree_path, &relative_paths, staged, &untracked_paths)
+}
+
+#[tauri::command]
 pub fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
     git::git_add_paths(&worktree_path, &paths)
 }

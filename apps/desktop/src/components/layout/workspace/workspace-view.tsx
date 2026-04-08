@@ -11,6 +11,7 @@ import {
 import { PanelResizeHandle } from "react-resizable-panels";
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
+import ReviewViewer from "@/components/editor/review-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
@@ -167,7 +168,8 @@ function PaneView({
   );
 
   const onlyEditors =
-    leaf.tabs.length > 0 && leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff");
+    leaf.tabs.length > 0 &&
+    leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff" || t.kind === "review");
 
   const handlePanePointerDownCapture = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
@@ -234,6 +236,21 @@ function PaneView({
                   source={tab.source}
                   isActive={isActiveTab}
                 />
+              </div>
+            );
+          }
+          if (tab.kind === "review") {
+            return (
+              <div
+                key={tabKey(tab)}
+                className="absolute inset-0 overflow-hidden"
+                style={{
+                  visibility: isActiveTab ? "visible" : "hidden",
+                  pointerEvents: isActiveTab ? "auto" : "none",
+                }}
+                aria-hidden={!isActiveTab}
+              >
+                <ReviewViewer workspaceId={workspaceId} workspaceRoot={workspaceRoot} />
               </div>
             );
           }

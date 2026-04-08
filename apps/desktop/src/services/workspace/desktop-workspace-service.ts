@@ -29,6 +29,7 @@ import {
   cycleRuntimeTabs,
   moveTabInWorkspaceRuntime,
   openDiffTabInWorkspaceRuntime,
+  openReviewTabInWorkspaceRuntime,
   removeTabFromWorkspaceRuntime,
   reorderTabInWorkspaceRuntime,
   selectTabInPaneInWorkspaceRuntime,
@@ -122,6 +123,7 @@ export interface WorkspaceSessionService {
       position: "before" | "after",
     ) => Effect.Effect<void>;
     readonly addDiffTab: (relativePath: string, source: DiffSource) => Effect.Effect<void>;
+    readonly addReviewTab: () => Effect.Effect<void>;
     readonly addTerminalTab: (slotId: string) => Effect.Effect<void>;
     readonly seedTerminal: () => Effect.Effect<void>;
   };
@@ -160,6 +162,7 @@ export interface DesktopWorkspaceServiceApi {
     relativePath: string,
     source: "working" | "staged",
   ) => Effect.Effect<void>;
+  readonly addReviewTab: () => Effect.Effect<void>;
   readonly updateWorkspacePrState: (workspaceId: string, prState: string) => Effect.Effect<void>;
   readonly setPrAwaiting: (workspaceId: string, awaiting: boolean) => Effect.Effect<void>;
   readonly archiveWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
@@ -1168,6 +1171,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               updateWorkspaceRuntime(workspaceId, (runtime) =>
                 addDiffTabToWorkspaceRuntime(runtime, relativePath, source),
               ),
+            addReviewTab: () =>
+              updateWorkspaceRuntime(workspaceId, (runtime) =>
+                openReviewTabInWorkspaceRuntime(runtime),
+              ),
             addTerminalTab: (slotId) =>
               updateWorkspaceRuntime(workspaceId, (runtime) =>
                 addTerminalTabToWorkspaceRuntime(runtime, slotId),
@@ -1347,6 +1354,14 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           if (!workspaceId) return;
           yield* updateWorkspaceRuntime(workspaceId, (runtime) =>
             openDiffTabInWorkspaceRuntime(runtime, relativePath, source),
+          );
+        }),
+      addReviewTab: () =>
+        Effect.gen(function* () {
+          const workspaceId = desktopStateSnapshot.selectedWorkspaceID;
+          if (!workspaceId) return;
+          yield* updateWorkspaceRuntime(workspaceId, (runtime) =>
+            openReviewTabInWorkspaceRuntime(runtime),
           );
         }),
       updateWorkspacePrState: (workspaceId, prState) =>
