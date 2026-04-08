@@ -3,7 +3,7 @@ import { cn } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
-import type { FileTreeRowHandle, TreeRowKind } from "./files.types";
+import { TREE_ROW_HEIGHT_PX, TREE_ROW_INDENT_PX, TREE_ROW_PADDING_LEFT_PX, type FileTreeRowHandle, type TreeRowKind } from "./files.types";
 
 type FileTreeRowProps = {
   depth: number;
@@ -68,7 +68,7 @@ export function FileTreeRow({
   );
 
   const rowClassName = cn(
-    "relative flex min-w-0 w-full select-none items-center gap-1.5 rounded-sm py-1 pr-1 text-left text-xs",
+    "relative flex min-w-0 w-full select-none items-center gap-2 rounded-md py-1 pr-2 text-left text-xs",
     !isHoverSuppressed && "hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
     scmToneTextClass(decoration.tone, decoration.dimmed),
     decoration.dimmed && "opacity-55",
@@ -85,7 +85,7 @@ export function FileTreeRow({
         data-tree-row-kind={rowKind}
         data-tree-parent-path={parentRelPath}
         className={rowClassName}
-        style={{ paddingLeft: 6 + depth * 12 }}
+        style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX, height: TREE_ROW_HEIGHT_PX }}
         onPointerDown={(event) => onPointerDown?.(event, handle)}
         onClickCapture={onClickCapture}
         onClick={onOpen}
@@ -106,7 +106,7 @@ export function FileTreeRow({
       data-tree-row-kind={rowKind}
       data-tree-parent-path={parentRelPath}
       className={rowClassName}
-      style={{ paddingLeft: 6 + depth * 12 }}
+      style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX, height: TREE_ROW_HEIGHT_PX }}
       onPointerDown={(event) => onPointerDown?.(event, handle)}
       onClickCapture={onClickCapture}
     >

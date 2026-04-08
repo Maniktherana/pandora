@@ -415,6 +415,19 @@ fn resolve_path_under_workspace_root(
     workspace_root: &str,
     relative_path: &str,
 ) -> Result<std::path::PathBuf, String> {
+    resolve_workspace_path(workspace_root, relative_path, true)
+}
+
+/// Resolve a relative path under the workspace root.
+/// When `must_exist` is true the full path is canonicalized (it must already
+/// exist on disk).  When false only the *existing* ancestor is canonicalized
+/// and the remaining tail is appended — this is needed for create operations
+/// where the target does not yet exist.
+fn resolve_workspace_path(
+    workspace_root: &str,
+    relative_path: &str,
+    must_exist: bool,
+) -> Result<std::path::PathBuf, String> {
     let root = Path::new(workspace_root);
     let root_abs = root
         .canonicalize()
@@ -429,9 +442,34 @@ fn resolve_path_under_workspace_root(
     } else {
         root_abs.join(rel)
     };
-    let resolved = candidate
-        .canonicalize()
-        .map_err(|e| format!("Cannot read directory: {e}"))?;
+    let resolved = if must_exist {
+        candidate
+            .canonicalize()
+            .map_err(|e| format!("Cannot read directory: {e}"))?
+    } else {
+        // Walk up to find the deepest existing ancestor, canonicalize that,
+        // then re-append the non-existent tail.
+        let mut existing = candidate.as_path();
+        let mut tail = Vec::new();
+        while !existing.exists() {
+            if let Some(name) = existing.file_name() {
+                tail.push(name.to_os_string());
+            } else {
+                break;
+            }
+            existing = match existing.parent() {
+                Some(p) => p,
+                None => break,
+            };
+        }
+        let mut resolved = existing
+            .canonicalize()
+            .map_err(|e| format!("Cannot resolve path: {e}"))?;
+        for component in tail.into_iter().rev() {
+            resolved.push(component);
+        }
+        resolved
+    };
     if !resolved.starts_with(&root_abs) {
         return Err("Path escapes workspace root".to_string());
     }
@@ -520,7 +558,7 @@ pub fn write_workspace_text_file(
     relative_path: String,
     contents: String,
 ) -> Result<(), String> {
-    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+    let path = resolve_workspace_path(&workspace_root, &relative_path, false)?;
     if contents.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
         return Err("Content is too large to save".to_string());
     }
@@ -528,6 +566,15 @@ pub fn write_workspace_text_file(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_workspace_directory(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let dir = resolve_workspace_path(&workspace_root, &relative_path, false)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
 }
 
 // ─── SCM / diff (git in workspace work tree) ───
@@ -854,6 +901,36 @@ pub fn move_within_workspace(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn rename_workspace_entry(
+    workspace_root: String,
+    source_relative_path: String,
+    new_name: String,
+) -> Result<(), String> {
+    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
+    let parent = src
+        .parent()
+        .ok_or_else(|| "Cannot determine parent directory".to_string())?;
+
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("New name cannot be empty".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("New name cannot contain path separators".to_string());
+    }
+
+    let dest = parent.join(trimmed);
+    if dest == src {
+        return Ok(());
+    }
+    if dest.exists() {
+        return Err("Destination already exists".to_string());
+    }
+
+    std::fs::rename(&src, &dest).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

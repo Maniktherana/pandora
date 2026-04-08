@@ -7,9 +7,29 @@ type ScmStatusBadgeProps = {
   tone: TreeScmTone;
   dimmed?: boolean;
   className?: string;
+  variant?: "text" | "dot";
 };
 
-export function ScmStatusBadge({ text, tone, dimmed = false, className }: ScmStatusBadgeProps) {
+export function ScmStatusBadge({
+  text,
+  tone,
+  dimmed = false,
+  className,
+  variant = "text",
+}: ScmStatusBadgeProps) {
+  if (variant === "dot") {
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          "size-1.5 shrink-0 rounded-full bg-current",
+          scmToneTextClass(tone, dimmed),
+          className,
+        )}
+      />
+    );
+  }
+
   return (
     <span
       className={cn(

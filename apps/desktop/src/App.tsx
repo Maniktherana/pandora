@@ -28,7 +28,7 @@ export default function App() {
   useBootstrapDesktop();
   useNativeTerminalOverlay(isResizingPanels ? "semi-transparent" : null);
 
-  const { selectedWorkspace: selectedWs } = useDesktopView();
+  const { selectedWorkspace: selectedWs, selectedProject } = useDesktopView();
   const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
@@ -209,6 +209,8 @@ export default function App() {
                             key={selectedWs.id}
                             workspaceRoot={selectedWs.worktreePath}
                             workspaceId={selectedWs.id}
+                            workspaceName={selectedWs.name}
+                            projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
                           />
                         ) : null}
                       </ErrorBoundary>

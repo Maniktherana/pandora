@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
 import { decorationForScmEntry } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type {
@@ -32,18 +31,28 @@ import {
   type InternalTreeDragSession,
   type LeftPanelMode,
   type NativeDragPayload,
+  type PendingRenameState,
   type PendingPointerDrag,
   type TreeDragSession,
   type TreeDropTarget,
   type TreeRowKind,
 } from "./files/files.types";
-import { createPortal } from "react-dom";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { FileTreeExpansionContext } from "./files/file-tree-expansion-context";
 import { FileTreeRow } from "./files/file-tree-row";
 import { DirectoryNode } from "./files/directory-node";
+import { FileTreeToolbar } from "./files/file-tree-toolbar";
+import { TreeCreateInput } from "./files/tree-create-input";
+import { TreeRenameInput } from "./files/tree-rename-input";
 import { TreeDragOverlay } from "./files/tree-drag-overlay";
 import { useScmStatusQuery } from "./scm/scm-queries";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 function isPointerOutsideWindow(pointer: DragPointer): boolean {
   return (
@@ -111,21 +120,29 @@ function createDecorationResolver(entries: ScmStatusEntry[]) {
 export default function RightSidebar({
   workspaceRoot,
   workspaceId,
+  workspaceName,
+  projectDisplayName,
 }: {
   workspaceRoot: string;
   workspaceId: string;
+  workspaceName: string;
+  projectDisplayName: string;
 }) {
   const [leftMode, setLeftMode] = useState<LeftPanelMode>("files");
   const [rootEntries, setRootEntries] = useState<DirEntry[] | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
     relPath: string;
     kind: TreeRowKind | "root";
   } | null>(null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
+  const [selectedTreeKind, setSelectedTreeKind] = useState<TreeRowKind | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<{
+    kind: "file" | "directory";
+    parentRelPath: string;
+  } | null>(null);
+  const [pendingRename, setPendingRename] = useState<PendingRenameState>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [refreshTick, setRefreshTick] = useState(0);
   const [pendingPointerDrag, setPendingPointerDrag] = useState<PendingPointerDrag | null>(null);
@@ -154,7 +171,6 @@ export default function RightSidebar({
   const { startDrag } = useTabDrag();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
   const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot);
-  useNativeTerminalOverlay(contextMenu !== null ? "semi-transparent" : null);
 
   const activePath = useMemo(() => {
     if (!runtime?.root || !runtime.focusedPaneID) return null;
@@ -218,8 +234,8 @@ export default function RightSidebar({
   );
 
   const onOpenContextMenu = useCallback(
-    (clientX: number, clientY: number, relPath: string, kind: TreeRowKind) => {
-      setContextMenu({ x: clientX, y: clientY, relPath, kind });
+    (_clientX: number, _clientY: number, relPath: string, kind: TreeRowKind) => {
+      setContextMenu({ relPath, kind });
     },
     [],
   );
@@ -412,6 +428,7 @@ export default function RightSidebar({
     (event: React.PointerEvent, handle: FileTreeRowHandle) => {
       if (event.button !== 0 || leftMode !== "files") return;
       setSelectedTreePath(handle.relPath);
+      setSelectedTreeKind(handle.kind);
       setPendingPointerDrag({
         sourceRelPath: handle.relPath,
         sourceAbsPath: handle.absolutePath,
@@ -801,20 +818,6 @@ export default function RightSidebar({
   }, []);
 
   useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [contextMenu]);
-
-  useEffect(() => {
     let cancelled = false;
     expansionLoadedRef.current = false;
     void loadFileTreeExpandedPaths(workspaceId)
@@ -878,6 +881,191 @@ export default function RightSidebar({
     [isPathExpanded, setPathExpanded],
   );
   const resolveDecoration = useMemo(() => createDecorationResolver(scmEntries), [scmEntries]);
+  const workspaceTreeLabel = `${projectDisplayName} / ${workspaceName}`;
+
+  const resolveCreateParent = useCallback(() => {
+    const path = selectedTreePath ?? activePath;
+    if (!path) return "";
+    if (selectedTreeKind === "directory") return path;
+    return getParentRelPath(path);
+  }, [activePath, selectedTreeKind, selectedTreePath]);
+
+  const handleCreateFile = useCallback(() => {
+    const parent = resolveCreateParent();
+    if (parent) setPathExpanded(parent, true);
+    setPendingCreate({ kind: "file", parentRelPath: parent });
+  }, [resolveCreateParent, setPathExpanded]);
+
+  const handleCreateFolder = useCallback(() => {
+    const parent = resolveCreateParent();
+    if (parent) setPathExpanded(parent, true);
+    setPendingCreate({ kind: "directory", parentRelPath: parent });
+  }, [resolveCreateParent, setPathExpanded]);
+
+  const handleConfirmCreate = useCallback(
+    (name: string, kind: "file" | "directory", parentRelPath: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        setPendingCreate(null);
+        return;
+      }
+      const relPath = parentRelPath ? `${parentRelPath}/${trimmed}` : trimmed;
+
+      if (kind === "file") {
+        void invoke("write_workspace_text_file", {
+          workspaceRoot,
+          relativePath: relPath,
+          contents: "",
+        })
+          .then(() => {
+            refreshTree();
+            return openFile(workspaceId, workspaceRoot, relPath);
+          })
+          .catch(console.error);
+      } else {
+        void invoke("create_workspace_directory", {
+          workspaceRoot,
+          relativePath: relPath,
+        })
+          .then(refreshTree)
+          .catch(console.error);
+      }
+      setPendingCreate(null);
+    },
+    [openFile, refreshTree, workspaceId, workspaceRoot],
+  );
+
+  const handleCancelCreate = useCallback(() => {
+    setPendingCreate(null);
+  }, []);
+
+  const handleCollapseAll = useCallback(() => {
+    setExpandedPaths(new Set());
+  }, []);
+
+  const handleRenameEntry = useCallback(() => {
+    if (!contextMenu || contextMenu.kind === "root") return;
+    const sourceRelPath = contextMenu.relPath;
+    const currentName = sourceRelPath.split("/").pop() ?? sourceRelPath;
+    setPendingRename({
+      kind: contextMenu.kind,
+      relPath: sourceRelPath,
+      parentRelPath: getParentRelPath(sourceRelPath),
+      currentName,
+    });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  const handleConfirmRename = useCallback(
+    (sourceRelPath: string, nextNameRaw: string) => {
+      const nextName = nextNameRaw.trim();
+      const currentName = sourceRelPath.split("/").pop() ?? sourceRelPath;
+      if (!nextName || nextName === currentName) {
+        setPendingRename(null);
+        return;
+      }
+      if (nextName.includes("/") || nextName.includes("\\")) {
+        console.error("Rename failed: name cannot contain path separators.");
+        setPendingRename(null);
+        return;
+      }
+      void invoke("rename_workspace_entry", {
+        workspaceRoot,
+        sourceRelativePath: sourceRelPath,
+        newName: nextName,
+      })
+        .then(refreshTree)
+        .catch(console.error);
+      setPendingRename(null);
+    },
+    [refreshTree, workspaceRoot],
+  );
+
+  const handleCancelRename = useCallback(() => {
+    setPendingRename(null);
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleContextMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) closeContextMenu();
+    },
+    [closeContextMenu],
+  );
+
+  const handleTreeContextMenuCapture = useCallback((event: MouseEvent) => {
+    const hit = (event.target as Element).closest?.("[data-tree-row-path]");
+    if (!hit) {
+      setContextMenu({ relPath: "", kind: "root" });
+    }
+  }, []);
+
+  const handleContextMenuOpenDiffStaged = useCallback(() => {
+    if (!contextMenu || contextMenu.kind !== "file") return;
+    layoutCommands.addDiffTabForPath(contextMenu.relPath, "staged");
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, layoutCommands]);
+
+  const handleContextMenuCopyRelativePath = useCallback(() => {
+    if (!contextMenu || contextMenu.kind === "root") return;
+    void navigator.clipboard.writeText(contextMenu.relPath);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu]);
+
+  const handleContextMenuCopyPath = useCallback(() => {
+    if (!contextMenu || contextMenu.kind === "root") return;
+    void navigator.clipboard.writeText(joinAbsolutePath(workspaceRoot, contextMenu.relPath));
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, workspaceRoot]);
+
+  const handleContextMenuCopy = useCallback(() => {
+    if (!contextMenu || contextMenu.kind === "root") return;
+    setCopiedPath(contextMenu.relPath);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu]);
+
+  const handleContextMenuPaste = useCallback(() => {
+    if (!contextMenu) return;
+    const destDir =
+      contextMenu.kind === "directory"
+        ? contextMenu.relPath
+        : contextMenu.kind === "root"
+          ? ""
+          : getParentRelPath(contextMenu.relPath);
+    void invoke<string[]>("read_clipboard_file_paths")
+      .then((clipPaths) => {
+        if (clipPaths.length > 0) {
+          return invoke("copy_into_workspace", {
+            workspaceRoot,
+            destRelativePath: destDir,
+            sourcePaths: clipPaths,
+          }).then(refreshTree);
+        }
+        if (copiedPath) {
+          return invoke("copy_within_workspace", {
+            workspaceRoot,
+            sourceRelativePath: copiedPath,
+            destRelativePath: destDir,
+          }).then(refreshTree);
+        }
+      })
+      .catch(console.error);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, copiedPath, refreshTree, workspaceRoot]);
+
+  const handleContextMenuDelete = useCallback(() => {
+    if (!contextMenu || contextMenu.kind === "root") return;
+    void invoke("delete_workspace_entry", {
+      workspaceRoot,
+      relativePath: contextMenu.relPath,
+    })
+      .then(refreshTree)
+      .catch(console.error);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, refreshTree, workspaceRoot]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -919,123 +1107,6 @@ export default function RightSidebar({
     <div className="flex h-full min-w-0 flex-col border-l border-[var(--theme-border)] bg-[#151515] select-none">
       {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
 
-      {contextMenu &&
-        createPortal(
-          <div
-            className="fixed z-[200] min-w-[200px] overflow-hidden rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel-elevated)] py-1 text-xs shadow-lg"
-            style={{
-              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 228)),
-              top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 180)),
-            }}
-            onClick={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            {contextMenu.kind === "file" && (
-              <button
-                type="button"
-                className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
-                onClick={() => {
-                  layoutCommands.addDiffTabForPath(contextMenu.relPath, "staged");
-                  setContextMenu(null);
-                }}
-              >
-                Open diff (staged)
-              </button>
-            )}
-            {contextMenu.kind !== "root" && (
-              <>
-                <button
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(contextMenu.relPath);
-                    setContextMenu(null);
-                  }}
-                >
-                  Copy Relative Path
-                </button>
-                <button
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(
-                      joinAbsolutePath(workspaceRoot, contextMenu.relPath),
-                    );
-                    setContextMenu(null);
-                  }}
-                >
-                  Copy Path
-                </button>
-                <div className="my-1 border-t border-[var(--theme-border)]" />
-                <button
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
-                  onClick={() => {
-                    setCopiedPath(contextMenu.relPath);
-                    setContextMenu(null);
-                  }}
-                >
-                  Copy
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="block w-full px-3 py-1.5 text-left text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]"
-              onClick={() => {
-                const destDir =
-                  contextMenu.kind === "directory"
-                    ? contextMenu.relPath
-                    : contextMenu.kind === "root"
-                      ? ""
-                      : getParentRelPath(contextMenu.relPath);
-                void invoke<string[]>("read_clipboard_file_paths")
-                  .then((clipPaths) => {
-                    if (clipPaths.length > 0) {
-                      return invoke("copy_into_workspace", {
-                        workspaceRoot,
-                        destRelativePath: destDir,
-                        sourcePaths: clipPaths,
-                      }).then(refreshTree);
-                    }
-                    if (copiedPath) {
-                      return invoke("copy_within_workspace", {
-                        workspaceRoot,
-                        sourceRelativePath: copiedPath,
-                        destRelativePath: destDir,
-                      }).then(refreshTree);
-                    }
-                  })
-                  .catch(console.error);
-                setContextMenu(null);
-              }}
-            >
-              Paste
-            </button>
-            {contextMenu.kind !== "root" && (
-              <>
-                <div className="my-1 border-t border-[var(--theme-border)]" />
-                <button
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-[var(--theme-panel-hover)]"
-                  onClick={() => {
-                    void invoke("delete_workspace_entry", {
-                      workspaceRoot,
-                      relativePath: contextMenu.relPath,
-                    })
-                      .then(refreshTree)
-                      .catch(console.error);
-                    setContextMenu(null);
-                  }}
-                >
-                  Delete
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
-
       <div className="flex shrink-0 gap-0 border-b border-[var(--theme-border)] p-1">
         <Button
           type="button"
@@ -1071,75 +1142,148 @@ export default function RightSidebar({
         <WorkspaceChangesPanel workspaceRoot={workspaceRoot} workspaceId={workspaceId} />
       ) : (
         <FileTreeExpansionContext.Provider value={expansionValue}>
-          <div
-            ref={treeBodyRef}
-            data-file-tree-sidebar="true"
-            tabIndex={-1}
-            className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1 outline-none"
-            style={{ overscrollBehavior: "none" }}
-            onKeyDown={handleTreeKeyDown}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              const hit = (event.target as Element).closest?.("[data-tree-row-path]");
-              if (!hit) {
-                setContextMenu({ x: event.clientX, y: event.clientY, relPath: "", kind: "root" });
-              }
-            }}
-            onDragEnter={handleTreeDragEnter}
-            onDragOver={handleTreeDragOver}
-            onDragLeave={handleTreeDragLeave}
-            onDrop={handleTreeDrop}
+          <FileTreeToolbar
+            workspaceTreeLabel={workspaceTreeLabel}
+            onCreateFile={handleCreateFile}
+            onCreateFolder={handleCreateFolder}
+            onRefreshExplorer={refreshTree}
+            onCollapseAll={handleCollapseAll}
+          />
+          <ContextMenu
+            open={contextMenu !== null}
+            onOpenChange={handleContextMenuOpenChange}
           >
-            {rootEntries === null ? (
-              <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading…</div>
+            <ContextMenuTrigger
+              className="relative min-h-0 flex-1"
+              onContextMenuCapture={handleTreeContextMenuCapture}
+            >
+              <div
+                ref={treeBodyRef}
+                data-file-tree-sidebar="true"
+                tabIndex={-1}
+                className="relative min-h-0 h-full overflow-auto overscroll-none px-1.5 pb-2 outline-none"
+                style={{ overscrollBehavior: "none" }}
+                onKeyDown={handleTreeKeyDown}
+                onDragEnter={handleTreeDragEnter}
+                onDragOver={handleTreeDragOver}
+                onDragLeave={handleTreeDragLeave}
+                onDrop={handleTreeDrop}
+              >
+                {rootEntries === null ? (
+                  <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading…</div>
+                ) : null}
+                {rootError ? (
+                  <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
+                ) : null}
+                {pendingCreate && pendingCreate.parentRelPath === "" && (
+                  <TreeCreateInput
+                    kind={pendingCreate.kind}
+                    parentRelPath={pendingCreate.parentRelPath}
+                    depth={0}
+                    onConfirm={handleConfirmCreate}
+                    onCancel={handleCancelCreate}
+                  />
+                )}
+                {rootEntries?.map((entry) =>
+                  pendingRename?.relPath === entry.name ? (
+                    <TreeRenameInput
+                      key={entry.name}
+                      kind={entry.isDirectory ? "directory" : "file"}
+                      depth={0}
+                      initialName={pendingRename.currentName}
+                      sourceRelPath={pendingRename.relPath}
+                      onConfirm={handleConfirmRename}
+                      onCancel={handleCancelRename}
+                    />
+                  ) : entry.isDirectory ? (
+                    <DirectoryNode
+                      key={entry.name}
+                      workspaceRoot={workspaceRoot}
+                      workspaceId={workspaceId}
+                      relPath={entry.name}
+                      parentRelPath=""
+                      name={entry.name}
+                      depth={0}
+                      isIgnored={entry.isIgnored}
+                      resolveDecoration={resolveDecoration}
+                      onOpenContextMenu={onOpenContextMenu}
+                      activePath={activePath}
+                      refreshTick={refreshTick}
+                      highlightedLeafDirectory={highlightedLeafDirectory}
+                      targetDirectory={targetDirectory}
+                      isHoverSuppressed={isHoverSuppressed}
+                      showDirectoryIcon={false}
+                      directoryScmBadgeVariant="dot"
+                      onRowPointerDown={onRowPointerDown}
+                      onRowClickCapture={onRowClickCapture}
+                      pendingCreate={pendingCreate}
+                      onConfirmCreate={handleConfirmCreate}
+                      onCancelCreate={handleCancelCreate}
+                      pendingRename={pendingRename}
+                      onConfirmRename={handleConfirmRename}
+                      onCancelRename={handleCancelRename}
+                    />
+                  ) : (
+                    <FileTreeRow
+                      key={entry.name}
+                      depth={0}
+                      icon={<FileTypeIcon path={entry.name} kind="file" />}
+                      label={entry.name}
+                      decoration={resolveDecoration(entry.name, false, entry.isIgnored)}
+                      fileRelPath={entry.name}
+                      onOpenContextMenu={onOpenContextMenu}
+                      active={activePath === entry.name}
+                      onOpen={() => void openFile(workspaceId, workspaceRoot, entry.name)}
+                      onPointerDown={onRowPointerDown}
+                      onClickCapture={onRowClickCapture}
+                      rowKind="file"
+                      rowRelPath={entry.name}
+                      parentRelPath=""
+                      absolutePath={joinAbsolutePath(workspaceRoot, entry.name)}
+                      highlightedLeafDirectory={highlightedLeafDirectory}
+                      isHoverSuppressed={isHoverSuppressed}
+                    />
+                  ),
+                )}
+              </div>
+            </ContextMenuTrigger>
+
+            {contextMenu ? (
+              <ContextMenuContent side="right" align="start" className="min-w-[200px]">
+                {contextMenu.kind === "file" ? (
+                  <ContextMenuItem onClick={handleContextMenuOpenDiffStaged}>
+                    Open diff (staged)
+                  </ContextMenuItem>
+                ) : null}
+                {contextMenu.kind !== "root" ? (
+                  <>
+                    <ContextMenuItem onClick={handleContextMenuCopyRelativePath}>
+                      Copy Relative Path
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleContextMenuCopyPath}>
+                      Copy Path
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleContextMenuCopy}>
+                      Copy
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleRenameEntry}>Rename</ContextMenuItem>
+                  </>
+                ) : null}
+                <ContextMenuItem onClick={handleContextMenuPaste}>
+                  Paste
+                </ContextMenuItem>
+                {contextMenu.kind !== "root" ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem variant="destructive" onClick={handleContextMenuDelete}>
+                      Delete
+                    </ContextMenuItem>
+                  </>
+                ) : null}
+              </ContextMenuContent>
             ) : null}
-            {rootError ? (
-              <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
-            ) : null}
-            {rootEntries?.map((entry) =>
-              entry.isDirectory ? (
-                <DirectoryNode
-                  key={entry.name}
-                  workspaceRoot={workspaceRoot}
-                  workspaceId={workspaceId}
-                  relPath={entry.name}
-                  parentRelPath=""
-                  name={entry.name}
-                  depth={0}
-                  isIgnored={entry.isIgnored}
-                  resolveDecoration={resolveDecoration}
-                  onOpenContextMenu={onOpenContextMenu}
-                  activePath={activePath}
-                  refreshTick={refreshTick}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  targetDirectory={targetDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                  onRowPointerDown={onRowPointerDown}
-                  onRowClickCapture={onRowClickCapture}
-                />
-              ) : (
-                <FileTreeRow
-                  key={entry.name}
-                  depth={0}
-                  icon={<FileTypeIcon path={entry.name} kind="file" />}
-                  label={entry.name}
-                  decoration={resolveDecoration(entry.name, false, entry.isIgnored)}
-                  fileRelPath={entry.name}
-                  onOpenContextMenu={onOpenContextMenu}
-                  active={activePath === entry.name}
-                  onOpen={() => void openFile(workspaceId, workspaceRoot, entry.name)}
-                  onPointerDown={onRowPointerDown}
-                  onClickCapture={onRowClickCapture}
-                  rowKind="file"
-                  rowRelPath={entry.name}
-                  parentRelPath=""
-                  absolutePath={joinAbsolutePath(workspaceRoot, entry.name)}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                />
-              ),
-            )}
-          </div>
+          </ContextMenu>
         </FileTreeExpansionContext.Provider>
       )}
     </div>

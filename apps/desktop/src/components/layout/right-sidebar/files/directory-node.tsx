@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -14,10 +14,38 @@ import {
   DIRECTORY_STICKY_ROW_OFFSET_PX,
   DIRECTORY_STICKY_Z_INDEX_BASE,
   STICKY_TOP_COMPENSATION_PX,
+  TREE_ROW_HEIGHT_PX,
+  TREE_ROW_INDENT_PX,
+  TREE_ROW_PADDING_LEFT_PX,
   type DirEntry,
   type FileTreeRowHandle,
+  type PendingCreateState,
+  type PendingRenameState,
   type ScmDecorationResolver,
 } from "./files.types";
+import { TreeCreateInput } from "./tree-create-input";
+import { TreeRenameInput } from "./tree-rename-input";
+
+function scmExpandedToneTextClass(
+  tone: "added" | "modified" | "deleted" | "renamed" | "conflict" | "ignored" | null,
+  dimmed = false,
+): string {
+  if (dimmed || tone === "ignored") return "aria-expanded:text-[var(--theme-text-faint)]";
+  switch (tone) {
+    case "added":
+      return "aria-expanded:text-[#D0FDC6]";
+    case "modified":
+      return "aria-expanded:text-[#F9E38D]";
+    case "deleted":
+      return "aria-expanded:text-[#D9432A]";
+    case "renamed":
+      return "aria-expanded:text-[var(--theme-interactive)]";
+    case "conflict":
+      return "aria-expanded:text-[var(--theme-info)]";
+    default:
+      return "aria-expanded:text-[var(--theme-text-subtle)]";
+  }
+}
 
 type DirectoryNodeProps = {
   workspaceRoot: string;
@@ -34,8 +62,16 @@ type DirectoryNodeProps = {
   highlightedLeafDirectory: string | null;
   targetDirectory: string | null;
   isHoverSuppressed: boolean;
+  showDirectoryIcon?: boolean;
+  directoryScmBadgeVariant?: "text" | "dot";
   onRowPointerDown: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
   onRowClickCapture: (event: React.MouseEvent) => void;
+  pendingCreate: PendingCreateState;
+  onConfirmCreate: (name: string, kind: "file" | "directory", parentRelPath: string) => void;
+  onCancelCreate: () => void;
+  pendingRename: PendingRenameState;
+  onConfirmRename: (sourceRelPath: string, nextName: string) => void;
+  onCancelRename: () => void;
 };
 
 export function DirectoryNode({
@@ -53,17 +89,27 @@ export function DirectoryNode({
   highlightedLeafDirectory,
   targetDirectory,
   isHoverSuppressed,
+  showDirectoryIcon = true,
+  directoryScmBadgeVariant = "dot",
   onRowPointerDown,
   onRowClickCapture,
+  pendingCreate,
+  onConfirmCreate,
+  onCancelCreate,
+  pendingRename,
+  onConfirmRename,
+  onCancelRename,
 }: DirectoryNodeProps) {
   const { openFile } = useEditorActions();
   const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
   const open = isPathExpanded(relPath);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isStickyActive, setIsStickyActive] = useState(false);
+  const rowRef = useRef<HTMLButtonElement | null>(null);
   const decoration = resolveDecoration(relPath, true, isIgnored);
   const isTargetedDirectory = targetDirectory !== null && targetDirectory === relPath;
-  const rowPaddingLeft = 6 + depth * 12;
+  const rowPaddingLeft = TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX;
 
   useEffect(() => {
     if (!open) return;
@@ -89,8 +135,34 @@ export function DirectoryNode({
     };
   }, [open, workspaceRoot, relPath, refreshTick]);
 
+  useEffect(() => {
+    if (!open) {
+      setIsStickyActive(false);
+      return;
+    }
+
+    const row = rowRef.current;
+    const scroller = row?.closest<HTMLElement>("[data-file-tree-sidebar='true']");
+    if (!row || !scroller) return;
+
+    const stickyTop = depth * DIRECTORY_STICKY_ROW_OFFSET_PX - STICKY_TOP_COMPENSATION_PX;
+    const updateStickyState = () => {
+      const rowTop = row.getBoundingClientRect().top;
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      const targetTop = scrollerTop + stickyTop;
+      setIsStickyActive(Math.abs(rowTop - targetTop) <= 0.5);
+    };
+
+    updateStickyState();
+    scroller.addEventListener("scroll", updateStickyState, { passive: true });
+    window.addEventListener("resize", updateStickyState);
+    return () => {
+      scroller.removeEventListener("scroll", updateStickyState);
+      window.removeEventListener("resize", updateStickyState);
+    };
+  }, [depth, open]);
+
   return (
-    <div>
       <Collapsible open={open} onOpenChange={(next) => setPathExpanded(relPath, next)}>
         <CollapsibleTrigger
           nativeButton={false}
@@ -99,19 +171,25 @@ export function DirectoryNode({
               variant="ghost"
               size="sm"
               className={cn(
-                "group relative h-auto min-h-0 w-full justify-start gap-1.5 rounded-sm py-1 pr-1 pl-0 text-left font-normal transition-none",
-                open &&
-                  "sticky rounded-none bg-[#151515] aria-expanded:bg-[#151515] dark:aria-expanded:bg-[#151515]",
-                !isHoverSuppressed &&
-                  "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]",
+                "group relative w-full justify-start gap-2 rounded-md py-0 pr-2 pl-0 text-left text-xs font-normal transition-none",
+                {
+                  "sticky bg-[#151515] aria-expanded:bg-[#151515] dark:aria-expanded:bg-[#151515]":
+                    open,
+                  "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]":
+                    !isStickyActive,
+                },
                 scmToneTextClass(decoration.tone, decoration.dimmed),
+                scmExpandedToneTextClass(decoration.tone, decoration.dimmed),
                 decoration.dimmed && "opacity-55",
                 isTargetedDirectory && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
               )}
               data-tree-row-path={relPath}
               data-tree-row-kind="directory"
               data-tree-parent-path={parentRelPath}
+              ref={rowRef}
               style={{
+                height: TREE_ROW_HEIGHT_PX,
+                minHeight: TREE_ROW_HEIGHT_PX,
                 paddingLeft: rowPaddingLeft,
                 ...(open
                   ? {
@@ -136,77 +214,110 @@ export function DirectoryNode({
                 onOpenContextMenu(event.clientX, event.clientY, relPath, "directory");
               }}
             >
-              <ChevronRight className="size-3.5 shrink-0 group-data-[panel-open]:rotate-90" />
-              <FileTypeIcon path={relPath} kind="directory" expanded={open} />
-              <span className="truncate text-xs">{name}</span>
+              <ChevronRight className="size-4 shrink-0 group-data-[panel-open]:rotate-90" />
+              {showDirectoryIcon ? (
+                <FileTypeIcon path={relPath} kind="directory" expanded={open} />
+              ) : null}
+              <span className="truncate">{name}</span>
               {decoration.badge ? (
-                <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="ml-auto" />
+                <ScmStatusBadge
+                  text={decoration.badge}
+                  tone={decoration.tone}
+                  variant={directoryScmBadgeVariant}
+                  className="ml-auto"
+                />
               ) : null}
             </Button>
           }
         />
         <CollapsibleContent noTransition>
           <div className="flex flex-col">
+            {pendingCreate && pendingCreate.parentRelPath === relPath && (
+              <TreeCreateInput
+                kind={pendingCreate.kind}
+                parentRelPath={pendingCreate.parentRelPath}
+                depth={depth + 1}
+                onConfirm={onConfirmCreate}
+                onCancel={onCancelCreate}
+              />
+            )}
             {loadError && (
               <div
                 className="px-2 py-1 text-[11px] text-[var(--theme-error)]"
-                style={{ paddingLeft: 18 + depth * 12 }}
+                style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + TREE_ROW_INDENT_PX + depth * TREE_ROW_INDENT_PX }}
               >
                 {loadError}
               </div>
             )}
             {children?.map((entry) =>
-              entry.isDirectory ? (
-                <DirectoryNode
-                  key={joinRel(relPath, entry.name)}
-                  workspaceRoot={workspaceRoot}
-                  workspaceId={workspaceId}
-                  relPath={joinRel(relPath, entry.name)}
-                  parentRelPath={relPath}
-                  name={entry.name}
-                  depth={depth + 1}
-                  isIgnored={entry.isIgnored}
-                  resolveDecoration={resolveDecoration}
-                  onOpenContextMenu={onOpenContextMenu}
-                  activePath={activePath}
-                  refreshTick={refreshTick}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  targetDirectory={targetDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                  onRowPointerDown={onRowPointerDown}
-                  onRowClickCapture={onRowClickCapture}
-                />
-              ) : (
-                <FileTreeRow
-                  key={joinRel(relPath, entry.name)}
-                  depth={depth + 1}
-                  icon={<FileTypeIcon path={joinRel(relPath, entry.name)} kind="file" />}
-                  label={entry.name}
-                  decoration={resolveDecoration(
-                    joinRel(relPath, entry.name),
-                    false,
-                    entry.isIgnored,
-                  )}
-                  fileRelPath={joinRel(relPath, entry.name)}
-                  onOpenContextMenu={onOpenContextMenu}
-                  active={activePath === joinRel(relPath, entry.name)}
-                  onOpen={() =>
-                    void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))
-                  }
-                  onPointerDown={onRowPointerDown}
-                  onClickCapture={onRowClickCapture}
-                  rowKind="file"
-                  rowRelPath={joinRel(relPath, entry.name)}
-                  parentRelPath={relPath}
-                  absolutePath={joinAbsolutePath(workspaceRoot, joinRel(relPath, entry.name))}
-                  highlightedLeafDirectory={highlightedLeafDirectory}
-                  isHoverSuppressed={isHoverSuppressed}
-                />
-              ),
+              (() => {
+                const childRelPath = joinRel(relPath, entry.name);
+                if (pendingRename?.relPath === childRelPath) {
+                  return (
+                    <TreeRenameInput
+                      key={childRelPath}
+                      kind={entry.isDirectory ? "directory" : "file"}
+                      depth={depth + 1}
+                      initialName={pendingRename.currentName}
+                      sourceRelPath={pendingRename.relPath}
+                      onConfirm={onConfirmRename}
+                      onCancel={onCancelRename}
+                    />
+                  );
+                }
+                return entry.isDirectory ? (
+                  <DirectoryNode
+                    key={childRelPath}
+                    workspaceRoot={workspaceRoot}
+                    workspaceId={workspaceId}
+                    relPath={childRelPath}
+                    parentRelPath={relPath}
+                    name={entry.name}
+                    depth={depth + 1}
+                    isIgnored={entry.isIgnored}
+                    resolveDecoration={resolveDecoration}
+                    onOpenContextMenu={onOpenContextMenu}
+                    activePath={activePath}
+                    refreshTick={refreshTick}
+                    highlightedLeafDirectory={highlightedLeafDirectory}
+                    targetDirectory={targetDirectory}
+                    isHoverSuppressed={isHoverSuppressed}
+                    showDirectoryIcon={showDirectoryIcon}
+                    directoryScmBadgeVariant={directoryScmBadgeVariant}
+                    onRowPointerDown={onRowPointerDown}
+                    onRowClickCapture={onRowClickCapture}
+                    pendingCreate={pendingCreate}
+                    onConfirmCreate={onConfirmCreate}
+                    onCancelCreate={onCancelCreate}
+                    pendingRename={pendingRename}
+                    onConfirmRename={onConfirmRename}
+                    onCancelRename={onCancelRename}
+                  />
+                ) : (
+                  <FileTreeRow
+                    key={childRelPath}
+                    depth={depth + 1}
+                    icon={<FileTypeIcon path={childRelPath} kind="file" />}
+                    label={entry.name}
+                    decoration={resolveDecoration(childRelPath, false, entry.isIgnored)}
+                    fileRelPath={childRelPath}
+                    onOpenContextMenu={onOpenContextMenu}
+                    active={activePath === childRelPath}
+                    onOpen={() => void openFile(workspaceId, workspaceRoot, childRelPath)}
+                    onPointerDown={onRowPointerDown}
+                    onClickCapture={onRowClickCapture}
+                    rowKind="file"
+                    rowRelPath={childRelPath}
+                    parentRelPath={relPath}
+                    absolutePath={joinAbsolutePath(workspaceRoot, childRelPath)}
+                    highlightedLeafDirectory={highlightedLeafDirectory}
+                    isHoverSuppressed={isHoverSuppressed}
+                  />
+                );
+              })(),
             )}
           </div>
         </CollapsibleContent>
       </Collapsible>
-    </div>
   );
 }

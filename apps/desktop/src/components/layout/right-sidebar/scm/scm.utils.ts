@@ -48,7 +48,7 @@ export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
     case "conflict":
       return "text-[var(--theme-info)]";
     default:
-      return "text-[var(--theme-text-muted)]";
+      return "text-[var(--theme-text-subtle)]";
   }
 }
 
@@ -71,7 +71,7 @@ export function decorationForScmEntry(
 ): TreeScmDecoration {
   const includeDeleted = opts?.includeDeleted ?? true;
   if (entry.untracked) {
-    return { badge: "U", tone: "added", dimmed: false };
+    return { badge: "A", tone: "added", dimmed: false };
   }
   const tone = statusTone(entry);
   if (!includeDeleted && tone === "deleted") {

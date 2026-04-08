@@ -16,9 +16,9 @@ export function FileTypeIcon({
   const symbolId = chooseIconName(path, kind === "directory" ? "directory" : "file", expanded);
   return (
     <svg
-      className={cn("size-3.5 shrink-0 overflow-visible", className)}
-      width={14}
-      height={14}
+      className={cn("size-4 shrink-0 overflow-visible", className)}
+      width={16}
+      height={16}
       aria-hidden
     >
       <use href={`${spriteUrl}#${symbolId}`} width="100%" height="100%" />
