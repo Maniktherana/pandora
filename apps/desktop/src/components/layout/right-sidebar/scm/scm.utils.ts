@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ScmDiffResult,
   ScmGitBlobSource,
+  ScmLineStats,
   ScmStatusEntry,
   TreeScmDecoration,
   TreeScmTone,
@@ -21,6 +22,10 @@ export function scmGitDiff(
 
 export function scmStatus(worktreePath: string): Promise<ScmStatusEntry[]> {
   return invoke<ScmStatusEntry[]>("scm_status", { worktreePath });
+}
+
+export function scmLineStats(worktreePath: string): Promise<ScmLineStats> {
+  return invoke<ScmLineStats>("scm_line_stats", { worktreePath });
 }
 
 export const SCM_TONE_HEX = {

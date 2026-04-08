@@ -15,6 +15,11 @@ export type ScmStatusEntry = {
   untracked: boolean;
 };
 
+export type ScmLineStats = {
+  added: number;
+  removed: number;
+};
+
 export type TreeScmTone =
   | "added"
   | "modified"

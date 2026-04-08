@@ -1,10 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Archive01Icon,
-  Archive02Icon,
   Archive03Icon,
-  ArchiveIcon,
   ExternalDriveIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -17,38 +14,21 @@ import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
-import { scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { scmLineStats } from "@/components/layout/right-sidebar/scm/scm.utils";
+import {
+  SCM_CHANGES_REFRESH_INTERVAL_MS,
+  type ScmLineStats,
+} from "@/components/layout/right-sidebar/scm/scm.types";
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
 };
 
-type ScmCounts = {
-  added: number;
-  removed: number;
-};
-
-function deriveScmCounts(entries: Awaited<ReturnType<typeof scmStatus>>): ScmCounts {
-  let added = 0;
-  let removed = 0;
-  for (const entry of entries) {
-    const staged = entry.stagedKind ?? "";
-    const worktree = entry.worktreeKind ?? "";
-    if (entry.untracked || staged === "A" || worktree === "A") {
-      added += 1;
-    }
-    if (staged === "D" || worktree === "D") {
-      removed += 1;
-    }
-  }
-  return { added, removed };
-}
-
 function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const workspaceCommands = useWorkspaceActions();
-  const [scmCounts, setScmCounts] = useState<ScmCounts | null>(null);
+  const [scmCounts, setScmCounts] = useState<ScmLineStats | null>(null);
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -81,21 +61,28 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
       setScmCounts(null);
       return;
     }
-    void scmStatus(workspace.worktreePath)
-      .then((entries) => {
-        if (!cancelled) {
-          setScmCounts(deriveScmCounts(entries));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setScmCounts(null);
-        }
-      });
+    const refresh = () => {
+      void scmLineStats(workspace.worktreePath)
+        .then((stats) => {
+          if (!cancelled) {
+            setScmCounts(stats);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setScmCounts(null);
+          }
+        });
+    };
+    refresh();
+    const intervalID = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, SCM_CHANGES_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(intervalID);
     };
-  }, [workspace.status, workspace.updatedAt, workspace.worktreePath]);
+  }, [workspace.status, workspace.worktreePath]);
 
   return (
     <div className="group">
