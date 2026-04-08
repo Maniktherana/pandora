@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
@@ -7,8 +7,7 @@ import { tabKey } from "@/components/layout/workspace/layout-tree";
 import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
-import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
+import { useScmStatusQuery } from "@/components/layout/right-sidebar/scm/scm-queries";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 
@@ -85,7 +84,7 @@ export default function WorkspaceTabBar({
       >,
     [sessions],
   );
-  const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
+  const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot);
   const pendingDragRef = useRef<{
     sourceIndex: number;
     label: string;
@@ -154,27 +153,6 @@ export default function WorkspaceTabBar({
     },
     [layoutCommands, paneID],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void scmStatus(workspaceRoot)
-        .then((list) => {
-          if (!cancelled) setScmEntries(list);
-        })
-        .catch(() => {
-          if (!cancelled) setScmEntries([]);
-        });
-    };
-    refresh();
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
-    }, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [workspaceRoot]);
 
   const scmByPath = useMemo(
     () => new Map(scmEntries.map((entry) => [entry.path, entry])),

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Archive03Icon,
@@ -14,11 +14,7 @@ import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
-import { scmLineStats } from "@/components/layout/right-sidebar/scm/scm.utils";
-import {
-  SCM_CHANGES_REFRESH_INTERVAL_MS,
-  type ScmLineStats,
-} from "@/components/layout/right-sidebar/scm/scm.types";
+import { useScmLineStatsQuery } from "@/components/layout/right-sidebar/scm/scm-queries";
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
@@ -28,7 +24,9 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const workspaceCommands = useWorkspaceActions();
-  const [scmCounts, setScmCounts] = useState<ScmLineStats | null>(null);
+  const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
+    enabled: workspace.status === "ready",
+  });
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -54,35 +52,6 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
     }
     return { icon: SplitIcon, className: "text-[var(--theme-text-subtle)]" };
   }, [prState, workspace.workspaceKind]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (workspace.status !== "ready") {
-      setScmCounts(null);
-      return;
-    }
-    const refresh = () => {
-      void scmLineStats(workspace.worktreePath)
-        .then((stats) => {
-          if (!cancelled) {
-            setScmCounts(stats);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setScmCounts(null);
-          }
-        });
-    };
-    refresh();
-    const intervalID = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
-    }, SCM_CHANGES_REFRESH_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalID);
-    };
-  }, [workspace.status, workspace.worktreePath]);
 
   return (
     <div className="group">

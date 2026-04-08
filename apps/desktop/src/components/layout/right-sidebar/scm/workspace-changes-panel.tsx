@@ -14,7 +14,6 @@ import {
   scmDiscardTracked,
   scmDiscardUntracked,
   scmStageAll,
-  scmStatus,
   scmUnstageAll,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type { ScmStatusEntry } from "./scm.types";
@@ -29,7 +28,7 @@ import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { ChangesFooter } from "./changes-footer";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
-import { SCM_CHANGES_REFRESH_INTERVAL_MS } from "./scm.types";
+import { useScmStatusQuery } from "./scm-queries";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -48,7 +47,6 @@ export default function WorkspaceChangesPanel({
   workspaceRoot,
   workspaceId,
 }: WorkspaceChangesPanelProps) {
-  const [entries, setEntries] = useState<ScmStatusEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
@@ -65,29 +63,20 @@ export default function WorkspaceChangesPanel({
   const workspaceRuntime = useWorkspaceView(workspaceId, (view) => view.runtime);
   const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
   const projectRuntime = useProjectTerminalView(projectRuntimeId ?? "", (view) => view.runtime);
-
-  const refresh = useCallback(() => {
-    void scmStatus(workspaceRoot)
-      .then((list) => {
-        setEntries(list);
-        setLoadError(null);
-      })
-      .catch((error) => {
-        setLoadError(String(error));
-        setEntries([]);
-      });
-  }, [workspaceRoot]);
+  const {
+    data: entriesData,
+    error: entriesError,
+    refetch: refetchEntries,
+  } = useScmStatusQuery(workspaceRoot);
+  const entries = entriesData ?? null;
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const intervalID = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
-    }, SCM_CHANGES_REFRESH_INTERVAL_MS);
-    return () => clearInterval(intervalID);
-  }, [refresh]);
+    if (entriesError) {
+      setLoadError(String(entriesError));
+      return;
+    }
+    setLoadError(null);
+  }, [entriesError]);
 
   const stagedList = useMemo(() => (entries ?? []).filter(hasStaged), [entries]);
   const unstagedList = useMemo(() => (entries ?? []).filter(hasUnstaged), [entries]);
@@ -97,7 +86,7 @@ export default function WorkspaceChangesPanel({
     setBusy(true);
     try {
       await fn();
-      refresh();
+      await refetchEntries();
     } catch (error) {
       setLoadError(String(error));
     } finally {
@@ -212,7 +201,7 @@ export default function WorkspaceChangesPanel({
           className="h-7 gap-1 px-2 text-[11px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
           disabled={busy}
           title="Refresh"
-          onClick={() => refresh()}
+          onClick={() => void refetchEntries()}
         >
           <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
         </Button>

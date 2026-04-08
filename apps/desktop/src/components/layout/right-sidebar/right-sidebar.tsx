@@ -9,7 +9,7 @@ import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
-import { decorationForScmEntry, scmStatus } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { decorationForScmEntry } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type {
   ScmStatusEntry,
   TreeScmDecoration,
@@ -43,6 +43,7 @@ import { FileTreeExpansionContext } from "./files/file-tree-expansion-context";
 import { FileTreeRow } from "./files/file-tree-row";
 import { DirectoryNode } from "./files/directory-node";
 import { TreeDragOverlay } from "./files/tree-drag-overlay";
+import { useScmStatusQuery } from "./scm/scm-queries";
 
 function isPointerOutsideWindow(pointer: DragPointer): boolean {
   return (
@@ -125,7 +126,6 @@ export default function RightSidebar({
   } | null>(null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
-  const [scmEntries, setScmEntries] = useState<ScmStatusEntry[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [refreshTick, setRefreshTick] = useState(0);
   const [pendingPointerDrag, setPendingPointerDrag] = useState<PendingPointerDrag | null>(null);
@@ -153,6 +153,7 @@ export default function RightSidebar({
   const layoutCommands = useLayoutActions();
   const { startDrag } = useTabDrag();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot);
   useNativeTerminalOverlay(contextMenu !== null ? "semi-transparent" : null);
 
   const activePath = useMemo(() => {
@@ -886,12 +887,6 @@ export default function RightSidebar({
     }, 3000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    void scmStatus(workspaceRoot)
-      .then((list) => setScmEntries(list))
-      .catch(() => setScmEntries([]));
-  }, [workspaceRoot, refreshTick]);
 
   useEffect(() => {
     let cancelled = false;

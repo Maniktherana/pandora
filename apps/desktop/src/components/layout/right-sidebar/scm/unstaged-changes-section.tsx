@@ -5,6 +5,7 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import { cn } from "@/lib/shared/utils";
 import {
   decorationForScmEntry,
+  scmToneTextClass,
   scmStage,
   statusTone,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
