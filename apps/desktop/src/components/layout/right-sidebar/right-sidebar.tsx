@@ -215,6 +215,31 @@ export default function RightSidebar({
     setDiffMenu({ x: clientX, y: clientY, relPath });
   }, []);
 
+  const computeDropTargetFromTreeElement = useCallback((element: Element | null): TreeDropTarget => {
+    const body = treeBodyRef.current;
+    if (!body || !element || !body.contains(element)) {
+      return { mode: "root", targetRelPath: null };
+    }
+
+    const row = element.closest<HTMLElement>(TREE_ROW_SELECTOR);
+    if (!row || !body.contains(row)) {
+      return { mode: "root", targetRelPath: null };
+    }
+
+    const relPath = row.dataset.treeRowPath ?? null;
+    const rowKind = row.dataset.treeRowKind as TreeRowKind | undefined;
+    const parentRelPath = row.dataset.treeParentPath ?? "";
+    if (!relPath || !rowKind) {
+      return { mode: "root", targetRelPath: null };
+    }
+
+    if (rowKind === "directory") {
+      return { mode: "directory", targetRelPath: relPath };
+    }
+
+    return { mode: "directory", targetRelPath: parentRelPath };
+  }, []);
+
   const computeDropTargetFromPoint = useCallback(
     (clientX: number, clientY: number): TreeDropTarget | null => {
       const body = treeBodyRef.current;
@@ -231,46 +256,25 @@ export default function RightSidebar({
       }
 
       const hit = document.elementFromPoint(clientX, clientY);
-      if (!(hit instanceof Element) || !body.contains(hit)) {
-        return { mode: "root", targetRelPath: null };
-      }
-
-      const row = hit.closest<HTMLElement>(TREE_ROW_SELECTOR);
-      if (!row || !body.contains(row)) {
-        return { mode: "root", targetRelPath: null };
-      }
-
-      const relPath = row.dataset.treeRowPath ?? null;
-      const rowKind = row.dataset.treeRowKind as TreeRowKind | undefined;
-      const parentRelPath = row.dataset.treeParentPath ?? "";
-      if (!relPath || !rowKind) {
-        return { mode: "root", targetRelPath: null };
-      }
-
-      if (rowKind === "directory") {
-        return { mode: "directory", targetRelPath: relPath };
-      }
-
-      return { mode: "directory", targetRelPath: parentRelPath };
+      return computeDropTargetFromTreeElement(hit instanceof Element ? hit : null);
     },
-    [],
+    [computeDropTargetFromTreeElement],
   );
 
-  const computeDropTargetFromNativePosition = useCallback(
-    (position: { x: number; y: number }) =>
-      computeDropTargetFromPoint(
-        position.x / window.devicePixelRatio,
-        position.y / window.devicePixelRatio,
-      ),
-    [computeDropTargetFromPoint],
-  );
+  const computeDropTargetFromDragEvent = useCallback(
+    (event: React.DragEvent): TreeDropTarget | null => {
+      const body = treeBodyRef.current;
+      if (!body) return null;
 
-  const nativePositionToPointer = useCallback(
-    (position: { x: number; y: number }): DragPointer => ({
-      x: position.x / window.devicePixelRatio,
-      y: position.y / window.devicePixelRatio,
-    }),
-    [],
+      if (!body.contains(event.target as Node)) {
+        return computeDropTargetFromPoint(event.clientX, event.clientY);
+      }
+
+      return computeDropTargetFromTreeElement(
+        event.target instanceof Element ? event.target : null,
+      );
+    },
+    [computeDropTargetFromPoint, computeDropTargetFromTreeElement],
   );
 
   const isPointWithinTreeBody = useCallback((clientX: number, clientY: number) => {
@@ -424,12 +428,12 @@ export default function RightSidebar({
       if (pendingPointerDrag || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
-      setExternalDragTarget(computeDropTargetFromPoint(event.clientX, event.clientY), {
+      setExternalDragTarget(computeDropTargetFromDragEvent(event), {
         x: event.clientX,
         y: event.clientY,
       });
     },
-    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
+    [computeDropTargetFromDragEvent, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
   );
 
   const handleTreeDragOver = useCallback(
@@ -437,12 +441,12 @@ export default function RightSidebar({
       if (pendingPointerDrag || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
-      setExternalDragTarget(computeDropTargetFromPoint(event.clientX, event.clientY), {
+      setExternalDragTarget(computeDropTargetFromDragEvent(event), {
         x: event.clientX,
         y: event.clientY,
       });
     },
-    [computeDropTargetFromPoint, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
+    [computeDropTargetFromDragEvent, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
   );
 
   const handleTreeDragLeave = useCallback(
@@ -466,12 +470,12 @@ export default function RightSidebar({
       if (pendingPointerDrag || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
-      externalTargetRef.current = computeDropTargetFromPoint(event.clientX, event.clientY);
+      externalTargetRef.current = computeDropTargetFromDragEvent(event);
       clearExternalDragVisualState();
     },
     [
       clearExternalDragVisualState,
-      computeDropTargetFromPoint,
+      computeDropTargetFromDragEvent,
       dragSession?.kind,
       pendingPointerDrag,
     ],
@@ -618,6 +622,9 @@ export default function RightSidebar({
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+
+    const toPointer = (pos: { x: number; y: number }): DragPointer => pos;
+
     void getCurrentWindow()
       .onDragDropEvent((event: { payload: NativeDragPayload }) => {
         if (leftModeRef.current !== "files") return;
@@ -628,9 +635,9 @@ export default function RightSidebar({
         const payload = event.payload;
 
         if (payload.type === "enter") {
-          const pointer = nativePositionToPointer(payload.position);
+          const pointer = toPointer(payload.position);
           setExternalDragTarget(
-            computeDropTargetFromNativePosition(payload.position),
+            computeDropTargetFromPoint(pointer.x, pointer.y),
             pointer,
             payload.paths,
           );
@@ -638,8 +645,11 @@ export default function RightSidebar({
         }
 
         if (payload.type === "over") {
-          const pointer = nativePositionToPointer(payload.position);
-          setExternalDragTarget(computeDropTargetFromNativePosition(payload.position), pointer);
+          const pointer = toPointer(payload.position);
+          setExternalDragTarget(
+            computeDropTargetFromPoint(pointer.x, pointer.y),
+            pointer,
+          );
           return;
         }
 
@@ -650,8 +660,9 @@ export default function RightSidebar({
 
         if (payload.type !== "drop") return;
 
+        const pointer = toPointer(payload.position);
         const target = externalTargetRef.current ??
-          computeDropTargetFromNativePosition(payload.position) ?? {
+          computeDropTargetFromPoint(pointer.x, pointer.y) ?? {
             mode: "root",
             targetRelPath: null,
           };
@@ -711,8 +722,7 @@ export default function RightSidebar({
     };
   }, [
     clearAllDragState,
-    computeDropTargetFromNativePosition,
-    nativePositionToPointer,
+    computeDropTargetFromPoint,
     refreshTree,
     resolveDestinationDirectory,
     setExternalDragTarget,
