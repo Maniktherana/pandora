@@ -1139,7 +1139,11 @@ export default function RightSidebar({
       </div>
 
       {leftMode === "changes" ? (
-        <WorkspaceChangesPanel workspaceRoot={workspaceRoot} workspaceId={workspaceId} />
+        <WorkspaceChangesPanel
+          workspaceRoot={workspaceRoot}
+          workspaceId={workspaceId}
+          workspaceLabel={workspaceTreeLabel}
+        />
       ) : (
         <FileTreeExpansionContext.Provider value={expansionValue}>
           <FileTreeToolbar
