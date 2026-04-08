@@ -7,6 +7,7 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { cn, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import { useFileTreeExpansion } from "./file-tree-expansion-context";
 import { FileTreeRow } from "./file-tree-row";
 import {
@@ -139,14 +140,7 @@ export function DirectoryNode({
               <FileTypeIcon path={relPath} kind="directory" expanded={open} />
               <span className="truncate text-xs">{name}</span>
               {decoration.badge ? (
-                <span
-                  className={cn(
-                    "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-                    scmToneTextClass(decoration.tone, false),
-                  )}
-                >
-                  {decoration.badge}
-                </span>
+                <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="ml-auto" />
               ) : null}
             </Button>
           }

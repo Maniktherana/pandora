@@ -4,6 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { cn } from "@/lib/shared/utils";
 import {
+  decorationForScmEntry,
   scmToneTextClass,
   scmUnstage,
   statusTone,
@@ -55,6 +56,7 @@ export function StagedChangesSection({
         <ul className="flex flex-col gap-0.5 pb-1">
           {stagedList.map((entry) => {
             const tone = statusTone(entry);
+            const decoration = decorationForScmEntry(entry);
             return (
               <li
                 key={`s:${entry.path}`}
@@ -73,12 +75,7 @@ export function StagedChangesSection({
                 </Button>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1">
-                    {entry.stagedKind ? (
-                      <ScmStatusBadge
-                        text={entry.stagedKind}
-                        className={cn("bg-transparent", scmToneTextClass(tone))}
-                      />
-                    ) : null}
+                    {decoration.badge ? <ScmStatusBadge text={decoration.badge} tone={decoration.tone} /> : null}
                     <button
                       type="button"
                       className={cn(

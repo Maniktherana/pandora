@@ -52,7 +52,7 @@ export function ProjectTab({
       data-bottom-terminal-slot-id={row.slotId}
       data-bottom-terminal-slot-index={row.slotIndex}
       className={cn(
-        "relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border border-neutral-800 border-l-transparent border-b-2 border-b-transparent px-2 text-left text-[11px] outline-none",
+        "group/tab relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border border-neutral-800 border-l-transparent border-b-2 border-b-transparent px-2 text-left text-[11px] outline-none",
         active
           ? "border-b-neutral-400 bg-neutral-900 text-neutral-100"
           : "text-neutral-400 hover:bg-neutral-800/30 hover:text-neutral-200",
@@ -65,24 +65,34 @@ export function ProjectTab({
       <TreeGutter treeState={row.treeState} />
       <TerminalIdentityIcon identity={row.display} className="size-4" />
       <span className="min-w-0 flex-1 truncate">{row.display.label}</span>
-      <button
-        type="button"
-        className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-white/10 hover:text-neutral-100"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => onRenameClick(e, row.slotId)}
-        title="Rename terminal"
-      >
-        <Pencil className="h-3 w-3" />
-      </button>
-      <button
-        type="button"
-        className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-white/10 hover:text-neutral-100"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => onCloseClick(e, row.slotId)}
-        title="Close terminal"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
+          "bg-gradient-to-l to-transparent",
+          active ? "from-neutral-900" : "from-neutral-800/30",
+        )}
+      />
+      <div className="relative z-10 ml-1 flex h-full items-center pl-1">
+        <button
+          type="button"
+          className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => onRenameClick(e, row.slotId)}
+          title="Rename terminal"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => onCloseClick(e, row.slotId)}
+          title="Close terminal"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

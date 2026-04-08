@@ -4,8 +4,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { cn } from "@/lib/shared/utils";
 import {
+  decorationForScmEntry,
   scmStage,
-  scmToneTextClass,
   statusTone,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "./scm-status-badge";
@@ -57,6 +57,7 @@ export function UnstagedChangesSection({
         <ul className="flex flex-col gap-0.5 pb-1">
           {unstagedList.map((entry) => {
             const tone = statusTone(entry);
+            const decoration = decorationForScmEntry(entry);
             return (
               <li
                 key={`u:${entry.path}`}
@@ -75,17 +76,7 @@ export function UnstagedChangesSection({
                 </Button>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1">
-                    {entry.untracked ? (
-                      <ScmStatusBadge
-                        text="?"
-                        className={cn("bg-transparent", scmToneTextClass("added"))}
-                      />
-                    ) : entry.worktreeKind ? (
-                      <ScmStatusBadge
-                        text={entry.worktreeKind}
-                        className={cn("bg-transparent", scmToneTextClass(tone))}
-                      />
-                    ) : null}
+                    {decoration.badge ? <ScmStatusBadge text={decoration.badge} tone={decoration.tone} /> : null}
                     <button
                       type="button"
                       className={cn(

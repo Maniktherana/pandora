@@ -6,7 +6,12 @@ import { useEditorStore } from "@/state/editor-store";
 import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { scmToneTextClass, statusTone } from "@/components/layout/right-sidebar/scm/scm.utils";
+import {
+  decorationForScmEntry,
+  scmToneTextClass,
+  statusTone,
+} from "@/components/layout/right-sidebar/scm/scm.utils";
+import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
 
 type WorkspaceTabProps = {
@@ -99,10 +104,11 @@ function EditorTabCloseControl({
         });
       }}
       className={cn(
-        "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-        isActive
-          ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-          : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
+        "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
+        {
+          "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": isActive,
+          "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !isActive,
+        },
       )}
     >
       {isDirty ? (
@@ -140,6 +146,14 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
     tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
   const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
   const label = tabLabel(tab, slotsMap, sessionsMap, displayMap);
+  const scmDecoration =
+    tab.kind === "editor" || tab.kind === "diff"
+      ? (scmEntry ? decorationForScmEntry(scmEntry) : null)
+      : null;
+  const closeButtonToneClass = cn({
+    "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": isActive,
+    "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !isActive,
+  });
 
   return (
     <div
@@ -150,77 +164,98 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
       onPointerDown={(e) => onPointerDown(e, index)}
       onPointerUp={(e) => onPointerUp(e, index)}
       className={cn(
-        "relative flex h-full shrink-0 cursor-default select-none items-center gap-1.5 pl-3 pr-1.5 text-xs",
-        !isLast && "border-r border-neutral-800",
-        isActive && isFocused
-          ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-200 after:content-['']"
-          : isActive
-            ? "bg-neutral-900 text-neutral-200 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[2px] after:bg-neutral-800 after:content-['']"
-            : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
-        isBeingDragged && "opacity-30",
+        "group/tab relative flex h-full shrink-0 cursor-default select-none items-center gap-1.5 pl-3 pr-1.5 text-xs",
+        "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:z-20 after:h-[2px]",
+        {
+          "border-r border-neutral-800": !isLast,
+          "bg-neutral-900 text-neutral-200 after:content-['']": isActive,
+          "after:bg-neutral-200": isActive && isFocused,
+          "after:bg-neutral-800": isActive && !isFocused,
+          "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300": !isActive,
+          "opacity-30": isBeingDragged,
+        },
       )}
     >
       {tab.kind === "editor" ? (
         <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
       ) : tab.kind === "diff" ? (
         <GitCompare
-          className={cn("size-3.5 shrink-0", toneClass || "text-neutral-500")}
+          className={cn("size-3.5 shrink-0", {
+            [toneClass]: !!toneClass,
+            "text-neutral-500": !toneClass,
+          })}
           aria-hidden
         />
       ) : terminalDisplay ? (
         <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
       ) : null}
-      <span className={cn("pointer-events-none max-w-[120px] truncate", toneClass)}>{label}</span>
-
-      {tab.kind === "editor" ? (
-        <EditorTabCloseControl
-          workspaceId={workspaceId}
-          workspaceRoot={workspaceRoot}
-          paneID={paneID}
-          index={index}
-          path={tab.path}
-          label={label}
-          isActive={isActive}
+      <span className={cn("pointer-events-none min-w-0 flex-1 truncate", toneClass)}>{label}</span>
+      {scmDecoration?.badge && (
+        <ScmStatusBadge
+          text={scmDecoration.badge}
+          tone={scmDecoration.tone}
+          className="pointer-events-none"
         />
-      ) : tab.kind === "diff" ? (
-        <div
-          role="button"
-          tabIndex={-1}
-          aria-label={`Close ${label}`}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onCloseDiffTab(index);
-          }}
-          className={cn(
-            "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-            isActive
-              ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
-          )}
-        >
-          <X className="h-3 w-3" aria-hidden />
-        </div>
-      ) : (
-        <div
-          role="button"
-          tabIndex={-1}
-          aria-label={`Close ${label}`}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onCloseTerminalTab(index);
-          }}
-          className={cn(
-            "ml-1 flex h-4 w-4 items-center justify-center rounded-sm transition-colors",
-            isActive
-              ? "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              : "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200",
-          )}
-        >
-          <X className="h-3 w-3" aria-hidden />
-        </div>
       )}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute right-0 top-0 h-full w-14 opacity-0 transition-opacity group-hover/tab:opacity-100",
+          "bg-gradient-to-l to-transparent",
+          {
+            "from-neutral-900": isActive,
+            "from-neutral-800/30": !isActive,
+          },
+        )}
+      />
+
+      <div className="relative z-10 ml-1 flex h-full items-center pl-1">
+        {tab.kind === "editor" ? (
+          <EditorTabCloseControl
+            workspaceId={workspaceId}
+            workspaceRoot={workspaceRoot}
+            paneID={paneID}
+            index={index}
+            path={tab.path}
+            label={label}
+            isActive={isActive}
+          />
+        ) : tab.kind === "diff" ? (
+          <div
+            role="button"
+            tabIndex={-1}
+            aria-label={`Close ${label}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCloseDiffTab(index);
+            }}
+            className={cn(
+              "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
+              closeButtonToneClass,
+            )}
+          >
+            <X className="h-3 w-3" aria-hidden />
+          </div>
+        ) : (
+          <div
+            role="button"
+            tabIndex={-1}
+            aria-label={`Close ${label}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCloseTerminalTab(index);
+            }}
+            className={cn(
+              "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
+              closeButtonToneClass,
+            )}
+          >
+            <X className="h-3 w-3" aria-hidden />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

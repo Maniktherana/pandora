@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
 import type { FileTreeRowHandle, TreeRowKind } from "./files.types";
 
@@ -61,14 +62,7 @@ export function FileTreeRow({
       {icon}
       <span className="truncate">{label}</span>
       {decoration.badge ? (
-        <span
-          className={cn(
-            "ml-auto shrink-0 font-mono text-[10px] font-semibold",
-            scmToneTextClass(decoration.tone, false),
-          )}
-        >
-          {decoration.badge}
-        </span>
+        <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="ml-auto" />
       ) : null}
     </>
   );
