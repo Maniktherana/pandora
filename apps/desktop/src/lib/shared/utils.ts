@@ -50,3 +50,17 @@ export function panelResizeHandleClasses(
         ],
   );
 }
+
+export function formatCompactNumber(value: number): string {
+  const abs = Math.abs(value);
+  if (abs < 1_000) {
+    return `${value}`;
+  }
+  if (abs < 1_000_000) {
+    return `${(value / 1_000).toFixed(2)}k`;
+  }
+  if (abs < 1_000_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}m`;
+  }
+  return `${(value / 1_000_000_000).toFixed(2)}b`;
+}

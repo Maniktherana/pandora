@@ -1198,14 +1198,27 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       addProject: (path) =>
         Effect.tryPromise({
           try: async () => {
+            const knownProjectIds = new Set(desktopStateSnapshot.projects.map((entry) => entry.id));
             const project = await invoke<ProjectRecord>("add_project", { selectedPath: path });
+            const isNewProject = !knownProjectIds.has(project.id);
+            let autoCreatedWorkspaceId: string | null = null;
+            if (isNewProject) {
+              const created = await invoke<WorkspaceRecord>("create_workspace", {
+                projectId: project.id,
+                workspaceKind: "linked",
+              });
+              autoCreatedWorkspaceId = created.id;
+            }
             const appState = await invoke<AppState>("load_app_state");
             applyAppState(appState);
             desktopStateSnapshot.selectedProjectID = project.id;
+            if (autoCreatedWorkspaceId) {
+              desktopStateSnapshot.selectedWorkspaceID = autoCreatedWorkspaceId;
+            }
             publish();
             await invoke("save_selection", {
               projectId: project.id,
-              workspaceId: desktopStateSnapshot.selectedWorkspaceID,
+              workspaceId: autoCreatedWorkspaceId ?? desktopStateSnapshot.selectedWorkspaceID,
             });
           },
           catch: (cause) => new DesktopStateLoadError({ cause }),

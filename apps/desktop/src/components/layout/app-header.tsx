@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderTree, PanelBottom, PanelLeft } from "lucide-react";
+import { FolderTree, PanelBottom } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { LayoutAlignLeftIcon } from "@hugeicons/core-free-icons";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
 import type { PrContext, WorkspaceRecord } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 
@@ -65,13 +68,15 @@ export default function AppHeader({
   return (
     <div className="h-10 flex items-center shrink-0 border-b border-[var(--theme-border)] bg-[#121212]">
       {!sidebarVisible && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onToggleSidebar}
-          className="ml-20 rounded-md p-1.5 text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
+          className="ml-20"
         >
-          <PanelLeft className="w-4 h-4" />
-        </button>
+           <HugeiconsIcon icon={LayoutAlignLeftIcon} strokeWidth={1.25} className="size-5" />
+        </Button>
       )}
 
       {selectedWorkspace && rootCrumb && (
@@ -112,28 +117,30 @@ export default function AppHeader({
 
       {selectedWorkspace?.status === "ready" && (
         <div className="mr-3 flex shrink-0 items-center gap-1">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onToggleBottomPanel}
             className={cn(
-              "rounded-md p-1.5 text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-              bottomPanelOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
+              bottomPanelOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)] hover:bg-[var(--theme-panel-elevated)]",
             )}
             title="Toggle terminal panel (Ctrl+`)"
           >
             <PanelBottom className="w-4 h-4" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onToggleFileTree}
             className={cn(
-              "rounded-md p-1.5 text-[var(--theme-text-muted)] transition-colors hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-              fileTreeOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
+              fileTreeOpen && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)] hover:bg-[var(--theme-panel-elevated)]",
             )}
             title="Toggle file tree"
           >
             <FolderTree className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       )}
     </div>

@@ -18,7 +18,7 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 
 export default function App() {
-  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);

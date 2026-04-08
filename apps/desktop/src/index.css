@@ -162,8 +162,8 @@ body {
   --theme-border: #242424;
   --theme-border-subtle: #1d1d1d;
   --theme-text: #ededed;
-  --theme-text-muted: #a0a0a0;
-  --theme-text-subtle: #707070;
+  --theme-text-muted: #707070;
+  --theme-text-subtle: #a0a0a0;
   --theme-text-faint: #505050;
   --theme-primary: #fab283;
   --theme-success: #12c905;
@@ -260,4 +260,34 @@ body {
 #root {
   min-height: 100vh;
   background-color: transparent;
+}
+
+@keyframes dot-grid-ripple {
+  0% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: var(--cell-color);
+  }
+  60% {
+    background-color: transparent;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.dot-grid-loader {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--dot-grid-gap, 1px);
+}
+
+.dot-grid-loader-cell {
+  background-color: transparent;
+  border-radius: var(--dot-grid-cell-radius, 0);
+}
+
+.dot-grid-loader-cell-ripple {
+  animation: dot-grid-ripple 1.5s ease infinite;
 }
