@@ -213,7 +213,7 @@ export default function WorkspaceChangesPanel({
 
   return (
     <div className="flex h-full min-h-0 select-none flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--theme-border)] px-2 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
         <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">{workspaceLabel}</span>
         <div className="flex shrink-0 items-center gap-0.5">
           <Button

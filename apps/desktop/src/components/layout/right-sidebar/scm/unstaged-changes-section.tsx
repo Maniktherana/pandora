@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ChevronRight } from "lucide-react";
 import { FilePlusIcon, PlusSignIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -54,12 +55,10 @@ export function UnstagedChangesSection({
           <Button
             variant="ghost"
             size="sm"
-            className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
+            className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-transparent aria-expanded:text-[var(--theme-text-muted)]"
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
-            <span className="text-[11px] font-medium uppercase tracking-wide">
-              Changes ({unstagedList.length})
-            </span>
+            <span className="text-[11px] font-medium uppercase tracking-wide">Changes</span>
             <span className="ml-auto flex w-20 items-center justify-end gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
               <Tooltip>
                 <TooltipTrigger
@@ -97,6 +96,11 @@ export function UnstagedChangesSection({
                 </TooltipTrigger>
                 <TooltipContent>Stage all changes</TooltipContent>
               </Tooltip>
+            </span>
+            <span className="flex items-center gap-1">
+            <Badge variant={"outline"} className="p-1.5 font-mono text-xs text-[var(--theme-text-subtle)]">
+                {unstagedList.length}
+              </Badge>
             </span>
           </Button>
         }
