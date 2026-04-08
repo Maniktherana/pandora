@@ -6,12 +6,14 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowTurnBackwardIcon,
+  FilePlusIcon,
   GitCompareIcon,
   PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import type { DiffSource, PrContext } from "@/lib/shared/types";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useEditorActions } from "@/hooks/use-editor-actions";
 import { Button } from "@/components/ui/button";
 import { diffContentsQueryKey, fetchDiffContents } from "@/components/editor/diff-data";
 import DiffViewer from "@/components/editor/diff-viewer";
@@ -128,6 +130,7 @@ function BranchModeLabel({ branchLabel }: { branchLabel: BranchLabel | null }) {
 
 export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const queryClient = useQueryClient();
+  const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
   const { data: entriesData, refetch, isFetching } = useScmStatusQuery(workspaceRoot);
   const entries = entriesData ?? [];
@@ -320,6 +323,13 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
     [activeSource, queryClient, workspaceRoot],
   );
 
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      void openFile(workspaceId, workspaceRoot, path);
+    },
+    [openFile, workspaceId, workspaceRoot],
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
       <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
@@ -480,6 +490,20 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
                       </span>
                     </button>
                     <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity group-hover/review-card:pointer-events-auto group-hover/review-card:opacity-100">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
+                        title="Open file"
+                        onClick={() => handleOpenFile(entry.path)}
+                      >
+                        <HugeiconsIcon
+                          icon={FilePlusIcon}
+                          strokeWidth={1.5}
+                          className="size-3.5"
+                        />
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"

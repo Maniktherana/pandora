@@ -44,7 +44,7 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
 
   if (!projectRuntime) {
     return (
-      <div className="flex h-full min-h-[120px] items-center justify-center border-t border-neutral-800 bg-neutral-950 text-sm text-neutral-500">
+      <div className="flex h-full min-h-[120px] items-center justify-center bg-neutral-950 text-sm text-neutral-500">
         Starting project shell...
       </div>
     );

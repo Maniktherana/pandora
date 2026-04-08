@@ -1104,7 +1104,7 @@ export default function RightSidebar({
   }, [workspaceRoot, refreshTick]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col border-l border-[var(--theme-border)] bg-[#151515] select-none">
+    <div className="flex h-full min-w-0 flex-col bg-[#151515] select-none">
       {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
 
       <div className="flex shrink-0 gap-0 border-b border-[var(--theme-border)] p-1">

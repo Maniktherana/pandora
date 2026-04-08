@@ -20,9 +20,6 @@ export function joinAbsolutePath(workspaceRoot: string, relPath: string): string
 
 /**
  * Resize handle styling that keeps the layout footprint at 1px.
- *
- * Important: expand the actual grab area via `hitAreaMargins` on `PanelResizeHandle`
- * so we don't introduce visible gaps/bars between panels.
  */
 export function panelResizeHandleClasses(
   direction: "horizontal" | "vertical",
@@ -36,17 +33,17 @@ export function panelResizeHandleClasses(
     enabled ? "" : "hidden",
     direction === "horizontal"
       ? [
-          // Keep layout footprint visible at 2px; hit area is expanded via hitAreaMargins.
-          "h-full w-[2px] cursor-col-resize",
-          "bg-[var(--theme-text-faint)] transition-colors",
+          // Keep the interactive area aligned with the visible divider.
+          "h-full w-px cursor-col-resize",
+          "bg-[var(--theme-border)] transition-colors",
           "data-[resize-handle-state=hover]:bg-[var(--theme-interactive)]",
-          "data-[resize-handle-state=drag]:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=drag]:bg-[var(--theme-border)]",
         ]
       : [
-          "h-[2px] w-full cursor-row-resize",
-          "bg-[var(--theme-text-faint)] transition-colors",
+          "h-px w-full cursor-row-resize",
+          "bg-[var(--theme-border)] transition-colors",
           "data-[resize-handle-state=hover]:bg-[var(--theme-interactive)]",
-          "data-[resize-handle-state=drag]:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=drag]:bg-[var(--theme-border)]",
         ],
   );
 }

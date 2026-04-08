@@ -21,7 +21,7 @@ export function BottomPanelHeader({
   hasTerminalGroups,
 }: BottomPanelHeaderProps) {
   return (
-    <div className="flex h-8 shrink-0 items-stretch border-t border-neutral-800">
+    <div className="flex h-8 shrink-0 items-stretch">
       <button
         type="button"
         title="Collapse bottom panel"

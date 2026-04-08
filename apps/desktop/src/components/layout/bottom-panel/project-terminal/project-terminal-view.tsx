@@ -161,7 +161,6 @@ function ResizableTerminalGroup({ children }: { children: ReactNode }) {
         <div key={index} className="contents">
           {index > 0 && (
             <PanelResizeHandle
-              hitAreaMargins={{ coarse: 10, fine: 8 }}
               className={panelResizeHandleClasses("horizontal")}
               onDragging={setIsResizing}
             />

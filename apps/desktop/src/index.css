@@ -94,10 +94,10 @@ body {
 
 /* Resizable panel handles */
 [data-panel-group-direction="horizontal"] > [data-resize-handle-active] {
-  background-color: var(--theme-interactive) !important;
+  background-color: var(--theme-border) !important;
 }
 [data-panel-group-direction="vertical"] > [data-resize-handle-active] {
-  background-color: var(--theme-interactive) !important;
+  background-color: var(--theme-border) !important;
 }
 
 @theme inline {

@@ -181,10 +181,9 @@ export default function App() {
                     </div>
                   </ResizablePanel>
                   <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 6, fine: 4 }}
                     onDragging={setIsResizingPanels}
                     className={cn(
-                      "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
+                      "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
                       fileTreeOpen && selectedWs?.status === "ready"
                         ? "cursor-col-resize"
                         : "hidden",
@@ -222,10 +221,9 @@ export default function App() {
               {selectedWs?.status === "ready" && (
                 <>
                   <PanelResizeHandle
-                    hitAreaMargins={{ coarse: 6, fine: 4 }}
                     onDragging={setIsResizingPanels}
                     className={cn(
-                      "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-text-faint)] transition-colors hover:bg-[var(--theme-interactive)]",
+                      "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
                       bottomPanelOpen ? "cursor-row-resize" : "hidden",
                     )}
                   />

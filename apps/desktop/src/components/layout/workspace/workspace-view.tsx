@@ -349,7 +349,6 @@ function LayoutRenderer({
               className={panelResizeHandleClasses(
                 direction === "horizontal" ? "horizontal" : "vertical",
               )}
-              hitAreaMargins={{ coarse: 10, fine: 8 }}
               onDragging={setLocalResizing}
             />
           )}
