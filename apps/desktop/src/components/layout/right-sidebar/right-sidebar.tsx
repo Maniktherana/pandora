@@ -153,7 +153,7 @@ export default function RightSidebar({
   const layoutCommands = useLayoutActions();
   const { startDrag } = useTabDrag();
   const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
-  useNativeTerminalOverlay(contextMenu !== null);
+  useNativeTerminalOverlay(contextMenu !== null ? "semi-transparent" : null);
 
   const activePath = useMemo(() => {
     if (!runtime?.root || !runtime.focusedPaneID) return null;

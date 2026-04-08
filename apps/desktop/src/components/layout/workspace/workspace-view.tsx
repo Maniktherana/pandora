@@ -304,7 +304,7 @@ function LayoutRenderer({
 }: LayoutRendererProps) {
   const [localResizing, setLocalResizing] = useState(false);
   const anyResizing = isResizing || localResizing;
-  useNativeTerminalOverlay(localResizing);
+  useNativeTerminalOverlay(localResizing ? "semi-transparent" : null);
 
   if (node.type === "leaf") {
     return (

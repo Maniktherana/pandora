@@ -163,6 +163,7 @@ fn main() {
             commands::scm_git_diff,
             commands::scm_read_git_blob,
             commands::scm_status,
+            commands::scm_line_stats,
             commands::scm_stage,
             commands::scm_stage_all,
             commands::scm_unstage,

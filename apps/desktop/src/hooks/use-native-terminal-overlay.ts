@@ -1,26 +1,29 @@
 import { useEffect } from "react";
 import { Effect } from "effect";
 import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
-import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import {
+  type NativeTerminalOverlayMode,
+  TerminalSurfaceService,
+} from "@/services/terminal/terminal-surface-service";
 
-export function useNativeTerminalOverlay(active: boolean) {
+export function useNativeTerminalOverlay(mode: NativeTerminalOverlayMode | null) {
   const runtime = useDesktopRuntime();
 
   useEffect(() => {
-    if (!active) return;
+    if (!mode) return;
 
     void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay()).pipe(
+      Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay(mode)).pipe(
         Effect.catchAll(() => Effect.void),
       ),
     );
 
     return () => {
       void runtime.runPromise(
-        Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay()).pipe(
+        Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay(mode)).pipe(
           Effect.catchAll(() => Effect.void),
         ),
       );
     };
-  }, [active, runtime]);
+  }, [mode, runtime]);
 }

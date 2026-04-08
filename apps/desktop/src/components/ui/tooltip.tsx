@@ -1,13 +1,40 @@
 import * as React from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn } from "@/lib/shared/utils";
 
 function TooltipProvider({ ...props }: TooltipPrimitive.Provider.Props) {
   return <TooltipPrimitive.Provider data-slot="tooltip-provider" {...props} />;
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
+function Tooltip({
+  defaultOpen,
+  onOpenChange,
+  open: openProp,
+  ...props
+}: TooltipPrimitive.Root.Props) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+  const open = openProp ?? uncontrolledOpen;
+  useNativeTerminalOverlay(open ? "semi-transparent" : null);
+
+  const handleOpenChange = React.useCallback<NonNullable<TooltipPrimitive.Root.Props["onOpenChange"]>>(
+    (nextOpen, details) => {
+      if (openProp === undefined) {
+        setUncontrolledOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen, details);
+    },
+    [onOpenChange, openProp],
+  );
+
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      open={open}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  );
 }
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {

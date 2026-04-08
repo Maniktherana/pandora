@@ -87,6 +87,63 @@ struct NativeSurface {
 // on the main thread.
 unsafe impl Send for NativeSurface {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebOverlayMode {
+    Opaque,
+    SemiTransparent,
+}
+
+impl WebOverlayMode {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "opaque" => Ok(Self::Opaque),
+            "semi-transparent" => Ok(Self::SemiTransparent),
+            _ => Err(format!("Unknown terminal overlay mode: {value}")),
+        }
+    }
+
+    fn alpha(self) -> Option<f64> {
+        match self {
+            Self::Opaque => None,
+            Self::SemiTransparent => Some(0.15),
+        }
+    }
+}
+
+#[derive(Default)]
+struct WebOverlayState {
+    opaque: u32,
+    semi_transparent: u32,
+}
+
+impl WebOverlayState {
+    fn effective_mode(&self) -> Option<WebOverlayMode> {
+        if self.opaque > 0 {
+            Some(WebOverlayMode::Opaque)
+        } else if self.semi_transparent > 0 {
+            Some(WebOverlayMode::SemiTransparent)
+        } else {
+            None
+        }
+    }
+
+    fn increment(&mut self, mode: WebOverlayMode) {
+        match mode {
+            WebOverlayMode::Opaque => self.opaque += 1,
+            WebOverlayMode::SemiTransparent => self.semi_transparent += 1,
+        }
+    }
+
+    fn decrement(&mut self, mode: WebOverlayMode) {
+        match mode {
+            WebOverlayMode::Opaque => self.opaque = self.opaque.saturating_sub(1),
+            WebOverlayMode::SemiTransparent => {
+                self.semi_transparent = self.semi_transparent.saturating_sub(1)
+            }
+        }
+    }
+}
+
 /// `NSWindow.backingScaleFactor` for the display the window is on (unlike WKWebView DPR).
 unsafe fn ns_window_backing_scale(window_ptr: *mut c_void) -> f64 {
     let win = window_ptr as *const AnyObject;
@@ -169,8 +226,9 @@ pub struct SurfaceRegistry {
     output_routes: Mutex<HashMap<String, String>>,
     /// NSWindow pointer (the main Tauri window)
     window_ptr: Mutex<Option<*mut c_void>>,
-    /// Refcount: while > 0, terminal NSViews stay hidden so web UI (tab drag, pane resize) receives input.
-    web_overlay_depth: Mutex<u32>,
+    /// Refcounts per overlay mode so overlapping drag/resize/menu interactions can resolve
+    /// to the strongest active visual treatment.
+    web_overlay_state: Mutex<WebOverlayState>,
 }
 
 // Safety: All mutable state is behind Mutex; raw pointers are only
@@ -196,12 +254,41 @@ impl SurfaceRegistry {
             mailboxes: Mutex::new(HashMap::new()),
             output_routes: Mutex::new(HashMap::new()),
             window_ptr: Mutex::new(None),
-            web_overlay_depth: Mutex::new(0),
+            web_overlay_state: Mutex::new(WebOverlayState::default()),
         }
     }
 
-    fn web_ui_suppresses_native_terminals(&self) -> bool {
-        *self.web_overlay_depth.lock().unwrap() > 0
+    fn effective_web_overlay_mode(&self) -> Option<WebOverlayMode> {
+        self.web_overlay_state.lock().unwrap().effective_mode()
+    }
+
+    fn apply_view_overlay(
+        view: *mut AnyObject,
+        visible: bool,
+        overlay_mode: Option<WebOverlayMode>,
+    ) {
+        unsafe {
+            if !visible {
+                let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
+                let _: () = objc2::msg_send![view, setHidden: true];
+                return;
+            }
+
+            match overlay_mode.and_then(WebOverlayMode::alpha) {
+                None if overlay_mode == Some(WebOverlayMode::Opaque) => {
+                    let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
+                    let _: () = objc2::msg_send![view, setHidden: true];
+                }
+                Some(alpha) => {
+                    let _: () = objc2::msg_send![view, setHidden: false];
+                    let _: () = objc2::msg_send![view, setAlphaValue: alpha];
+                }
+                None => {
+                    let _: () = objc2::msg_send![view, setHidden: false];
+                    let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
+                }
+            }
+        }
     }
 
     fn extract_surface_locked(
@@ -427,7 +514,7 @@ impl SurfaceRegistry {
         let _mtm = MainThreadMarker::new()
             .ok_or_else(|| "create_surface must run on the main thread".to_string())?;
 
-        let suppress = self.web_ui_suppresses_native_terminals();
+        let overlay_mode = self.effective_web_overlay_mode();
 
         // Create the native terminal NSView subclass that can receive key/mouse events.
         let ns_view_raw =
@@ -528,7 +615,12 @@ impl SurfaceRegistry {
             }
 
             if let Some(s) = inner.surfaces.get_mut(&surface_id) {
-                s.ns_view.setHidden(suppress);
+                let visible = s.visible;
+                Self::apply_view_overlay(
+                    Retained::as_ptr(&s.ns_view) as *mut AnyObject,
+                    visible,
+                    overlay_mode,
+                );
             }
         }
 
@@ -569,7 +661,7 @@ impl SurfaceRegistry {
         };
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
-        let suppress = self.web_ui_suppresses_native_terminals();
+        let overlay_mode = self.effective_web_overlay_mode();
         let (ghostty_surface, ns_view_ptr, prev_rect, prev_visible, prev_focused) = {
             let inner = self.inner.lock().unwrap();
             let surface = match inner.surfaces.get(surface_id) {
@@ -621,12 +713,11 @@ impl SurfaceRegistry {
         );
 
         // Update NSView frame and visibility
-        let hidden = suppress || !visible;
+        let ns_view = ns_view_ptr as *mut AnyObject;
         unsafe {
-            let ns_view = ns_view_ptr as *mut AnyObject;
             let _: () = objc2::msg_send![ns_view, setFrame: new_frame];
-            let _: () = objc2::msg_send![ns_view, setHidden: hidden];
         }
+        Self::apply_view_overlay(ns_view, visible, overlay_mode);
 
         // Update ghostty surface size (in pixels)
         let width_px = (rect.width * rect.scale_factor) as u32;
@@ -657,45 +748,64 @@ impl SurfaceRegistry {
             surface.focused = focused;
         }
 
-        tlog!("UPDATE", "surface={} vis={} foc={} suppress={} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
-            surface_id, visible, focused, suppress,
+        tlog!("UPDATE", "surface={} vis={} foc={} overlay={:?} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
+            surface_id, visible, focused, overlay_mode,
             prev_rect.x, prev_rect.y, prev_rect.width, prev_rect.height, prev_rect.scale_factor,
             t0.elapsed().as_micros());
 
         Ok(())
     }
 
-    /// Hide all terminal surfaces (first holder). Pair with [`Self::end_web_overlay`].
-    pub fn begin_web_overlay(&self) {
-        let mut d = self.web_overlay_depth.lock().unwrap();
-        *d += 1;
-        tlog!("OVERLAY", "begin depth={}", *d);
-        if *d != 1 {
-            return;
-        }
+    /// Apply a web overlay mode over all visible terminal surfaces. Pair with [`Self::end_web_overlay`].
+    pub fn begin_web_overlay(&self, mode: WebOverlayMode) {
+        let next_mode = {
+            let mut state = self.web_overlay_state.lock().unwrap();
+            state.increment(mode);
+            let effective = state.effective_mode();
+            tlog!(
+                "OVERLAY",
+                "begin mode={:?} counts=({}, {}) effective={:?}",
+                mode,
+                state.opaque,
+                state.semi_transparent,
+                effective
+            );
+            effective
+        };
         let views = {
             let inner = self.inner.lock().unwrap();
             inner
                 .surfaces
                 .values()
-                .map(|surface| Retained::as_ptr(&surface.ns_view) as *mut AnyObject)
+                .map(|surface| {
+                    (
+                        Retained::as_ptr(&surface.ns_view) as *mut AnyObject,
+                        surface.visible,
+                    )
+                })
                 .collect::<Vec<_>>()
         };
-        for view in views {
-            unsafe {
-                let _: () = objc2::msg_send![view, setAlphaValue: 0.15_f64];
-            }
+        for (view, visible) in views {
+            Self::apply_view_overlay(view, visible, next_mode);
         }
     }
 
     /// Restore visibility after [`Self::begin_web_overlay`]. Safe to over-pop (clamped).
-    pub fn end_web_overlay(&self) {
-        let mut d = self.web_overlay_depth.lock().unwrap();
-        *d = d.saturating_sub(1);
-        tlog!("OVERLAY", "end depth={}", *d);
-        if *d > 0 {
-            return;
-        }
+    pub fn end_web_overlay(&self, mode: WebOverlayMode) {
+        let next_mode = {
+            let mut state = self.web_overlay_state.lock().unwrap();
+            state.decrement(mode);
+            let effective = state.effective_mode();
+            tlog!(
+                "OVERLAY",
+                "end mode={:?} counts=({}, {}) effective={:?}",
+                mode,
+                state.opaque,
+                state.semi_transparent,
+                effective
+            );
+            effective
+        };
         let views = {
             let inner = self.inner.lock().unwrap();
             inner
@@ -710,13 +820,7 @@ impl SurfaceRegistry {
                 .collect::<Vec<_>>()
         };
         for (view, hidden) in views {
-            unsafe {
-                if hidden {
-                    let _: () = objc2::msg_send![view, setHidden: true];
-                } else {
-                    let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
-                }
-            }
+            Self::apply_view_overlay(view, !hidden, next_mode);
         }
     }
 

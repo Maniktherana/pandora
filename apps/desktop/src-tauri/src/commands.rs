@@ -563,6 +563,11 @@ pub fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, Str
 }
 
 #[tauri::command]
+pub fn scm_line_stats(worktree_path: String) -> Result<git::ScmLineStats, String> {
+    git::git_line_stats(&worktree_path)
+}
+
+#[tauri::command]
 pub fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
     git::git_add_paths(&worktree_path, &paths)
 }

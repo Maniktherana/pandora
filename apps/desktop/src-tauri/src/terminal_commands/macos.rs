@@ -1,4 +1,6 @@
-use crate::surface_registry::{backing_scale_for_ns_window, SurfaceRect, SurfaceRegistry};
+use crate::surface_registry::{
+    backing_scale_for_ns_window, SurfaceRect, SurfaceRegistry, WebOverlayMode,
+};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::WebviewWindow;
@@ -135,13 +137,15 @@ pub fn terminal_surface_focus(
 pub fn terminal_surfaces_begin_web_overlay(
     window: WebviewWindow,
     registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    mode: String,
 ) -> Result<(), String> {
-    tlog!("CMD", "begin_web_overlay DISPATCH");
+    let mode = WebOverlayMode::parse(&mode)?;
+    tlog!("CMD", "begin_web_overlay DISPATCH mode={:?}", mode);
     let registry = registry.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel();
     window
         .run_on_main_thread(move || {
-            registry.begin_web_overlay();
+            registry.begin_web_overlay(mode);
             let _ = tx.send(Ok(()));
         })
         .map_err(|e| e.to_string())?;
@@ -152,13 +156,15 @@ pub fn terminal_surfaces_begin_web_overlay(
 pub fn terminal_surfaces_end_web_overlay(
     window: WebviewWindow,
     registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    mode: String,
 ) -> Result<(), String> {
-    tlog!("CMD", "end_web_overlay DISPATCH");
+    let mode = WebOverlayMode::parse(&mode)?;
+    tlog!("CMD", "end_web_overlay DISPATCH mode={:?}", mode);
     let registry = registry.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel();
     window
         .run_on_main_thread(move || {
-            registry.end_web_overlay();
+            registry.end_web_overlay(mode);
             let _ = tx.send(Ok(()));
         })
         .map_err(|e| e.to_string())?;

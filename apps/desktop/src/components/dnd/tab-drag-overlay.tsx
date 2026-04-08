@@ -97,6 +97,14 @@ export function TabDragOverlay({
       onDone();
     }
 
+    function onPointerCancel() {
+      onDone();
+    }
+
+    function onWindowBlur() {
+      onDone();
+    }
+
     function executeDrop(drag: DragState, tgt: DropTarget) {
       const desktopView = useDesktopViewStore.getState().desktopView;
       const rid = desktopView.layoutTargetRuntimeId ?? desktopView.selectedWorkspaceID;
@@ -355,9 +363,13 @@ export function TabDragOverlay({
 
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerCancel);
+    window.addEventListener("blur", onWindowBlur);
     return () => {
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("blur", onWindowBlur);
     };
     // target is intentionally read from closure at pointerup time
     // eslint-disable-next-line react-hooks/exhaustive-deps

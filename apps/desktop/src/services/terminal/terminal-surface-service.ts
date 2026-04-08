@@ -38,6 +38,8 @@ interface NativeSyncPayload {
   signature: string;
 }
 
+export type NativeTerminalOverlayMode = "opaque" | "semi-transparent";
+
 export interface TerminalSurfaceServiceApi {
   readonly isNativeSupported: () => Effect.Effect<boolean>;
   readonly upsertSurface: (
@@ -49,8 +51,12 @@ export interface TerminalSurfaceServiceApi {
     workspaceId: string,
   ) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeAllSurfaces: () => Effect.Effect<void, NativeSurfaceError>;
-  readonly beginWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
-  readonly endWebOverlay: () => Effect.Effect<void, NativeSurfaceError>;
+  readonly beginWebOverlay: (
+    mode: NativeTerminalOverlayMode,
+  ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly endWebOverlay: (
+    mode: NativeTerminalOverlayMode,
+  ) => Effect.Effect<void, NativeSurfaceError>;
 }
 
 export class TerminalSurfaceService extends Context.Tag("pandora/TerminalSurfaceService")<
@@ -91,7 +97,10 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     const entries = new Map<string, ManagedSurfaceEntry>();
     let nativeSupportPromise: Promise<boolean> | null = null;
     let createQueue: Promise<void> = Promise.resolve();
-    let webOverlayDepth = 0;
+    const webOverlayDepth = {
+      opaque: 0,
+      "semi-transparent": 0,
+    } satisfies Record<NativeTerminalOverlayMode, number>;
     let needsSyncAfterOverlay = false;
 
     const getNativeSupport = () => {
@@ -134,6 +143,8 @@ export const TerminalSurfaceServiceLive = Layer.effect(
         clearScheduledSync(entry);
       }
     };
+
+    const isWebOverlayActive = () => Object.values(webOverlayDepth).some((depth) => depth > 0);
 
     const buildPayload = (entry: ManagedSurfaceEntry) => {
       if (!entry.anchorElement) {
@@ -244,7 +255,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     };
 
     const runSync = (entry: ManagedSurfaceEntry) => {
-      if (webOverlayDepth > 0) {
+      if (isWebOverlayActive()) {
         needsSyncAfterOverlay = true;
         return;
       }
@@ -275,7 +286,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       const entry = entries.get(surfaceId);
       if (!entry) return;
       if (forceCreate) entry.pendingCreate = true;
-      if (webOverlayDepth > 0) {
+      if (isWebOverlayActive()) {
         needsSyncAfterOverlay = true;
         clearScheduledSync(entry);
         return;
@@ -459,24 +470,25 @@ export const TerminalSurfaceServiceLive = Layer.effect(
           try: () => destroyAllSurfaces(),
           catch: (cause) => nativeSurfaceError(cause, "all-surfaces"),
         }),
-      beginWebOverlay: () =>
+      beginWebOverlay: (mode) =>
         Effect.tryPromise({
           try: async () => {
-            webOverlayDepth += 1;
-            if (webOverlayDepth === 1) {
+            const wasActive = isWebOverlayActive();
+            webOverlayDepth[mode] += 1;
+            if (!wasActive) {
               needsSyncAfterOverlay = false;
               clearAllScheduledSyncs();
-              await invoke("terminal_surfaces_begin_web_overlay");
             }
+            await invoke("terminal_surfaces_begin_web_overlay", { mode });
           },
           catch: (cause) => nativeSurfaceError(cause, "web-overlay"),
         }),
-      endWebOverlay: () =>
+      endWebOverlay: (mode) =>
         Effect.tryPromise({
           try: async () => {
-            webOverlayDepth = Math.max(0, webOverlayDepth - 1);
-            if (webOverlayDepth === 0) {
-              await invoke("terminal_surfaces_end_web_overlay");
+            webOverlayDepth[mode] = Math.max(0, webOverlayDepth[mode] - 1);
+            await invoke("terminal_surfaces_end_web_overlay", { mode });
+            if (Object.values(webOverlayDepth).every((depth) => depth === 0)) {
               if (needsSyncAfterOverlay) {
                 needsSyncAfterOverlay = false;
                 syncAll();

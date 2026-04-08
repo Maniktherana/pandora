@@ -56,6 +56,7 @@ pub fn terminal_surface_focus(
 pub fn terminal_surfaces_begin_web_overlay(
     _window: WebviewWindow,
     _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _mode: String,
 ) -> Result<(), String> {
     Ok(())
 }
@@ -64,6 +65,7 @@ pub fn terminal_surfaces_begin_web_overlay(
 pub fn terminal_surfaces_end_web_overlay(
     _window: WebviewWindow,
     _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _mode: String,
 ) -> Result<(), String> {
     Ok(())
 }

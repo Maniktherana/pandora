@@ -152,7 +152,7 @@ function TerminalPane({
 
 function ResizableTerminalGroup({ children }: { children: ReactNode }) {
   const [isResizing, setIsResizing] = useState(false);
-  useNativeTerminalOverlay(isResizing);
+  useNativeTerminalOverlay(isResizing ? "semi-transparent" : null);
   const childArray = useMemo(() => (Array.isArray(children) ? children : [children]), [children]);
 
   return (

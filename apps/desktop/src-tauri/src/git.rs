@@ -501,6 +501,104 @@ pub struct ScmStatusEntry {
     pub untracked: bool,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmLineStats {
+    pub added: u64,
+    pub removed: u64,
+}
+
+const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+fn parse_numstat(raw: &str) -> ScmLineStats {
+    let mut stats = ScmLineStats::default();
+    for line in raw.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let Some(added) = parts.next() else {
+            continue;
+        };
+        let Some(removed) = parts.next() else {
+            continue;
+        };
+        if let Ok(value) = added.parse::<u64>() {
+            stats.added += value;
+        }
+        if let Ok(value) = removed.parse::<u64>() {
+            stats.removed += value;
+        }
+    }
+    stats
+}
+
+fn count_text_lines(path: &Path) -> u64 {
+    let Ok(bytes) = std::fs::read(path) else {
+        return 0;
+    };
+    if bytes.is_empty() || bytes.contains(&0) {
+        return 0;
+    }
+    let newline_count = bytes.iter().filter(|&&byte| byte == b'\n').count() as u64;
+    if bytes.last() == Some(&b'\n') {
+        newline_count
+    } else {
+        newline_count + 1
+    }
+}
+
+fn count_untracked_added_lines(worktree_path: &str) -> Result<u64, String> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            worktree_path,
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Git command failed".into()
+        } else {
+            stderr
+        });
+    }
+
+    let mut added = 0;
+    for raw_path in output.stdout.split(|byte| *byte == 0) {
+        if raw_path.is_empty() {
+            continue;
+        }
+        let relative_path = String::from_utf8_lossy(raw_path);
+        let full_path = Path::new(worktree_path).join(relative_path.as_ref());
+        if !full_path.is_file() {
+            continue;
+        }
+        added += count_text_lines(&full_path);
+    }
+
+    Ok(added)
+}
+
+pub fn git_line_stats(worktree_path: &str) -> Result<ScmLineStats, String> {
+    verify_git_worktree(worktree_path)?;
+
+    let diff_base = if run_git(&["-C", worktree_path, "rev-parse", "--verify", "HEAD"]).is_ok() {
+        "HEAD"
+    } else {
+        EMPTY_TREE_SHA
+    };
+
+    let mut stats = parse_numstat(
+        &run_git(&["-C", worktree_path, "diff", "--numstat", diff_base, "--"]).unwrap_or_default(),
+    );
+    stats.added += count_untracked_added_lines(worktree_path)?;
+    Ok(stats)
+}
+
 fn dequote_git_path(raw: &str) -> String {
     let s = raw.trim();
     if !(s.starts_with('"') && s.ends_with('"') && s.len() >= 2) {

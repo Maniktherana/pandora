@@ -26,7 +26,7 @@ export default function App() {
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const sidebarResizeWidthRef = useRef<number | null>(null);
   useBootstrapDesktop();
-  useNativeTerminalOverlay(isResizingPanels);
+  useNativeTerminalOverlay(isResizingPanels ? "semi-transparent" : null);
 
   const { selectedWorkspace: selectedWs } = useDesktopView();
   const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
