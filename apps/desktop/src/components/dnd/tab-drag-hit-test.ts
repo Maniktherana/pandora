@@ -5,6 +5,7 @@ import type {
   BottomTerminalSlotDropTarget,
   DragState,
   DropZone,
+  FileTreeDropTarget,
   TabDropTarget,
 } from "./tab-drag.types";
 
@@ -219,5 +220,13 @@ export function hitTestTabs(
     };
   }
 
+  return null;
+}
+
+export function hitTestFileTree(x: number, y: number): FileTreeDropTarget | null {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const sidebar = el.closest<HTMLElement>("[data-file-tree-sidebar='true']");
+  if (sidebar) return { kind: "file-tree" };
   return null;
 }

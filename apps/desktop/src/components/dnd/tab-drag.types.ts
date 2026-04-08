@@ -67,10 +67,15 @@ export interface BottomTerminalPaneDropTarget {
   rect: DOMRect;
 }
 
+export interface FileTreeDropTarget {
+  kind: "file-tree";
+}
+
 export type DropTarget =
   | PaneDropTarget
   | TabDropTarget
   | BottomTerminalGroupDropTarget
   | BottomTerminalInsertDropTarget
   | BottomTerminalSlotDropTarget
-  | BottomTerminalPaneDropTarget;
+  | BottomTerminalPaneDropTarget
+  | FileTreeDropTarget;

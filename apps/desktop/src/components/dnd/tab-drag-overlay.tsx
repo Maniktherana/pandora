@@ -13,6 +13,7 @@ import { cn } from "@/lib/shared/utils";
 import {
   hitTestBottomTerminalPanes,
   hitTestBottomTerminalSidebar,
+  hitTestFileTree,
   hitTestPanes,
   hitTestTabs,
 } from "./tab-drag-hit-test";
@@ -73,6 +74,15 @@ export function TabDragOverlay({
         };
         targetRef.current = paneTarget;
         setTarget(paneTarget);
+      } else if (dragState.kind === "pane-tab") {
+        const fileTreeHit = hitTestFileTree(e.clientX, e.clientY);
+        if (fileTreeHit) {
+          targetRef.current = fileTreeHit;
+          setTarget(fileTreeHit);
+        } else {
+          targetRef.current = null;
+          setTarget(null);
+        }
       } else {
         targetRef.current = null;
         setTarget(null);
@@ -277,6 +287,13 @@ export function TabDragOverlay({
         ensureDraggedFileLoaded(() => {
           layoutCommands.splitPaneWithEditor(paneID, drag.relativePath!, axis, position);
         });
+        return;
+      }
+
+      if (drag.kind === "pane-tab" && tgt.kind === "file-tree") {
+        if (drag.sourcePaneID != null && drag.sourceIndex != null) {
+          layoutCommands.removePaneTabByIndex(drag.sourcePaneID, drag.sourceIndex);
+        }
         return;
       }
 

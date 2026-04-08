@@ -851,6 +851,117 @@ pub fn move_within_workspace(
     Ok(())
 }
 
+#[tauri::command]
+pub fn delete_workspace_entry(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+    if path.is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn copy_within_workspace(
+    workspace_root: String,
+    source_relative_path: String,
+    dest_relative_path: String,
+) -> Result<(), String> {
+    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
+    let root_abs = Path::new(&workspace_root)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {e}"))?;
+
+    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
+        root_abs.clone()
+    } else {
+        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
+        let candidate = root_abs.join(rel);
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|e| format!("Invalid destination: {e}"))?;
+        if !resolved.starts_with(&root_abs) {
+            return Err("Destination escapes workspace root".to_string());
+        }
+        resolved
+    };
+
+    if !dest_dir.is_dir() {
+        return Err("Destination is not a directory".to_string());
+    }
+
+    let name = src
+        .file_name()
+        .ok_or_else(|| "Cannot determine filename".to_string())?;
+    let requested_dest = dest_dir.join(name);
+    let final_dest = if requested_dest.exists() {
+        next_copy_destination(&requested_dest)?
+    } else {
+        requested_dest
+    };
+    copy_path_recursive(&src, &final_dest)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_clipboard_file_paths() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        read_clipboard_file_paths_macos()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_clipboard_file_paths_macos() -> Vec<String> {
+    use std::process::Command;
+    // Use osascript to read file paths from clipboard — works for Finder copies
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            r#"set theFiles to {}
+try
+    set clipItems to the clipboard as «class furl»
+    set end of theFiles to POSIX path of clipItems
+on error
+    try
+        set clipItems to the clipboard as list
+        repeat with f in clipItems
+            try
+                set end of theFiles to POSIX path of (f as alias)
+            end try
+        end repeat
+    on error
+        try
+            set clipData to the clipboard as «class utf8»
+            if clipData starts with "/" and (do shell script "test -e " & quoted form of clipData & " && echo yes || echo no") is "yes" then
+                set end of theFiles to clipData
+            end if
+        end try
+    end try
+end try
+set AppleScript's text item delimiters to linefeed
+return theFiles as text"#,
+        ])
+        .output();
+    match output {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
 // ─── Reload all data (convenience for frontend) ───
 
 #[derive(serde::Serialize)]

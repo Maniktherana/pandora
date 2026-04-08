@@ -683,7 +683,7 @@ impl SurfaceRegistry {
         };
         for view in views {
             unsafe {
-                let _: () = objc2::msg_send![view, setHidden: true];
+                let _: () = objc2::msg_send![view, setAlphaValue: 0.15_f64];
             }
         }
     }
@@ -711,7 +711,11 @@ impl SurfaceRegistry {
         };
         for (view, hidden) in views {
             unsafe {
-                let _: () = objc2::msg_send![view, setHidden: hidden];
+                if hidden {
+                    let _: () = objc2::msg_send![view, setHidden: true];
+                } else {
+                    let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
+                }
             }
         }
     }

@@ -27,7 +27,7 @@ type DirectoryNodeProps = {
   depth: number;
   isIgnored?: boolean;
   resolveDecoration: ScmDecorationResolver;
-  onOpenDiffMenu?: (clientX: number, clientY: number, fileRelPath: string) => void;
+  onOpenContextMenu?: (clientX: number, clientY: number, relPath: string, kind: "file" | "directory") => void;
   activePath: string | null;
   refreshTick: number;
   highlightedLeafDirectory: string | null;
@@ -46,7 +46,7 @@ export function DirectoryNode({
   depth,
   isIgnored,
   resolveDecoration,
-  onOpenDiffMenu,
+  onOpenContextMenu,
   activePath,
   refreshTick,
   highlightedLeafDirectory,
@@ -129,6 +129,11 @@ export function DirectoryNode({
                 })
               }
               onClickCapture={onRowClickCapture}
+              onContextMenu={(event) => {
+                if (!onOpenContextMenu) return;
+                event.preventDefault();
+                onOpenContextMenu(event.clientX, event.clientY, relPath, "directory");
+              }}
             >
               <ChevronRight className="size-3.5 shrink-0 group-data-[panel-open]:rotate-90" />
               <FileTypeIcon path={relPath} kind="directory" expanded={open} />
@@ -168,7 +173,7 @@ export function DirectoryNode({
                   depth={depth + 1}
                   isIgnored={entry.isIgnored}
                   resolveDecoration={resolveDecoration}
-                  onOpenDiffMenu={onOpenDiffMenu}
+                  onOpenContextMenu={onOpenContextMenu}
                   activePath={activePath}
                   refreshTick={refreshTick}
                   highlightedLeafDirectory={highlightedLeafDirectory}
@@ -189,7 +194,7 @@ export function DirectoryNode({
                     entry.isIgnored,
                   )}
                   fileRelPath={joinRel(relPath, entry.name)}
-                  onOpenDiffMenu={onOpenDiffMenu}
+                  onOpenContextMenu={onOpenContextMenu}
                   active={activePath === joinRel(relPath, entry.name)}
                   onOpen={() =>
                     void openFile(workspaceId, workspaceRoot, joinRel(relPath, entry.name))

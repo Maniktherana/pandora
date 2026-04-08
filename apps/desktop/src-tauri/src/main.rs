@@ -178,6 +178,9 @@ fn main() {
             commands::archive_workspace,
             commands::copy_into_workspace,
             commands::move_within_workspace,
+            commands::delete_workspace_entry,
+            commands::copy_within_workspace,
+            commands::read_clipboard_file_paths,
         ])
         .setup(|app| {
             native_shortcuts::init(app.handle().clone());
