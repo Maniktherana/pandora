@@ -53,10 +53,11 @@ export function ProjectTab({
       data-bottom-terminal-slot-index={row.slotIndex}
       className={cn(
         "group/tab relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border border-neutral-800 border-l-transparent border-b-2 border-b-transparent px-2 text-left text-[11px] outline-none",
-        active
-          ? "border-b-neutral-400 bg-neutral-900 text-neutral-100"
-          : "text-neutral-400 hover:bg-neutral-800/30 hover:text-neutral-200",
-        isBeingDragged && "opacity-30",
+        {
+          "border-b-neutral-400 bg-neutral-900 text-neutral-100": active,
+          "text-neutral-400 hover:bg-neutral-800/30 hover:text-neutral-200": !active,
+          "opacity-30": isBeingDragged,
+        },
       )}
       onPointerDown={(e) => onPointerDown(e, row)}
       onPointerUp={() => onPointerUp(row)}
@@ -70,7 +71,10 @@ export function ProjectTab({
         className={cn(
           "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
           "bg-gradient-to-l to-transparent",
-          active ? "from-neutral-900" : "from-neutral-800/30",
+          {
+            "from-neutral-900": active,
+            "from-neutral-800/30": !active,
+          },
         )}
       />
       <div className="relative z-10 ml-1 flex h-full items-center pl-1">

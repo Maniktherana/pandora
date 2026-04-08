@@ -39,9 +39,10 @@ export function BottomPanelHeader({
             onClick={() => onTabChange(id)}
             className={cn(
               "h-full rounded-none px-3 text-xs after:bottom-[-1px] after:h-[2px]",
-              tab === id
-                ? "bg-neutral-900 text-neutral-100"
-                : "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300",
+              {
+                "bg-neutral-900 text-neutral-100": tab === id,
+                "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300": tab !== id,
+              },
             )}
           >
             {id === "terminal" ? "Terminal" : "Ports"}

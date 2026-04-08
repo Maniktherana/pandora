@@ -99,7 +99,10 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
         }}
         className={cn(
           "flex w-full select-none items-center gap-2 rounded-md px-2.5 text-left transition-colors border border-transparent",
-          (isActive || isSelected) ? "bg-[var(--theme-panel-hover)]" : "hover:bg-[var(--theme-panel-hover)]",
+          {
+            "bg-[var(--theme-panel-hover)]": isActive || isSelected,
+            "hover:bg-[var(--theme-panel-hover)]": !isActive && !isSelected,
+          },
         )}
       >
         <HugeiconsIcon

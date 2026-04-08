@@ -150,10 +150,6 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
     tab.kind === "editor" || tab.kind === "diff"
       ? (scmEntry ? decorationForScmEntry(scmEntry) : null)
       : null;
-  const closeButtonToneClass = cn({
-    "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": isActive,
-    "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !isActive,
-  });
 
   return (
     <div
@@ -232,7 +228,10 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
             }}
             className={cn(
               "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
-              closeButtonToneClass,
+              {
+                "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": isActive,
+                "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !isActive,
+              },
             )}
           >
             <X className="h-3 w-3" aria-hidden />
@@ -249,7 +248,10 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
             }}
             className={cn(
               "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
-              closeButtonToneClass,
+              {
+                "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": isActive,
+                "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !isActive,
+              },
             )}
           >
             <X className="h-3 w-3" aria-hidden />

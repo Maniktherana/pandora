@@ -130,7 +130,7 @@ function TerminalPane({
       data-bottom-terminal-group-id={groupId}
       className={cn(
         "relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950",
-        active ? "ring-1 ring-neutral-700/60" : "",
+        { "ring-1 ring-neutral-700/60": active },
       )}
       style={{ background: terminalTheme.background ?? "#0a0a0a" }}
       onPointerDownCapture={() => {
