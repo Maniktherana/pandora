@@ -30,6 +30,9 @@ import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
 import { useScmStatusQuery } from "./scm-queries";
+import {
+  SCM_SECTION_STICKY_Z_INDEX_BASE,
+} from "./scm.types";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -290,7 +293,11 @@ export default function WorkspaceChangesPanel({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto overscroll-none pb-1" style={{ overscrollBehavior: "none" }}>
+      <div
+        data-scm-sidebar="true"
+        className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
+        style={{ overscrollBehavior: "none" }}
+      >
         {entries === null && (
           <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading changes…</div>
         )}
@@ -304,6 +311,8 @@ export default function WorkspaceChangesPanel({
             stagedOpen={stagedOpen}
             setStagedOpen={setStagedOpen}
             busy={busy}
+            stickyTop={0}
+            stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
             onOpenDiff={onOpenDiff}
             onUnstage={onUnstage}
             onViewAll={onViewAllStaged}
@@ -317,6 +326,8 @@ export default function WorkspaceChangesPanel({
             changesOpen={changesOpen}
             setChangesOpen={setChangesOpen}
             busy={busy}
+            stickyTop={0}
+            stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
             workspaceRoot={workspaceRoot}
             onOpenDiff={onOpenDiff}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}

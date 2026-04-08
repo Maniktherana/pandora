@@ -85,6 +85,50 @@ export function decorationForScmEntry(
   return { badge: null, tone: null, dimmed: false };
 }
 
+function pathSegments(path: string): string[] {
+  return path.split("/").filter(Boolean);
+}
+
+function comparePathSegment(a: string, b: string): number {
+  const folded = a.toLowerCase().localeCompare(b.toLowerCase());
+  if (folded !== 0) {
+    return folded;
+  }
+  return a.localeCompare(b);
+}
+
+export function compareScmPathsByTreeOrder(aPath: string, bPath: string): number {
+  const aSegments = pathSegments(aPath);
+  const bSegments = pathSegments(bPath);
+  const sharedDepth = Math.min(aSegments.length, bSegments.length);
+
+  for (let index = 0; index < sharedDepth; index += 1) {
+    const aSegment = aSegments[index];
+    const bSegment = bSegments[index];
+    if (aSegment === bSegment) {
+      continue;
+    }
+
+    const aIsDirectory = index < aSegments.length - 1;
+    const bIsDirectory = index < bSegments.length - 1;
+    if (aIsDirectory !== bIsDirectory) {
+      return aIsDirectory ? -1 : 1;
+    }
+
+    return comparePathSegment(aSegment, bSegment);
+  }
+
+  if (aSegments.length !== bSegments.length) {
+    return aSegments.length - bSegments.length;
+  }
+
+  return comparePathSegment(aPath, bPath);
+}
+
+export function sortScmEntriesByTreeOrder(entries: ScmStatusEntry[]): ScmStatusEntry[] {
+  return [...entries].sort((a, b) => compareScmPathsByTreeOrder(a.path, b.path));
+}
+
 export function scmStage(worktreePath: string, paths: string[]): Promise<void> {
   return invoke("scm_stage", { worktreePath, paths });
 }

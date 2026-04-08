@@ -1,6 +1,8 @@
 import type { DiffSource } from "@/lib/shared/types";
 
 export const SCM_CHANGES_REFRESH_INTERVAL_MS = 2000;
+export const SCM_SECTION_STICKY_ROW_HEIGHT_PX = 28;
+export const SCM_SECTION_STICKY_Z_INDEX_BASE = 20;
 
 export type ScmDiffResult = {
   diff: string;

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { scmLineStats, scmStatus } from "./scm.utils";
+import { scmLineStats, scmStatus, sortScmEntriesByTreeOrder } from "./scm.utils";
 import { SCM_CHANGES_REFRESH_INTERVAL_MS } from "./scm.types";
 
 type ScmQueryOptions = {
@@ -9,7 +9,7 @@ type ScmQueryOptions = {
 export function useScmStatusQuery(workspaceRoot: string, options?: ScmQueryOptions) {
   return useQuery({
     queryKey: ["scm-status", workspaceRoot],
-    queryFn: () => scmStatus(workspaceRoot),
+    queryFn: () => scmStatus(workspaceRoot).then(sortScmEntriesByTreeOrder),
     enabled: Boolean(workspaceRoot) && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,

@@ -14,13 +14,21 @@ import {
   statusTone,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "./scm-status-badge";
-import type { DiscardEntryFn, OpenDiffFn, RunScmActionFn, ScmStatusEntry } from "./scm.types";
+import {
+  SCM_SECTION_STICKY_ROW_HEIGHT_PX,
+  type DiscardEntryFn,
+  type OpenDiffFn,
+  type RunScmActionFn,
+  type ScmStatusEntry,
+} from "./scm.types";
 
 type UnstagedChangesSectionProps = {
   unstagedList: ScmStatusEntry[];
   changesOpen: boolean;
   setChangesOpen: (open: boolean) => void;
   busy: boolean;
+  stickyTop: number;
+  stickyZIndex: number;
   workspaceRoot: string;
   onOpenDiff: OpenDiffFn;
   onOpenFile: (path: string) => void;
@@ -36,6 +44,8 @@ export function UnstagedChangesSection({
   changesOpen,
   setChangesOpen,
   busy,
+  stickyTop,
+  stickyZIndex,
   workspaceRoot,
   onOpenDiff,
   onOpenFile,
@@ -55,7 +65,13 @@ export function UnstagedChangesSection({
           <Button
             variant="ghost"
             size="sm"
-            className="group h-auto min-h-0 w-full justify-start gap-1 rounded-none py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-transparent aria-expanded:text-[var(--theme-text-muted)]"
+            className="group sticky w-full justify-start gap-1 rounded-none border-0 bg-[#151515] bg-clip-border py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-[#151515] aria-expanded:text-[var(--theme-text-muted)]"
+            style={{
+              top: stickyTop,
+              zIndex: stickyZIndex,
+              minHeight: SCM_SECTION_STICKY_ROW_HEIGHT_PX,
+              height: SCM_SECTION_STICKY_ROW_HEIGHT_PX,
+            }}
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
             <span className="text-[11px] font-medium uppercase tracking-wide">Changes</span>
@@ -107,7 +123,7 @@ export function UnstagedChangesSection({
       />
       <CollapsibleContent>
         <TooltipProvider>
-          <ul className="flex flex-col gap-0.5 pb-1">
+          <ul className="flex flex-col">
             {unstagedList.map((entry) => {
               const tone = statusTone(entry);
               const decoration = decorationForScmEntry(entry);
@@ -115,7 +131,7 @@ export function UnstagedChangesSection({
               const fileName = pathParts[pathParts.length - 1] ?? entry.path;
               const directoryPath = pathParts.length > 1 ? pathParts.slice(0, -1).join("/") : "";
               return (
-                <li key={`u:${entry.path}`} className="group py-0.5 pl-1 pr-1">
+                <li key={`u:${entry.path}`} className="group px-1">
                   <div
                     role="button"
                     tabIndex={0}
