@@ -255,6 +255,12 @@ export default function WorkspaceChangesPanel({
           value={commitMessage}
           disabled={busy}
           onChange={(event) => setCommitMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canCommit) {
+              event.preventDefault();
+              onCommit();
+            }
+          }}
         />
         <Button
           type="button"
