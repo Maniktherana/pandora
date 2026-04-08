@@ -1,4 +1,4 @@
-import { GitCompare, X } from "lucide-react";
+import { X } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
@@ -177,21 +177,16 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
         },
       )}
     >
-      {tab.kind === "editor" ? (
+      {tab.kind === "editor" || tab.kind === "diff" ? (
         <FileTypeIcon path={tab.path} kind="file" className="pointer-events-none" />
-      ) : tab.kind === "diff" ? (
-        <GitCompare
-          className={cn("size-3.5 shrink-0", {
-            [toneClass]: !!toneClass,
-            "text-neutral-500": !toneClass,
-          })}
-          aria-hidden
-        />
       ) : tab.kind === "review" ? (
         <HugeiconsIcon
           icon={GitCompareIcon}
           strokeWidth={1.5}
-          className="size-3.5 shrink-0 text-neutral-500"
+          className={cn("size-3.5 shrink-0", {
+            "text-neutral-200": isActive,
+            "text-neutral-500": !isActive,
+          })}
         />
       ) : terminalDisplay ? (
         <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />

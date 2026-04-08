@@ -50,6 +50,10 @@ type ReviewViewerProps = {
 
 type DiffLayout = "split" | "unified";
 type ReviewMode = "unstaged" | "staged" | "branch";
+type BranchLabel = {
+  source: string;
+  target: string;
+};
 
 function loadDiffLayout(): DiffLayout {
   if (typeof window === "undefined") return "split";
@@ -106,19 +110,20 @@ function splitDisplayPath(path: string): { directory: string; fileName: string }
   };
 }
 
-function modeLabel(
-  mode: ReviewMode,
-  branchLabel: string | null,
-  counts: { unstaged: number; staged: number },
-): string {
-  switch (mode) {
-    case "staged":
-      return `Staged (${counts.staged})`;
-    case "branch":
-      return branchLabel ? `Branch · ${branchLabel}` : "Branch · current -> target";
-    default:
-      return `Unstaged (${counts.unstaged})`;
-  }
+function BranchModeLabel({ branchLabel }: { branchLabel: BranchLabel | null }) {
+  return (
+    <>
+      <span>Branch</span>
+      <span className="text-[var(--theme-text-subtle)]">·</span>
+      <span className="font-mono text-[0.95em]">
+        {branchLabel?.source ?? "current"}
+      </span>
+      <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.5} className="size-3.5 shrink-0" />
+      <span className="font-mono text-[0.95em]">
+        {branchLabel?.target ?? "origin/..."}
+      </span>
+    </>
+  );
 }
 
 export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
@@ -130,7 +135,7 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
-  const [baseBranchLabel, setBaseBranchLabel] = useState<string | null>(null);
+  const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
 
@@ -143,12 +148,18 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
     invoke<PrContext>("pr_gather_context", { workspaceId: workspace.id })
       .then((ctx) => {
         if (!cancelled) {
-          setBaseBranchLabel(`from ${workspace.gitBranchName} to origin/${ctx.baseBranch}`);
+          setBaseBranchLabel({
+            source: workspace.gitBranchName,
+            target: `origin/${ctx.baseBranch}`,
+          });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setBaseBranchLabel(`from ${workspace.gitBranchName} to origin/...`);
+          setBaseBranchLabel({
+            source: workspace.gitBranchName,
+            target: "origin/...",
+          });
         }
       });
     return () => {
@@ -324,8 +335,14 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
             }
           >
             <HugeiconsIcon icon={GitCompareIcon} strokeWidth={1.5} className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {modeLabel(mode, baseBranchLabel, { unstaged: unstagedCount, staged: stagedCount })}
+            <span className="flex min-w-0 items-center gap-1 truncate">
+              {mode === "staged" ? (
+                <span>Staged ({stagedCount})</span>
+              ) : mode === "branch" ? (
+                <BranchModeLabel branchLabel={baseBranchLabel} />
+              ) : (
+                <span>Unstaged ({unstagedCount})</span>
+              )}
             </span>
             <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.5} className="size-3.5 shrink-0" />
           </DropdownMenuTrigger>
@@ -339,7 +356,9 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="staged">Staged ({stagedCount})</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="branch">
-                {baseBranchLabel ? `Branch · ${baseBranchLabel}` : "Branch"}
+                <span className="flex items-center gap-1">
+                  <BranchModeLabel branchLabel={baseBranchLabel} />
+                </span>
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
