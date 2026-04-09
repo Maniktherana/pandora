@@ -5,7 +5,13 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useEditorStore } from "@/state/editor-store";
-import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import type {
+  PaneTab,
+  SessionState,
+  SlotState,
+  TerminalAgentStatus,
+  TerminalDisplayState,
+} from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import {
@@ -30,11 +36,26 @@ type WorkspaceTabProps = {
   slotsMap: Record<string, SlotState | undefined>;
   sessionsMap: Record<string, SessionState | undefined>;
   displayMap: Record<string, TerminalDisplayState>;
+  terminalAgentStatus: TerminalAgentStatus;
   onPointerDown: (event: React.PointerEvent, index: number) => void;
   onPointerUp: (event: React.PointerEvent, index: number) => void;
   onCloseDiffTab: (index: number) => void;
   onCloseTerminalTab: (index: number) => void;
 };
+
+function TerminalAgentStatusIndicator({ status }: { status: TerminalAgentStatus }) {
+  if (status === "idle") return null;
+  return (
+    <span
+      aria-hidden
+      className={cn("h-2 w-2 shrink-0 rounded-full", {
+        "animate-pulse bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.45)]": status === "working",
+        "animate-pulse bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.5)]": status === "permission",
+        "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.45)]": status === "review",
+      })}
+    />
+  );
+}
 
 function terminalTabDisplay(
   tab: PaneTab,
@@ -140,6 +161,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
     slotsMap,
     sessionsMap,
     displayMap,
+    terminalAgentStatus,
     onPointerDown,
     onPointerUp,
     onCloseDiffTab,
@@ -199,6 +221,9 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
           className="pointer-events-none"
         />
       )}
+      {tab.kind === "terminal" ? (
+        <TerminalAgentStatusIndicator status={terminalAgentStatus} />
+      ) : null}
       <div
         aria-hidden
         className={cn(

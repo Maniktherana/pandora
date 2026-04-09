@@ -8,6 +8,7 @@ import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { PortsTabContent } from "./ports/ports-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
+import DotGridLoader from "@/components/dot-grid-loader";
 
 type BottomPanelProps = {
   onCollapse: () => void;
@@ -44,8 +45,13 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
 
   if (!projectRuntime) {
     return (
-      <div className="flex h-full min-h-[120px] items-center justify-center bg-[var(--theme-bg)] text-sm text-[var(--theme-text-muted)]">
-        Starting project shell...
+      <div className="flex h-full min-h-[120px] items-center justify-center bg-[var(--theme-bg)] text-[var(--theme-text-muted)]">
+        <DotGridLoader
+          variant="default"
+          gridSize={5}
+          sizeClassName="h-8 w-8"
+          className="opacity-90"
+        />
       </div>
     );
   }

@@ -15,6 +15,9 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "strict": true,
+    "types": [
+      "bun"
+    ],
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": false,

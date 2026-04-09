@@ -60,6 +60,7 @@ export function createWorkspaceRuntimeState(
     slots: [],
     sessions: [],
     terminalDisplayBySlotId: {},
+    terminalAgentStatusBySlotId: {},
     connectionState: "connecting",
     root,
     focusedPaneID,

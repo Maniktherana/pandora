@@ -3,6 +3,16 @@ export type SessionKind = "process" | "agent" | "terminal";
 export type PresentationMode = "single" | "tabs" | "split";
 export type SessionStatus = "stopped" | "running" | "crashed" | "restarting" | "paused";
 export type AggregateStatus = "stopped" | "running" | "crashed" | "restarting";
+export type AgentVendor =
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "gemini"
+  | "cursor-agent"
+  | "github-copilot"
+  | "amp-code";
+export type AgentPhase = "idle" | "working" | "waiting_input" | "waiting_approval" | "finished";
+export type TerminalAgentStatus = "idle" | "working" | "permission" | "review";
 
 export interface ActionCapabilities {
   canFocus: boolean;
@@ -13,13 +23,26 @@ export interface ActionCapabilities {
   canRestart: boolean;
 }
 
+export interface AgentActivityState {
+  vendor: AgentVendor;
+  phase: AgentPhase;
+  agentSessionID: string | null;
+  updatedAt: string;
+  message: string | null;
+  title: string | null;
+  toolName: string | null;
+}
+
 export type TerminalDisplayKind =
   | "terminal"
   | "claude-code"
   | "codex"
   | "opencode"
   | "pi-agent"
-  | "gemini";
+  | "gemini"
+  | "cursor-agent"
+  | "github-copilot"
+  | "amp-code";
 
 export interface TerminalDisplayState {
   kind: TerminalDisplayKind;
@@ -54,6 +77,7 @@ export interface SessionState {
   startedAt: string | null;
   lastOutputAt: string | null;
   foregroundProcess: string | null;
+  agentActivity: AgentActivityState | null;
   capabilities: ActionCapabilities;
 }
 
@@ -202,6 +226,7 @@ export interface WorkspaceRuntimeState {
   slots: SlotState[];
   sessions: SessionState[];
   terminalDisplayBySlotId: Record<string, TerminalDisplayState>;
+  terminalAgentStatusBySlotId: Record<string, TerminalAgentStatus>;
   connectionState: "disconnected" | "connecting" | "connected";
   root: LayoutNode | null;
   focusedPaneID: string | null;

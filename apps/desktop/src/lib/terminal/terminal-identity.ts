@@ -22,6 +22,9 @@ const DETECTORS: Detector[] = [
   { kind: "opencode", label: "OpenCode", pattern: /\bopencode\b/i },
   { kind: "pi-agent", label: "Pi Agent", pattern: /\bpi(?:[\s-]+agent)?\b/i },
   { kind: "gemini", label: "Gemini CLI", pattern: /\bgemini(?:\s+cli)?\b/i },
+  { kind: "cursor-agent", label: "Cursor Agent", pattern: /\bcursor-agent\b/i },
+  { kind: "github-copilot", label: "Copilot", pattern: /\b(?:github-)?copilot\b/i },
+  { kind: "amp-code", label: "Amp", pattern: /\b(?:ampcode|amp-code|amp)\b/i },
 ];
 
 function detectTerminalDisplay(source: string): TerminalDisplayState | null {

@@ -10,12 +10,16 @@ import {
   SplitIcon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
 import { useScmLineStatsQuery } from "@/components/layout/right-sidebar/scm/scm-queries";
 import DotGridLoader from "@/components/dot-grid-loader";
+import {
+  isTerminalAgentAttentionStatus,
+  workspaceTerminalAgentStatus,
+} from "@/lib/terminal/agent-activity";
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
@@ -25,6 +29,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const workspaceCommands = useWorkspaceActions();
+  const runtime = useRuntimeState(workspace.id);
   const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
     enabled: workspace.status === "ready",
   });
@@ -34,6 +39,10 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const isFailed = workspace.status === "failed";
   const addedCount = scmCounts?.added ?? 0;
   const removedCount = scmCounts?.removed ?? 0;
+  const agentStatus = workspaceTerminalAgentStatus(runtime);
+  const hasAgentAttention = !isSelected && isTerminalAgentAttentionStatus(agentStatus);
+  const showAgentLoader = agentStatus === "working";
+  const highlightName = hasAgentAttention;
   const prState = workspace.prState as string | null;
   const stateIcon = useMemo(() => {
     if (prState === "open") {
@@ -81,12 +90,26 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
           },
         )}
       >
-        <HugeiconsIcon
-          icon={stateIcon.icon}
-          strokeWidth={2}
-          className={cn("h-3.5 w-3.5 shrink-0", stateIcon.className)}
-        />
-        <span className="min-w-0 ml-1 flex-1 truncate text-sm text-[var(--theme-text-subtle)]">
+        {showAgentLoader ? (
+          <DotGridLoader
+            variant="default"
+            gridSize={3}
+            sizeClassName="h-4 w-4"
+            className="shrink-0 opacity-85"
+          />
+        ) : (
+          <HugeiconsIcon
+            icon={stateIcon.icon}
+            strokeWidth={2}
+            className={cn("h-3.5 w-3.5 shrink-0", stateIcon.className)}
+          />
+        )}
+        <span
+          className={cn("min-w-0 ml-1 flex-1 truncate text-sm", {
+            "text-[var(--theme-text)]": highlightName,
+            "text-[var(--theme-text-subtle)]": !highlightName,
+          })}
+        >
           {workspace.name}
         </span>
         {workspace.status === "creating" ? (

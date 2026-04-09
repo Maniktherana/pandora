@@ -69,6 +69,7 @@ export class DaemonServer {
         });
       },
       resolvedDefaultCwd,
+      rid,
     );
   }
 
@@ -305,6 +306,9 @@ export class DaemonServer {
         break;
       case "resize":
         this.processManager.resizeSession(message.sessionID, message.cols, message.rows);
+        break;
+      case "agent_cli_signal":
+        this.processManager.recordAgentCliSignal(message.signal);
         break;
       default:
         writeMessage(socket, { type: "error", message: "Unsupported message" });

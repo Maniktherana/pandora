@@ -5,6 +5,15 @@ export type SessionKind = "process" | "agent" | "terminal";
 export type PresentationMode = "single" | "tabs" | "split";
 export type SessionStatus = "stopped" | "running" | "crashed" | "restarting" | "paused";
 export type AggregateStatus = "stopped" | "running" | "crashed" | "restarting";
+export type AgentVendor =
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "gemini"
+  | "cursor-agent"
+  | "github-copilot"
+  | "amp-code";
+export type AgentPhase = "idle" | "working" | "waiting_input" | "waiting_approval" | "finished";
 
 export interface ActionCapabilities {
   canFocus: boolean;
@@ -13,6 +22,22 @@ export interface ActionCapabilities {
   canClear: boolean;
   canStop: boolean;
   canRestart: boolean;
+}
+
+export interface AgentActivityState {
+  vendor: AgentVendor;
+  phase: AgentPhase;
+  agentSessionID: string | null;
+  updatedAt: string;
+  message: string | null;
+  title: string | null;
+  toolName: string | null;
+}
+
+export interface AgentCliSignal {
+  slotID: string;
+  source: AgentVendor;
+  payloadBase64?: string | null;
 }
 
 export interface SlotDefinition {
@@ -51,6 +76,7 @@ export interface SessionInstance {
   startedAt: string | null;
   lastOutputAt: string | null;
   foregroundProcess: string | null;
+  agentActivity: AgentActivityState | null;
 }
 
 export interface SlotState extends SlotDefinition {
@@ -93,7 +119,8 @@ export type ClientMessage =
   | { type: "close_session_instance"; sessionID: string }
   | { type: "input"; sessionID: string; data: string }
   | { type: "request_snapshot" }
-  | { type: "resize"; sessionID: string; cols: number; rows: number };
+  | { type: "resize"; sessionID: string; cols: number; rows: number }
+  | { type: "agent_cli_signal"; signal: AgentCliSignal };
 
 export type DaemonMessage =
   | { type: "slot_snapshot"; slots: SlotState[] }

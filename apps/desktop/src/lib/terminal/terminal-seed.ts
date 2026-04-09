@@ -41,7 +41,10 @@ export function seedTerminalWithName(client: DaemonClient, runtimeId: string, na
           command: `exec ${shellPath} -i`,
           cwd: null,
           port: null,
-          envOverrides: {},
+          envOverrides: {
+            PANDORA_RUNTIME_ID: runtimeId,
+            PANDORA_SLOT_ID: slotID,
+          },
           restartPolicy: "manual",
           pauseSupported: false,
           resumeSupported: false,

@@ -11,6 +11,7 @@ import {
   splitPaneWithinLeaf,
 } from "@/components/layout/workspace/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { acknowledgeTerminalAgentStatus } from "@/lib/terminal/agent-activity";
 
 export type WorkspaceLayoutChange = {
   root: LayoutNode | null;
@@ -161,7 +162,12 @@ export function selectTabInPaneInWorkspaceRuntime(
 ) {
   return withLayoutSnapshot(runtime, (snapshot) => {
     if (!snapshot.root) return null;
-    if (!findLeaf(snapshot.root, paneID)) return null;
+    const leaf = findLeaf(snapshot.root, paneID);
+    if (!leaf) return null;
+    const selectedTab = leaf.tabs[index];
+    if (selectedTab?.kind === "terminal") {
+      acknowledgeTerminalAgentStatus(runtime, selectedTab.slotId);
+    }
     return { root: selectTabInLayout(snapshot.root, paneID, index), focusedPaneID: paneID };
   });
 }

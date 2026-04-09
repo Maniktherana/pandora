@@ -10,6 +10,7 @@ import type {
   WorkspaceKind,
   WorkspaceRecord,
   LayoutNode,
+  SessionState,
   SlotState,
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
@@ -79,6 +80,14 @@ import {
   getVisibleProjectTerminalSlotIds,
   getVisibleWorkspaceTerminalSlotIds,
 } from "@/lib/terminal/lazy-terminal-connections";
+import {
+  acknowledgeSelectedTerminalAgentStatus,
+  applySessionAgentActivityStatus,
+  clearEphemeralTerminalAgentStatus,
+  hasAgentActivityChanged,
+  rebuildTerminalAgentStatuses,
+  sessionAgentActivity,
+} from "@/lib/terminal/agent-activity";
 import { seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
@@ -963,6 +972,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
           if (desktopStateSnapshot.selectedWorkspaceID !== workspace.id) return;
           yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: false });
+          if (desktopStateSnapshot.selectedWorkspaceID !== workspace.id) return;
+          yield* updateWorkspaceRuntime(workspace.id, (runtime) => {
+            acknowledgeSelectedTerminalAgentStatus(runtime);
+          });
         }),
         "Failed to settle selected workspace:",
       );
@@ -1156,6 +1169,21 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         void invoke("pr_link", { workspaceId, prUrl, prNumber });
       });
 
+    const applyAgentActivityTransition = (
+      runtime: WritableDraft<WorkspaceRuntimeState>,
+      workspaceId: string,
+      session: SessionState,
+    ) => {
+      runtime.terminalAgentStatusBySlotId ??= {};
+      const previous = sessionAgentActivity(runtime, session);
+      const next = session.agentActivity;
+      if (!hasAgentActivityChanged(previous, next)) return;
+
+      applySessionAgentActivityStatus(runtime, session, {
+        selectedWorkspaceId: desktopStateSnapshot.selectedWorkspaceID,
+      });
+    };
+
     const processDaemonEvent = Effect.flatMap(eventQueue.take(), (event) =>
       Effect.gen(function* () {
         switch (event.type) {
@@ -1202,6 +1230,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           case "session_snapshot":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               replaceRuntimeSessions(runtime, event.sessions);
+              rebuildTerminalAgentStatuses(runtime, {
+                selectedWorkspaceId: desktopStateSnapshot.selectedWorkspaceID,
+              });
             });
             yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
@@ -1215,8 +1246,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             {
               const crashedTerminalSlotId = yield* mutateRuntimeState(
                 event.workspaceId,
-                (runtime) =>
-                  updateRuntimeSessionState(runtime, event.session).crashedTerminalSlotId,
+                (runtime) => {
+                  applyAgentActivityTransition(runtime, event.workspaceId, event.session);
+                  return updateRuntimeSessionState(runtime, event.session).crashedTerminalSlotId;
+                },
               );
               if (crashedTerminalSlotId) {
                 yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -1252,6 +1285,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             break;
           case "session_closed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
+              const session = runtime.sessions.find((candidate) => candidate.id === event.sessionID);
+              if (session) {
+                clearEphemeralTerminalAgentStatus(runtime, session.slotID);
+              }
               removeRuntimeSessionState(runtime, event.sessionID);
             });
             yield* refreshRuntimeTerminalStartup(event.workspaceId);

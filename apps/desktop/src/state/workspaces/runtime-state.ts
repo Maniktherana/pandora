@@ -86,6 +86,7 @@ export function createWorkspaceRuntimeState(workspaceId: string): WorkspaceRunti
     slots: [],
     sessions: [],
     terminalDisplayBySlotId: {},
+    terminalAgentStatusBySlotId: {},
     connectionState: "disconnected",
     root: null,
     focusedPaneID: null,
@@ -114,9 +115,12 @@ export function setRuntimeConnectionState(
 }
 
 export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotState[]) {
+  runtime.terminalAgentStatusBySlotId ??= {};
   runtime.slots = slots;
   const previousDisplayBySlotId = runtime.terminalDisplayBySlotId;
+  const previousAgentStatusBySlotId = runtime.terminalAgentStatusBySlotId;
   let nextDisplayBySlotId = previousDisplayBySlotId;
+  let nextAgentStatusBySlotId = previousAgentStatusBySlotId;
   const liveSlotIds = new Set(slots.map((slot) => slot.id));
 
   for (const slot of slots) {
@@ -127,6 +131,14 @@ export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotS
     nextDisplayBySlotId[slot.id] = defaultTerminalDisplay();
   }
 
+  for (const slot of slots) {
+    if (nextAgentStatusBySlotId[slot.id]) continue;
+    if (nextAgentStatusBySlotId === previousAgentStatusBySlotId) {
+      nextAgentStatusBySlotId = { ...previousAgentStatusBySlotId };
+    }
+    nextAgentStatusBySlotId[slot.id] = "idle";
+  }
+
   for (const slotId of Object.keys(previousDisplayBySlotId)) {
     if (liveSlotIds.has(slotId)) continue;
     if (nextDisplayBySlotId === previousDisplayBySlotId) {
@@ -135,7 +147,16 @@ export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotS
     delete nextDisplayBySlotId[slotId];
   }
 
+  for (const slotId of Object.keys(previousAgentStatusBySlotId)) {
+    if (liveSlotIds.has(slotId)) continue;
+    if (nextAgentStatusBySlotId === previousAgentStatusBySlotId) {
+      nextAgentStatusBySlotId = { ...previousAgentStatusBySlotId };
+    }
+    delete nextAgentStatusBySlotId[slotId];
+  }
+
   runtime.terminalDisplayBySlotId = nextDisplayBySlotId;
+  runtime.terminalAgentStatusBySlotId = nextAgentStatusBySlotId;
 }
 
 export function replaceRuntimeSessions(runtime: WorkspaceRuntimeState, sessions: SessionState[]) {
@@ -143,6 +164,7 @@ export function replaceRuntimeSessions(runtime: WorkspaceRuntimeState, sessions:
 }
 
 export function updateRuntimeSlot(runtime: WorkspaceRuntimeState, slot: SlotState) {
+  runtime.terminalAgentStatusBySlotId ??= {};
   const idx = runtime.slots.findIndex((existing) => existing.id === slot.id);
   if (idx >= 0) {
     runtime.slots[idx] = slot;
@@ -150,13 +172,16 @@ export function updateRuntimeSlot(runtime: WorkspaceRuntimeState, slot: SlotStat
   if (!runtime.terminalDisplayBySlotId[slot.id]) {
     runtime.terminalDisplayBySlotId[slot.id] = defaultTerminalDisplay();
   }
+  runtime.terminalAgentStatusBySlotId[slot.id] ??= "idle";
 }
 
 export function addRuntimeSlot(runtime: WorkspaceRuntimeState, slot: SlotState) {
+  runtime.terminalAgentStatusBySlotId ??= {};
   runtime.slots.push(slot);
   if (!runtime.terminalDisplayBySlotId[slot.id]) {
     runtime.terminalDisplayBySlotId[slot.id] = defaultTerminalDisplay();
   }
+  runtime.terminalAgentStatusBySlotId[slot.id] ??= "idle";
   if (isProjectRuntimeKey(runtime.workspaceId)) {
     runtime.terminalPanel = reconcileProjectTerminalPanelState(
       runtime.terminalPanel,
@@ -177,6 +202,7 @@ export function removeRuntimeSlot(runtime: WorkspaceRuntimeState, slotID: string
 
   runtime.slots = runtime.slots.filter((slot) => slot.id !== slotID);
   delete runtime.terminalDisplayBySlotId[slotID];
+  delete runtime.terminalAgentStatusBySlotId[slotID];
   runtime.root = newRoot;
   runtime.focusedPaneID = focusedPaneID;
   if (isProjectRuntimeKey(runtime.workspaceId)) {
