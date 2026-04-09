@@ -646,32 +646,44 @@ pub fn scm_read_git_blob(
 }
 
 #[tauri::command]
-pub fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, String> {
-    git::git_status(&worktree_path)
+pub async fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, String> {
+    tokio::task::spawn_blocking(move || git::git_status(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_line_stats(worktree_path: String) -> Result<git::ScmLineStats, String> {
-    git::git_line_stats(&worktree_path)
+pub async fn scm_line_stats(worktree_path: String) -> Result<git::ScmLineStats, String> {
+    tokio::task::spawn_blocking(move || git::git_line_stats(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_path_line_stats(
+pub async fn scm_path_line_stats(
     worktree_path: String,
     relative_path: String,
     staged: bool,
 ) -> Result<git::ScmLineStats, String> {
-    git::git_path_line_stats(&worktree_path, &relative_path, staged)
+    tokio::task::spawn_blocking(move || {
+        git::git_path_line_stats(&worktree_path, &relative_path, staged)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_path_line_stats_bulk(
+pub async fn scm_path_line_stats_bulk(
     worktree_path: String,
     relative_paths: Vec<String>,
     staged: bool,
     untracked_paths: Vec<String>,
 ) -> Result<Vec<git::ScmPathLineStats>, String> {
-    git::git_path_line_stats_bulk(&worktree_path, &relative_paths, staged, &untracked_paths)
+    tokio::task::spawn_blocking(move || {
+        git::git_path_line_stats_bulk(&worktree_path, &relative_paths, staged, &untracked_paths)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
