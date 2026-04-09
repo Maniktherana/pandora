@@ -1,6 +1,15 @@
-import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
@@ -12,6 +21,7 @@ import type {
   ScmStatusEntry,
   TreeScmDecoration,
 } from "@/components/layout/right-sidebar/scm/scm.types";
+import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 import {
   loadFileTreeExpandedPaths,
   persistFileTreeExpandedPaths,
@@ -23,7 +33,6 @@ import {
   SUPPRESS_HOVER_AFTER_DRAG_MS,
   TRANSPARENT_DRAG_IMAGE,
   TREE_ROW_SELECTOR,
-  type DirEntry,
   type DragPointer,
   type FileTreeRowHandle,
   type InternalTreeDragSession,
@@ -42,6 +51,10 @@ import { FileTreeToolbar } from "./files/file-tree-toolbar";
 import { TreeCreateInput } from "./files/tree-create-input";
 import { TreeRenameInput } from "./files/tree-rename-input";
 import { TreeDragOverlay } from "./files/tree-drag-overlay";
+import {
+  fileTreeQueryKey,
+  useWorkspaceDirectoryQuery,
+} from "./files/files-queries";
 import { useScmStatusQuery } from "./scm/scm-queries";
 import {
   ContextMenu,
@@ -125,6 +138,15 @@ function RightSidebarPanelLoader() {
   );
 }
 
+function selectActiveEditorPath(runtime: WorkspaceRuntimeState | null): string | null {
+  if (!runtime?.root || !runtime.focusedPaneID) return null;
+  const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
+  if (!leaf) return null;
+  const tab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
+  if (!tab || (tab.kind !== "editor" && tab.kind !== "diff")) return null;
+  return tab.path;
+}
+
 export default function RightSidebar({
   workspaceRoot,
   workspaceId,
@@ -138,8 +160,6 @@ export default function RightSidebar({
   projectDisplayName: string;
   mode: LeftPanelMode;
 }) {
-  const [rootEntries, setRootEntries] = useState<DirEntry[] | null>(null);
-  const [rootError, setRootError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     relPath: string;
     kind: TreeRowKind | "root";
@@ -153,7 +173,6 @@ export default function RightSidebar({
   } | null>(null);
   const [pendingRename, setPendingRename] = useState<PendingRenameState>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const [refreshTick, setRefreshTick] = useState(0);
   const [pendingPointerDrag, setPendingPointerDrag] = useState<PendingPointerDrag | null>(null);
   const [dragSession, setDragSession] = useState<TreeDragSession | null>(null);
   const [hoverSuppressed, setHoverSuppressed] = useState(false);
@@ -169,7 +188,6 @@ export default function RightSidebar({
   const externalTargetRef = useRef<TreeDropTarget | null>(null);
   const externalLeaveTimerRef = useRef<number | null>(null);
 
-  expandedPathsRef.current = expandedPaths;
   workspaceRootRef.current = workspaceRoot;
   leftModeRef.current = mode;
   pendingPointerDragRef.current = pendingPointerDrag;
@@ -178,24 +196,26 @@ export default function RightSidebar({
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const { startDrag } = useTabDrag();
-  const runtime = useRuntimeState(workspaceId);
+  const queryClient = useQueryClient();
+  const activePath = useRuntimeState(workspaceId, selectActiveEditorPath);
   const fileTreeOpen = useUiPreferencesView((view) => view.fileTreeOpen);
+  const rootEntriesQuery = useWorkspaceDirectoryQuery({
+    workspaceId,
+    workspaceRoot,
+    relativePath: "",
+    enabled: fileTreeOpen && mode === "files",
+  });
+  const rootEntries = rootEntriesQuery.data ?? null;
+  const rootError = rootEntriesQuery.error ? String(rootEntriesQuery.error) : null;
   const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot, {
     enabled: fileTreeOpen && mode === "files",
   });
 
-  const activePath = useMemo(() => {
-    if (!runtime?.root || !runtime.focusedPaneID) return null;
-    const leaf = findLeaf(runtime.root, runtime.focusedPaneID);
-    if (!leaf) return null;
-    const tab = leaf.tabs[leaf.selectedIndex] ?? leaf.tabs[0];
-    if (!tab || (tab.kind !== "editor" && tab.kind !== "diff")) return null;
-    return tab.path;
-  }, [runtime]);
-
   const refreshTree = useCallback(() => {
-    setRefreshTick((tick) => tick + 1);
-  }, []);
+    void queryClient.invalidateQueries({
+      queryKey: fileTreeQueryKey(workspaceId, workspaceRoot),
+    });
+  }, [queryClient, workspaceId, workspaceRoot]);
 
   const suppressHoverBriefly = useCallback(() => {
     if (suppressHoverTimerRef.current !== null) {
@@ -579,7 +599,8 @@ export default function RightSidebar({
   const highlightedLeafDirectory =
     activeDropTarget?.mode === "root"
       ? ""
-      : targetDirectory !== null && (targetDirectory === "" || expandedPaths.has(targetDirectory))
+      : targetDirectory !== null &&
+          (targetDirectory === "" || expandedPathsRef.current.has(targetDirectory))
         ? targetDirectory
         : null;
 
@@ -839,6 +860,7 @@ export default function RightSidebar({
         setExpandedPaths((current) => {
           merged = new Set(paths);
           for (const path of current) merged.add(path);
+          expandedPathsRef.current = merged;
           return merged;
         });
         expansionLoadedRef.current = true;
@@ -871,14 +893,15 @@ export default function RightSidebar({
 
   const setPathExpanded = useCallback(
     (relPath: string, expanded: boolean) => {
-      setExpandedPaths((previous) => {
-        const next = new Set(previous);
-        if (expanded) next.add(relPath);
-        else next.delete(relPath);
-        if (expansionLoadedRef.current) {
-          void persistFileTreeExpandedPaths(workspaceId, next);
-        }
-        return next;
+      const next = new Set(expandedPathsRef.current);
+      if (expanded) next.add(relPath);
+      else next.delete(relPath);
+      expandedPathsRef.current = next;
+      if (expansionLoadedRef.current) {
+        void persistFileTreeExpandedPaths(workspaceId, next);
+      }
+      startTransition(() => {
+        setExpandedPaths(next);
       });
     },
     [workspaceId],
@@ -943,7 +966,9 @@ export default function RightSidebar({
   }, []);
 
   const handleCollapseAll = useCallback(() => {
-    setExpandedPaths(new Set());
+    const next = new Set<string>();
+    expandedPathsRef.current = next;
+    setExpandedPaths(next);
     if (expansionLoadedRef.current) {
       void persistFileTreeExpandedPaths(workspaceId, []);
     }
@@ -1073,42 +1098,6 @@ export default function RightSidebar({
     closeContextMenu();
   }, [closeContextMenu, contextMenu, refreshTree, workspaceRoot]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        setRefreshTick((tick) => tick + 1);
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (refreshTick === 0) {
-      setRootEntries(null);
-      setRootError(null);
-    }
-    void invoke<DirEntry[]>("list_workspace_directory", {
-      workspaceRoot,
-      relativePath: "",
-    })
-      .then((list) => {
-        if (!cancelled) {
-          setRootEntries(list);
-          setRootError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setRootError(String(error));
-          setRootEntries([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceRoot, refreshTick]);
-
   return (
     <div className="flex h-full min-w-0 flex-col bg-[#151515] select-none">
       {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
@@ -1148,7 +1137,7 @@ export default function RightSidebar({
                 onDragLeave={handleTreeDragLeave}
                 onDrop={handleTreeDrop}
               >
-                {rootEntries === null ? <RightSidebarPanelLoader /> : null}
+                {rootEntries === null && rootEntriesQuery.isFetching ? <RightSidebarPanelLoader /> : null}
                 {rootError ? (
                   <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
                 ) : null}
@@ -1188,7 +1177,6 @@ export default function RightSidebar({
                       setPathExpanded={setPathExpanded}
                       onOpenContextMenu={onOpenContextMenu}
                       activePath={activePath}
-                      refreshTick={refreshTick}
                       highlightedLeafDirectory={highlightedLeafDirectory}
                       targetDirectory={targetDirectory}
                       isHoverSuppressed={isHoverSuppressed}

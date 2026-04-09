@@ -506,8 +506,7 @@ fn resolve_workspace_path(
     Ok(resolved)
 }
 
-#[tauri::command]
-pub fn list_workspace_directory(
+fn list_workspace_directory_blocking(
     workspace_root: String,
     relative_path: String,
 ) -> Result<Vec<WorkspaceDirEntry>, String> {
@@ -554,6 +553,18 @@ pub fn list_workspace_directory(
     });
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn list_workspace_directory(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<Vec<WorkspaceDirEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_workspace_directory_blocking(workspace_root, relative_path)
+    })
+    .await
+    .map_err(|e| format!("Failed to list workspace directory: {e}"))?
 }
 
 #[tauri::command]

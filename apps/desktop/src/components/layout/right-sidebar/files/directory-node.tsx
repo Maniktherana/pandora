@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
@@ -17,12 +16,12 @@ import {
   TREE_ROW_HEIGHT_PX,
   TREE_ROW_INDENT_PX,
   TREE_ROW_PADDING_LEFT_PX,
-  type DirEntry,
   type FileTreeRowHandle,
   type PendingCreateState,
   type PendingRenameState,
   type ScmDecorationResolver,
 } from "./files.types";
+import { useWorkspaceDirectoryQuery } from "./files-queries";
 import { TreeCreateInput } from "./tree-create-input";
 import { TreeRenameInput } from "./tree-rename-input";
 
@@ -61,7 +60,6 @@ type DirectoryNodeProps = {
   setPathExpanded: (relPath: string, expanded: boolean) => void;
   onOpenContextMenu?: (clientX: number, clientY: number, relPath: string, kind: "file" | "directory") => void;
   activePath: string | null;
-  refreshTick: number;
   highlightedLeafDirectory: string | null;
   targetDirectory: string | null;
   isHoverSuppressed: boolean;
@@ -91,7 +89,6 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   setPathExpanded,
   onOpenContextMenu,
   activePath,
-  refreshTick,
   highlightedLeafDirectory,
   targetDirectory,
   isHoverSuppressed,
@@ -107,9 +104,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   onCancelRename,
 }: DirectoryNodeProps) {
   const { openFile } = useEditorActions();
-  const open = isExpanded;
-  const [children, setChildren] = useState<DirEntry[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [open, setOpen] = useState(isExpanded);
   const [isStickyActive, setIsStickyActive] = useState(false);
   const rowRef = useRef<HTMLButtonElement | null>(null);
   const decoration = resolveDecoration(relPath, true, isIgnored);
@@ -117,28 +112,17 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   const rowPaddingLeft = TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX;
 
   useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void invoke<DirEntry[]>("list_workspace_directory", {
-      workspaceRoot,
-      relativePath: relPath,
-    })
-      .then((list) => {
-        if (!cancelled) {
-          setChildren(list);
-          setLoadError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setLoadError(String(error));
-          setChildren([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceRoot, relPath, refreshTick]);
+    setOpen(isExpanded);
+  }, [isExpanded]);
+
+  const childrenQuery = useWorkspaceDirectoryQuery({
+    workspaceId,
+    workspaceRoot,
+    relativePath: relPath,
+    enabled: open,
+  });
+  const children = childrenQuery.data ?? null;
+  const loadError = childrenQuery.error ? String(childrenQuery.error) : null;
 
   useEffect(() => {
     if (!open) {
@@ -168,7 +152,13 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   }, [depth, open]);
 
   return (
-      <Collapsible open={open} onOpenChange={(next) => setPathExpanded(relPath, next)}>
+      <Collapsible
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          setPathExpanded(relPath, next);
+        }}
+      >
         <CollapsibleTrigger
           nativeButton={false}
           render={
@@ -254,7 +244,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
                 {loadError}
               </div>
             )}
-            {open && children === null && !loadError && (
+            {open && children === null && childrenQuery.isFetching && !loadError && (
               <div
                 className="flex items-center justify-center py-3"
                 style={{
@@ -302,7 +292,6 @@ export const DirectoryNode = React.memo(function DirectoryNode({
                     setPathExpanded={setPathExpanded}
                     onOpenContextMenu={onOpenContextMenu}
                     activePath={activePath}
-                    refreshTick={refreshTick}
                     highlightedLeafDirectory={highlightedLeafDirectory}
                     targetDirectory={targetDirectory}
                     isHoverSuppressed={isHoverSuppressed}
