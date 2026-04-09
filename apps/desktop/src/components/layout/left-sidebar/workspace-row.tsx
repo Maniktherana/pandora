@@ -20,6 +20,11 @@ import {
   isTerminalAgentAttentionStatus,
   workspaceTerminalAgentStatus,
 } from "@/lib/terminal/agent-activity";
+import type { WorkspaceRuntimeState } from "@/lib/shared/types";
+
+function selectAgentStatus(runtime: WorkspaceRuntimeState | null) {
+  return workspaceTerminalAgentStatus(runtime);
+}
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
@@ -29,7 +34,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const workspaceCommands = useWorkspaceActions();
-  const runtime = useRuntimeState(workspace.id);
+  const agentStatus = useRuntimeState(workspace.id, selectAgentStatus);
   const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
     enabled: workspace.status === "ready",
   });
@@ -39,7 +44,6 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const isFailed = workspace.status === "failed";
   const addedCount = scmCounts?.added ?? 0;
   const removedCount = scmCounts?.removed ?? 0;
-  const agentStatus = workspaceTerminalAgentStatus(runtime);
   const hasAgentAttention = !isSelected && isTerminalAgentAttentionStatus(agentStatus);
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;

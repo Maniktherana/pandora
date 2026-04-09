@@ -97,7 +97,6 @@ describe("ProcessManager updates", () => {
           };
           process: null;
           stopTimer: null;
-          fgPollTimer: null;
         }
       >;
     }).sessions;
@@ -118,7 +117,6 @@ describe("ProcessManager updates", () => {
       },
       process: null,
       stopTimer: null,
-      fgPollTimer: null,
     });
 
     const encode = (payload: unknown) => Buffer.from(JSON.stringify(payload)).toString("base64");
