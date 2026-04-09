@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
-import { useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useRuntimeState, useUiPreferencesView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
 import { decorationForScmEntry } from "@/components/layout/right-sidebar/scm/scm.utils";
@@ -25,7 +25,6 @@ import {
   TREE_ROW_SELECTOR,
   type DirEntry,
   type DragPointer,
-  type ExpansionCtx,
   type FileTreeRowHandle,
   type InternalTreeDragSession,
   type LeftPanelMode,
@@ -37,7 +36,6 @@ import {
   type TreeRowKind,
 } from "./files/files.types";
 import { useEditorActions } from "@/hooks/use-editor-actions";
-import { FileTreeExpansionContext } from "./files/file-tree-expansion-context";
 import { FileTreeRow } from "./files/file-tree-row";
 import { DirectoryNode } from "./files/directory-node";
 import { FileTreeToolbar } from "./files/file-tree-toolbar";
@@ -52,6 +50,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import DotGridLoader from "@/components/dot-grid-loader";
 
 function isPointerOutsideWindow(pointer: DragPointer): boolean {
   return (
@@ -116,6 +115,16 @@ function createDecorationResolver(entries: ScmStatusEntry[]) {
   };
 }
 
+function RightSidebarPanelLoader() {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center px-4">
+      <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
+        <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+      </div>
+    </div>
+  );
+}
+
 export default function RightSidebar({
   workspaceRoot,
   workspaceId,
@@ -169,8 +178,11 @@ export default function RightSidebar({
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const { startDrag } = useTabDrag();
-  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
-  const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot);
+  const runtime = useRuntimeState(workspaceId);
+  const fileTreeOpen = useUiPreferencesView((view) => view.fileTreeOpen);
+  const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot, {
+    enabled: fileTreeOpen && mode === "files",
+  });
 
   const activePath = useMemo(() => {
     if (!runtime?.root || !runtime.focusedPaneID) return null;
@@ -832,11 +844,9 @@ export default function RightSidebar({
         expansionLoadedRef.current = true;
         const workspaceID = workspaceId;
         const snapshot = new Set(merged);
-        queueMicrotask(() => {
-          if (!cancelled) {
-            void persistFileTreeExpandedPaths(workspaceID, snapshot);
-          }
-        });
+        if (!cancelled) {
+          void persistFileTreeExpandedPaths(workspaceID, snapshot);
+        }
       })
       .catch(() => {
         if (!cancelled) expansionLoadedRef.current = true;
@@ -855,8 +865,8 @@ export default function RightSidebar({
   }, [workspaceId]);
 
   const isPathExpanded = useCallback(
-    (relPath: string) => expandedPaths.has(relPath),
-    [expandedPaths],
+    (relPath: string) => expandedPathsRef.current.has(relPath),
+    [],
   );
 
   const setPathExpanded = useCallback(
@@ -866,19 +876,12 @@ export default function RightSidebar({
         if (expanded) next.add(relPath);
         else next.delete(relPath);
         if (expansionLoadedRef.current) {
-          const workspaceID = workspaceId;
-          const snapshot = new Set(next);
-          queueMicrotask(() => void persistFileTreeExpandedPaths(workspaceID, snapshot));
+          void persistFileTreeExpandedPaths(workspaceId, next);
         }
         return next;
       });
     },
     [workspaceId],
-  );
-
-  const expansionValue = useMemo<ExpansionCtx>(
-    () => ({ isPathExpanded, setPathExpanded }),
-    [isPathExpanded, setPathExpanded],
   );
   const resolveDecoration = useMemo(() => createDecorationResolver(scmEntries), [scmEntries]);
   const workspaceTreeLabel = `${projectDisplayName} / ${workspaceName}`;
@@ -941,7 +944,10 @@ export default function RightSidebar({
 
   const handleCollapseAll = useCallback(() => {
     setExpandedPaths(new Set());
-  }, []);
+    if (expansionLoadedRef.current) {
+      void persistFileTreeExpandedPaths(workspaceId, []);
+    }
+  }, [workspaceId]);
 
   const handleRenameEntry = useCallback(() => {
     if (!contextMenu || contextMenu.kind === "root") return;
@@ -1114,7 +1120,7 @@ export default function RightSidebar({
           workspaceLabel={workspaceTreeLabel}
         />
       ) : (
-        <FileTreeExpansionContext.Provider value={expansionValue}>
+        <>
           <FileTreeToolbar
             workspaceTreeLabel={workspaceTreeLabel}
             onCreateFile={handleCreateFile}
@@ -1142,13 +1148,11 @@ export default function RightSidebar({
                 onDragLeave={handleTreeDragLeave}
                 onDrop={handleTreeDrop}
               >
-                {rootEntries === null ? (
-                  <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading…</div>
-                ) : null}
+                {rootEntries === null ? <RightSidebarPanelLoader /> : null}
                 {rootError ? (
                   <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
                 ) : null}
-                {pendingCreate && pendingCreate.parentRelPath === "" && (
+                {rootEntries !== null && pendingCreate && pendingCreate.parentRelPath === "" && (
                   <TreeCreateInput
                     kind={pendingCreate.kind}
                     parentRelPath={pendingCreate.parentRelPath}
@@ -1179,6 +1183,9 @@ export default function RightSidebar({
                       depth={0}
                       isIgnored={entry.isIgnored}
                       resolveDecoration={resolveDecoration}
+                      isExpanded={isPathExpanded(entry.name)}
+                      isPathExpanded={isPathExpanded}
+                      setPathExpanded={setPathExpanded}
                       onOpenContextMenu={onOpenContextMenu}
                       activePath={activePath}
                       refreshTick={refreshTick}
@@ -1257,7 +1264,7 @@ export default function RightSidebar({
               </ContextMenuContent>
             ) : null}
           </ContextMenu>
-        </FileTreeExpansionContext.Provider>
+        </>
       )}
     </div>
   );

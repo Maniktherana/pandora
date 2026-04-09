@@ -5,12 +5,24 @@ import { Button } from "@/components/ui/button";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { ProjectRow } from "./project-row";
+import DotGridLoader from "@/components/dot-grid-loader";
 
 type LeftSidebarProps = {
+  booting: boolean;
   onCollapse: () => void;
 };
 
-export default function LeftSidebar({ onCollapse }: LeftSidebarProps) {
+function SidebarBootLoader() {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center px-4">
+      <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
+        <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+      </div>
+    </div>
+  );
+}
+
+export default function LeftSidebar({ booting, onCollapse }: LeftSidebarProps) {
   const projects = useDesktopView((view) => view.projects);
   const workspaceCommands = useWorkspaceActions();
 
@@ -52,11 +64,12 @@ export default function LeftSidebar({ onCollapse }: LeftSidebarProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-1.5 py-1">
+        {booting && projects.length === 0 ? <SidebarBootLoader /> : null}
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} />
         ))}
 
-        {projects.length === 0 && (
+        {!booting && projects.length === 0 && (
           <div className="mt-8 px-4 text-center text-xs text-[var(--theme-text-faint)]">
             <div className="space-y-2">
               <p>No projects yet</p>

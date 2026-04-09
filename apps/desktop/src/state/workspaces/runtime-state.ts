@@ -115,12 +115,27 @@ export function setRuntimeConnectionState(
 
 export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotState[]) {
   runtime.slots = slots;
-  runtime.terminalDisplayBySlotId = Object.fromEntries(
-    slots.map((slot) => [
-      slot.id,
-      runtime.terminalDisplayBySlotId[slot.id] ?? defaultTerminalDisplay(),
-    ]),
-  );
+  const previousDisplayBySlotId = runtime.terminalDisplayBySlotId;
+  let nextDisplayBySlotId = previousDisplayBySlotId;
+  const liveSlotIds = new Set(slots.map((slot) => slot.id));
+
+  for (const slot of slots) {
+    if (nextDisplayBySlotId[slot.id]) continue;
+    if (nextDisplayBySlotId === previousDisplayBySlotId) {
+      nextDisplayBySlotId = { ...previousDisplayBySlotId };
+    }
+    nextDisplayBySlotId[slot.id] = defaultTerminalDisplay();
+  }
+
+  for (const slotId of Object.keys(previousDisplayBySlotId)) {
+    if (liveSlotIds.has(slotId)) continue;
+    if (nextDisplayBySlotId === previousDisplayBySlotId) {
+      nextDisplayBySlotId = { ...previousDisplayBySlotId };
+    }
+    delete nextDisplayBySlotId[slotId];
+  }
+
+  runtime.terminalDisplayBySlotId = nextDisplayBySlotId;
 }
 
 export function replaceRuntimeSessions(runtime: WorkspaceRuntimeState, sessions: SessionState[]) {

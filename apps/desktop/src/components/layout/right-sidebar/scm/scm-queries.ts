@@ -6,6 +6,9 @@ type ScmQueryOptions = {
   enabled?: boolean;
 };
 
+const SCM_STALE_TIME_MS = 5_000;
+const SCM_GC_TIME_MS = 300_000;
+
 export function useScmStatusQuery(workspaceRoot: string, options?: ScmQueryOptions) {
   return useQuery({
     queryKey: ["scm-status", workspaceRoot],
@@ -13,6 +16,8 @@ export function useScmStatusQuery(workspaceRoot: string, options?: ScmQueryOptio
     enabled: Boolean(workspaceRoot) && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,
+    staleTime: SCM_STALE_TIME_MS,
+    gcTime: SCM_GC_TIME_MS,
   });
 }
 
@@ -23,6 +28,8 @@ export function useScmLineStatsQuery(worktreePath: string, options?: ScmQueryOpt
     enabled: Boolean(worktreePath) && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,
+    staleTime: SCM_STALE_TIME_MS,
+    gcTime: SCM_GC_TIME_MS,
   });
 }
 
@@ -42,5 +49,7 @@ export function useScmPathLineStatsBulkQuery(
       (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,
+    staleTime: SCM_STALE_TIME_MS,
+    gcTime: SCM_GC_TIME_MS,
   });
 }

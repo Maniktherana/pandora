@@ -17,9 +17,6 @@ export interface DesktopView {
   readonly selectedWorkspaceID: string | null;
   readonly selectedProject: ProjectRecord | null;
   readonly selectedWorkspace: WorkspaceRecord | null;
-  readonly runtimes: Readonly<Record<string, WorkspaceRuntimeState>>;
-  readonly activeRuntime: WorkspaceRuntimeState | null;
-  readonly connectionState: WorkspaceRuntimeState["connectionState"];
   readonly navigationArea: NavigationArea;
   readonly searchText: string;
   readonly layoutTargetRuntimeId: string | null;
@@ -28,21 +25,16 @@ export interface DesktopView {
 export interface WorkspaceView {
   readonly workspaceId: string;
   readonly workspace: WorkspaceRecord | null;
-  readonly runtime: WorkspaceRuntimeState | null;
   readonly isSelected: boolean;
 }
 
-export interface ProjectTerminalView {
-  readonly runtimeId: string;
-  readonly runtime: WorkspaceRuntimeState | null;
-}
+export type RuntimeStateView = Readonly<Record<string, WorkspaceRuntimeState>>;
 
 export interface DesktopViewStateSnapshot {
   readonly projects: readonly ProjectRecord[];
   readonly workspaces: readonly WorkspaceRecord[];
   readonly selectedProjectID: string | null;
   readonly selectedWorkspaceID: string | null;
-  readonly runtimes: Readonly<Record<string, WorkspaceRuntimeState>>;
   readonly navigationArea: NavigationArea;
   readonly searchText: string;
   readonly layoutTargetRuntimeId: string | null;
@@ -63,22 +55,18 @@ export const emptyDesktopView: DesktopView = {
   selectedWorkspaceID: null,
   selectedProject: null,
   selectedWorkspace: null,
-  runtimes: {},
-  activeRuntime: null,
-  connectionState: "disconnected",
   navigationArea: "sidebar",
   searchText: "",
   layoutTargetRuntimeId: null,
 };
+
+export const emptyRuntimeStateView: RuntimeStateView = {};
 
 export function buildDesktopView(state: DesktopViewStateSnapshot): DesktopView {
   const selectedProject =
     state.projects.find((project) => project.id === state.selectedProjectID) ?? null;
   const selectedWorkspace =
     state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceID) ?? null;
-  const activeRuntime = state.selectedWorkspaceID
-    ? (state.runtimes[state.selectedWorkspaceID] ?? null)
-    : null;
 
   return {
     projects: state.projects,
@@ -87,9 +75,6 @@ export function buildDesktopView(state: DesktopViewStateSnapshot): DesktopView {
     selectedWorkspaceID: state.selectedWorkspaceID,
     selectedProject,
     selectedWorkspace,
-    runtimes: state.runtimes,
-    activeRuntime,
-    connectionState: activeRuntime?.connectionState ?? "disconnected",
     navigationArea: state.navigationArea,
     searchText: state.searchText,
     layoutTargetRuntimeId: state.layoutTargetRuntimeId,
@@ -100,17 +85,6 @@ export function buildWorkspaceView(desktopView: DesktopView, workspaceId: string
   return {
     workspaceId,
     workspace: desktopView.workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
-    runtime: desktopView.runtimes[workspaceId] ?? null,
     isSelected: desktopView.selectedWorkspaceID === workspaceId,
-  };
-}
-
-export function buildProjectTerminalView(
-  desktopView: DesktopView,
-  runtimeId: string,
-): ProjectTerminalView {
-  return {
-    runtimeId,
-    runtime: desktopView.runtimes[runtimeId] ?? null,
   };
 }

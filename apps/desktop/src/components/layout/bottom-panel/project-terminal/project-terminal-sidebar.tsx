@@ -3,6 +3,7 @@ import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
+import DotGridLoader from "@/components/dot-grid-loader";
 import type { SidebarRow } from "../project-terminal.types";
 import {
   createSessionMap,
@@ -138,8 +139,15 @@ export default function ProjectTerminalSidebar({
   if (!panel || panel.groups.length === 0) {
     return (
       <div className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-[var(--theme-border)] bg-[var(--theme-bg)]">
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-[var(--theme-text-muted)]">
-          No terminals
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-[var(--theme-text-muted)]">
+          <div className="flex flex-col items-center">
+            <DotGridLoader
+              variant="default"
+              gridSize={3}
+              sizeClassName="h-6 w-6"
+              className="opacity-85"
+            />
+          </div>
         </div>
       </div>
     );

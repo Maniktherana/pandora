@@ -8,7 +8,7 @@ import { useEditorActions } from "@/hooks/use-editor-actions";
 import { cn, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import { useFileTreeExpansion } from "./file-tree-expansion-context";
+import DotGridLoader from "@/components/dot-grid-loader";
 import { FileTreeRow } from "./file-tree-row";
 import {
   DIRECTORY_STICKY_ROW_OFFSET_PX,
@@ -56,6 +56,9 @@ type DirectoryNodeProps = {
   depth: number;
   isIgnored?: boolean;
   resolveDecoration: ScmDecorationResolver;
+  isExpanded: boolean;
+  isPathExpanded: (relPath: string) => boolean;
+  setPathExpanded: (relPath: string, expanded: boolean) => void;
   onOpenContextMenu?: (clientX: number, clientY: number, relPath: string, kind: "file" | "directory") => void;
   activePath: string | null;
   refreshTick: number;
@@ -74,7 +77,7 @@ type DirectoryNodeProps = {
   onCancelRename: () => void;
 };
 
-export function DirectoryNode({
+export const DirectoryNode = React.memo(function DirectoryNode({
   workspaceRoot,
   workspaceId,
   relPath,
@@ -83,6 +86,9 @@ export function DirectoryNode({
   depth,
   isIgnored,
   resolveDecoration,
+  isExpanded,
+  isPathExpanded,
+  setPathExpanded,
   onOpenContextMenu,
   activePath,
   refreshTick,
@@ -101,8 +107,7 @@ export function DirectoryNode({
   onCancelRename,
 }: DirectoryNodeProps) {
   const { openFile } = useEditorActions();
-  const { isPathExpanded, setPathExpanded } = useFileTreeExpansion();
-  const open = isPathExpanded(relPath);
+  const open = isExpanded;
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isStickyActive, setIsStickyActive] = useState(false);
@@ -249,6 +254,22 @@ export function DirectoryNode({
                 {loadError}
               </div>
             )}
+            {open && children === null && !loadError && (
+              <div
+                className="flex items-center justify-center py-3"
+                style={{
+                  paddingLeft:
+                    TREE_ROW_PADDING_LEFT_PX + TREE_ROW_INDENT_PX + depth * TREE_ROW_INDENT_PX,
+                }}
+              >
+                <DotGridLoader
+                  variant="default"
+                  gridSize={3}
+                  sizeClassName="h-5 w-5"
+                  className="opacity-80"
+                />
+              </div>
+            )}
             {children?.map((entry) =>
               (() => {
                 const childRelPath = joinRel(relPath, entry.name);
@@ -276,6 +297,9 @@ export function DirectoryNode({
                     depth={depth + 1}
                     isIgnored={entry.isIgnored}
                     resolveDecoration={resolveDecoration}
+                    isExpanded={isPathExpanded(childRelPath)}
+                    isPathExpanded={isPathExpanded}
+                    setPathExpanded={setPathExpanded}
                     onOpenContextMenu={onOpenContextMenu}
                     activePath={activePath}
                     refreshTick={refreshTick}
@@ -320,4 +344,4 @@ export function DirectoryNode({
         </CollapsibleContent>
       </Collapsible>
   );
-}
+});

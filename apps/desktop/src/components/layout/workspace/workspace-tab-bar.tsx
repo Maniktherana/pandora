@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useRuntimeState } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
@@ -68,7 +68,7 @@ export default function WorkspaceTabBar({
   const { startDrag, dragState } = useTabDrag();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
-  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const runtime = useRuntimeState(workspaceId);
   const slotsMap = useMemo(
     () =>
       Object.fromEntries((runtime?.slots ?? []).map((slot) => [slot.id, slot] as const)) as Record<

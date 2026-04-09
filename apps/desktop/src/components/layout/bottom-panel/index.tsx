@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { useDesktopView, useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
 import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
@@ -18,9 +18,9 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
   const project = useDesktopView((view) => view.selectedProject);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const workspaceRuntime = useWorkspaceView(selectedWorkspaceID ?? "", (view) => view.runtime);
+  const workspaceRuntime = useRuntimeState(selectedWorkspaceID ?? "");
   const projectKey = project ? projectRuntimeKey(project.id) : "";
-  const projectRuntime = useProjectTerminalView(projectKey, (view) => view.runtime);
+  const projectRuntime = useRuntimeState(projectKey);
   const projectTerminalCommands = useProjectTerminalActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();

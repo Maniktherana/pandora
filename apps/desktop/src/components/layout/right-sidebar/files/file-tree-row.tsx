@@ -25,7 +25,7 @@ type FileTreeRowProps = {
   isHoverSuppressed: boolean;
 };
 
-export function FileTreeRow({
+export const FileTreeRow = React.memo(function FileTreeRow({
   depth,
   icon,
   label,
@@ -113,4 +113,4 @@ export function FileTreeRow({
       {content}
     </div>
   );
-}
+});

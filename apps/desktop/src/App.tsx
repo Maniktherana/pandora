@@ -30,8 +30,15 @@ export default function App() {
   useBootstrapDesktop();
   useNativeTerminalOverlay(isResizingPanels ? "semi-transparent" : null);
 
-  const { selectedWorkspace: selectedWs, selectedProject } = useDesktopView();
-  const { sidebarVisible, fileTreeOpen } = useUiPreferencesView();
+  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
+  const selectedWsStatus = useDesktopView((view) => view.selectedWorkspace?.status ?? null);
+  const selectedWsId = useDesktopView((view) => view.selectedWorkspaceID);
+  const selectedProject = useDesktopView((view) => view.selectedProject);
+  const sidebarVisible = useUiPreferencesView((view) => view.sidebarVisible);
+  const sidebarHydrated = useUiPreferencesView((view) => view.sidebarHydrated);
+  const fileTreeHydrated = useUiPreferencesView((view) => view.fileTreeHydrated);
+  const fileTreeOpen = useUiPreferencesView((view) => view.fileTreeOpen);
+  const booting = !sidebarHydrated || !fileTreeHydrated;
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
   const workspaceCommands = useWorkspaceActions();
@@ -84,28 +91,31 @@ export default function App() {
   useLayoutEffect(() => {
     const p = fileTreePanelRef.current;
     if (!p) return;
-    if (fileTreeOpen && selectedWs?.status === "ready") {
+    if (fileTreeOpen && selectedWsStatus === "ready") {
       p.expand(12);
     } else {
       p.collapse();
     }
-  }, [fileTreeOpen, selectedWs?.status]);
+  }, [fileTreeOpen, selectedWsStatus]);
 
   useLayoutEffect(() => {
     const p = bottomPanelRef.current;
-    if (!p || selectedWs?.status !== "ready") return;
+    if (!p || selectedWsStatus !== "ready") return;
     if (bottomPanelOpen) {
       p.expand(28);
     } else {
       p.collapse();
     }
-  }, [bottomPanelOpen, selectedWs?.status]);
+  }, [bottomPanelOpen, selectedWsStatus]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {sidebarVisible && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
-          <LeftSidebar onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)} />
+          <LeftSidebar
+            booting={booting}
+            onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)}
+          />
           <div
             role="separator"
             aria-orientation="vertical"
@@ -161,6 +171,7 @@ export default function App() {
 
       <div className="flex h-full min-w-0 flex-1 flex-col bg-[#151515]">
         <AppHeader
+          booting={booting}
           sidebarVisible={sidebarVisible}
           selectedWorkspace={selectedWs}
           bottomPanelOpen={bottomPanelOpen}
@@ -180,7 +191,7 @@ export default function App() {
                     <div
                       className="h-full min-h-0 min-w-0"
                       data-workspace-drop-root="true"
-                      data-workspace-id={selectedWs?.status === "ready" ? selectedWs.id : undefined}
+                      data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
                       onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
                     >
                       <ErrorBoundary name="workspace">
@@ -194,7 +205,7 @@ export default function App() {
                     onDragging={setIsResizingPanels}
                     className={cn(
                       "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
-                      fileTreeOpen && selectedWs?.status === "ready"
+                      fileTreeOpen && selectedWsStatus === "ready"
                         ? "cursor-col-resize"
                         : "hidden",
                     )}
@@ -213,7 +224,7 @@ export default function App() {
                       onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
                     >
                       <ErrorBoundary name="file-tree">
-                        {fileTreeOpen && selectedWs?.status === "ready" ? (
+                        {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (
                           <RightSidebar
                             key={selectedWs.id}
                             workspaceRoot={selectedWs.worktreePath}

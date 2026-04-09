@@ -4,6 +4,7 @@ import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
+import { useRuntimeStore } from "@/state/runtime-store";
 import { useEditorStore } from "@/state/editor-store";
 import { findLeaf } from "@/components/layout/workspace/layout-migrate";
 import { tabsEqual } from "@/components/layout/workspace/layout-tree";
@@ -107,11 +108,10 @@ export function TabDragOverlay({
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
       const desktopView = useDesktopViewStore.getState().desktopView;
+      const runtimeState = useRuntimeStore.getState().runtimeState;
       const rid = desktopView.layoutTargetRuntimeId ?? desktopView.selectedWorkspaceID;
-      const runtime = rid ? desktopView.runtimes[rid] : null;
-      const terminalPanel = drag.runtimeId
-        ? desktopView.runtimes[drag.runtimeId]?.terminalPanel
-        : null;
+      const runtime = rid ? (runtimeState[rid] ?? null) : null;
+      const terminalPanel = drag.runtimeId ? runtimeState[drag.runtimeId]?.terminalPanel : null;
       const ensureDraggedFileLoaded = (afterLoad: () => void) => {
         if (
           drag.kind !== "file-tree-file" ||

@@ -4,7 +4,7 @@ import { FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-fre
 import { GitPullRequest } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
-import { useProjectTerminalView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useRuntimeState, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
@@ -33,6 +33,7 @@ import { useScmStatusQuery } from "./scm-queries";
 import {
   SCM_SECTION_STICKY_Z_INDEX_BASE,
 } from "./scm.types";
+import DotGridLoader from "@/components/dot-grid-loader";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -67,9 +68,9 @@ export default function WorkspaceChangesPanel({
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const workspaceRuntime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const workspaceRuntime = useRuntimeState(workspaceId);
   const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
-  const projectRuntime = useProjectTerminalView(projectRuntimeId ?? "", (view) => view.runtime);
+  const projectRuntime = useRuntimeState(projectRuntimeId ?? "");
   const {
     data: entriesData,
     error: entriesError,
@@ -217,6 +218,16 @@ export default function WorkspaceChangesPanel({
     textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
   }, [commitMessage]);
+
+  if (entries === null && !loadError) {
+    return (
+      <div className="flex h-full min-h-0 items-center justify-center px-4">
+        <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
+          <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 select-none flex-col">

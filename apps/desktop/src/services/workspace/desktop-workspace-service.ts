@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Cache, Context, Effect, Fiber, Layer } from "effect";
 import type { WritableDraft } from "immer";
 import type {
@@ -13,6 +14,7 @@ import type {
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
+import { useRuntimeStore } from "@/state/runtime-store";
 import { buildDesktopView, type DesktopViewStateSnapshot } from "@/state/desktop-view-projections";
 import { DesktopStateLoadError, WorkspaceSelectionError } from "@/services/service-errors";
 import { DaemonEventQueue } from "@/services/daemon/daemon-event-queue";
@@ -244,6 +246,7 @@ type DesktopStateSnapshot = {
       ? U[]
       : DesktopViewStateSnapshot[K];
 } & {
+  runtimes: Record<string, WorkspaceRuntimeState>;
   prAwaitingWorkspaceIds: Set<string>;
 };
 
@@ -255,11 +258,19 @@ function publishDesktopView(snapshot: DesktopViewStateSnapshot) {
   useDesktopViewStore.getState().setDesktopView(buildDesktopView(snapshot));
 }
 
+function publishRuntimeState(runtimes: Record<string, WorkspaceRuntimeState>) {
+  useRuntimeStore.getState().setRuntimeState(runtimes);
+}
+
 function cloneRuntimeState(runtime: WorkspaceRuntimeState): WorkspaceRuntimeState {
   return structuredClone(runtime);
 }
 
-function persistWorkspaceLayout(snapshot: DesktopViewStateSnapshot, workspaceId: string) {
+function compareCreatedAtDesc<T extends { createdAt: string }>(a: T, b: T) {
+  return b.createdAt.localeCompare(a.createdAt);
+}
+
+function persistWorkspaceLayout(snapshot: DesktopStateSnapshot, workspaceId: string) {
   const runtime = snapshot.runtimes[workspaceId];
   const root =
     runtime?.root?.type === "leaf" && runtime.root.tabs.length === 0
@@ -374,7 +385,26 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const connectionWaiters = new Map<string, Array<() => void>>();
     const pendingDefaultTerminalSeeds = new Set<string>();
     const pendingInitialTerminalWorkspaceIds = new Set<string>();
-    const publish = () => publishDesktopView(desktopStateSnapshot);
+    let desktopPublishScheduled = false;
+    let runtimePublishScheduled = false;
+    const publishDesktopNow = () => publishDesktopView(desktopStateSnapshot);
+    const scheduleDesktopPublish = () => {
+      if (desktopPublishScheduled) return;
+      desktopPublishScheduled = true;
+      queueMicrotask(() => {
+        desktopPublishScheduled = false;
+        publishDesktopNow();
+      });
+    };
+    const publishRuntimeNow = () => publishRuntimeState(desktopStateSnapshot.runtimes);
+    const scheduleRuntimePublish = () => {
+      if (runtimePublishScheduled) return;
+      runtimePublishScheduled = true;
+      queueMicrotask(() => {
+        runtimePublishScheduled = false;
+        publishRuntimeNow();
+      });
+    };
     const getEffectiveLayoutRuntimeId = () =>
       desktopStateSnapshot.layoutTargetRuntimeId ?? desktopStateSnapshot.selectedWorkspaceID;
     const pendingSessionOpens = new Set<string>();
@@ -384,12 +414,29 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const hiddenWarmupDelay = "120 millis";
     let requestActiveTerminalStartupRefresh: (() => void) | null = null;
     let activeTerminalStartupRefreshQueued = false;
+    let selectionTargetWorkspaceID: string | null = null;
+    let selectionSettleFiber: Fiber.RuntimeFiber<void, never> | null = null;
+
+    const runLoggedBackgroundEffect = (
+      effect: Effect.Effect<void, unknown>,
+      label: string,
+    ) =>
+      Effect.runFork(
+        effect.pipe(
+          Effect.catchAll((error) =>
+            Effect.sync(() => {
+              console.warn(label, error);
+            }),
+          ),
+        ),
+      );
 
     const applyAppState = (appState: AppState) => {
-      desktopStateSnapshot.projects = structuredClone(appState.projects);
-      desktopStateSnapshot.workspaces = structuredClone(appState.workspaces);
+      desktopStateSnapshot.projects = structuredClone(appState.projects).sort(compareCreatedAtDesc);
+      desktopStateSnapshot.workspaces = structuredClone(appState.workspaces).sort(compareCreatedAtDesc);
       desktopStateSnapshot.selectedProjectID = appState.selectedProjectId;
       desktopStateSnapshot.selectedWorkspaceID = appState.selectedWorkspaceId;
+      selectionTargetWorkspaceID = appState.selectedWorkspaceId;
 
       const allowedRuntimeIds = new Set<string>(
         appState.workspaces.map((workspace) => workspace.id),
@@ -409,8 +456,32 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         }
       }
 
-      publish();
+      scheduleDesktopPublish();
+      scheduleRuntimePublish();
     };
+
+    const patchWorkspaceRecord = (record: WorkspaceRecord) => {
+      const nextRecord = structuredClone(record);
+      const index = desktopStateSnapshot.workspaces.findIndex((entry) => entry.id === record.id);
+      if (index >= 0) {
+        const nextWorkspaces = [...desktopStateSnapshot.workspaces];
+        nextWorkspaces[index] = nextRecord;
+        desktopStateSnapshot.workspaces = nextWorkspaces.sort(compareCreatedAtDesc);
+      } else {
+        desktopStateSnapshot.workspaces = [nextRecord, ...desktopStateSnapshot.workspaces].sort(
+          compareCreatedAtDesc,
+        );
+      }
+      scheduleDesktopPublish();
+    };
+
+    const getVisibleSidebarWorkspaces = () =>
+      desktopStateSnapshot.projects.flatMap((project) =>
+        desktopStateSnapshot.workspaces.filter(
+          (workspace) =>
+            workspace.projectId === project.id && workspace.status !== "archived",
+        ),
+      );
 
     const loadAppStateFromBackend = () =>
       Effect.tryPromise({
@@ -424,10 +495,37 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       );
 
-    const updateDesktopState = (mutate: (state: DesktopStateSnapshot) => void) =>
+    yield* Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () =>
+          listen<WorkspaceRecord>("workspace_record_changed", ({ payload }) => {
+            patchWorkspaceRecord(payload);
+            if (
+              payload.id === desktopStateSnapshot.selectedWorkspaceID &&
+              payload.status === "ready"
+            ) {
+              startSelectionSettle(payload);
+            }
+          }),
+        catch: (cause) => new DesktopStateLoadError({ cause }),
+      }),
+      (unlisten) =>
+        Effect.sync(() => {
+          unlisten();
+        }),
+    );
+
+    const updateDesktopState = (
+      mutate: (state: DesktopStateSnapshot) => void,
+      options?: { sync?: boolean },
+    ) =>
       Effect.sync(() => {
         mutate(desktopStateSnapshot);
-        publish();
+        if (options?.sync) {
+          publishDesktopNow();
+        } else {
+          scheduleDesktopPublish();
+        }
       });
 
     /**
@@ -447,48 +545,44 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       }
       if (pendingDefaultTerminalSeeds.has(workspaceId)) return;
       pendingDefaultTerminalSeeds.add(workspaceId);
-      void import("@/app/desktop-runtime")
-        .then(({ getDesktopRuntime }) =>
-          getDesktopRuntime().runPromise(
-            Effect.gen(function* () {
-              const alreadySeeded = yield* Effect.sync(
-                () =>
-                  desktopStateSnapshot.runtimes[workspaceId]?.slots.some(
-                    (slot) => slot.kind === "terminal_slot",
-                  ) ?? false,
-              );
-              if (alreadySeeded) {
-                pendingInitialTerminalWorkspaceIds.delete(workspaceId);
-                return;
-              }
+      const fiber = runLoggedBackgroundEffect(
+        Effect.gen(function* () {
+          const alreadySeeded = yield* Effect.sync(
+            () =>
+              desktopStateSnapshot.runtimes[workspaceId]?.slots.some(
+                (slot) => slot.kind === "terminal_slot",
+              ) ?? false,
+          );
+          if (alreadySeeded) {
+            pendingInitialTerminalWorkspaceIds.delete(workspaceId);
+            return;
+          }
 
-              const client = yield* daemonGateway.getClient();
-              if (!client) return;
+          const client = yield* daemonGateway.getClient();
+          if (!client) return;
 
-              const seeded = seedWorkspaceTerminal(client, workspaceId);
-              const session = yield* sessionCache.get(workspaceId);
-              yield* session.commands.addTerminalTab(seeded.slotID);
-              pendingInitialTerminalWorkspaceIds.delete(workspaceId);
-            }),
-          ),
-        )
-        .catch((error) => {
-          console.warn("Failed to seed default workspace terminal:", error);
-        })
-        .finally(() => {
-          pendingDefaultTerminalSeeds.delete(workspaceId);
-        });
+          const seeded = seedWorkspaceTerminal(client, workspaceId);
+          const session = yield* sessionCache.get(workspaceId);
+          yield* session.commands.addTerminalTab(seeded.slotID);
+          pendingInitialTerminalWorkspaceIds.delete(workspaceId);
+        }),
+        "Failed to seed default workspace terminal:",
+      );
+      fiber.addObserver(() => {
+        pendingDefaultTerminalSeeds.delete(workspaceId);
+      });
     };
 
     const ensureRuntimeLayoutForWorkspace = (workspaceId: string) => {
-      const runtime = desktopStateSnapshot.runtimes[workspaceId];
-      if (!runtime) return;
+      const current = desktopStateSnapshot.runtimes[workspaceId];
+      if (!current) return;
+      const runtime = cloneRuntimeState(current);
       if (isProjectRuntimeKey(workspaceId)) {
         ensureProjectTerminalPanelState(runtime);
       } else {
         ensureRuntimeLayoutState(runtime);
       }
-      publish();
+      writeSessionRuntimeState(workspaceId, runtime);
       ensureWorkspaceDefaultTerminal(workspaceId);
     };
 
@@ -500,14 +594,22 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       }) satisfies WorkspaceStartupState;
 
     const startupSet: WorkspaceStartupSet = ((update: unknown) => {
+      const nextRuntimes = structuredClone(desktopStateSnapshot.runtimes);
+      const nextState = {
+        projects: desktopStateSnapshot.projects,
+        runtimes: nextRuntimes,
+        ensureRuntimeLayout: ensureRuntimeLayoutForWorkspace,
+      } as WorkspaceStartupState;
+
       if (typeof update === "function") {
         (update as (state: WritableDraft<WorkspaceStartupState>) => void)(
-          desktopStateSnapshot as unknown as WritableDraft<WorkspaceStartupState>,
+          nextState as WritableDraft<WorkspaceStartupState>,
         );
       } else if (update && typeof update === "object") {
-        Object.assign(desktopStateSnapshot, update);
+        Object.assign(nextState, update);
       }
-      publish();
+      desktopStateSnapshot.runtimes = nextState.runtimes;
+      scheduleRuntimePublish();
       requestActiveTerminalStartupRefresh?.();
     }) as WorkspaceStartupSet;
 
@@ -519,13 +621,13 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
       const runtime = createRuntimeState(workspaceId);
       desktopStateSnapshot.runtimes[workspaceId] = runtime;
-      publish();
+      scheduleRuntimePublish();
       return runtime;
     };
 
     const writeSessionRuntimeState = (workspaceId: string, runtime: WorkspaceRuntimeState) => {
       desktopStateSnapshot.runtimes[workspaceId] = runtime;
-      publish();
+      scheduleRuntimePublish();
     };
 
     const terminalStartupKey = (runtimeId: string, slotId: string) => `${runtimeId}:${slotId}`;
@@ -772,15 +874,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       activeTerminalStartupRefreshQueued = true;
       queueMicrotask(() => {
         activeTerminalStartupRefreshQueued = false;
-        void import("@/app/desktop-runtime")
-          .then(({ getDesktopRuntime }) =>
-            getDesktopRuntime().runPromise(
-              refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true }),
-            ),
-          )
-          .catch((error) => {
-            console.warn("Failed to refresh terminal startup state:", error);
-          });
+        runLoggedBackgroundEffect(
+          refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true }),
+          "Failed to refresh terminal startup state:",
+        );
       });
     };
 
@@ -842,6 +939,53 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         });
       });
 
+    const interruptSelectionSettle = () => {
+      const fiber = selectionSettleFiber;
+      if (!fiber) return;
+      selectionSettleFiber = null;
+      void Effect.runFork(Fiber.interrupt(fiber));
+    };
+
+    const startSelectionSettle = (workspace: WorkspaceRecord) => {
+      interruptSelectionSettle();
+      const fiber = runLoggedBackgroundEffect(
+        Effect.gen(function* () {
+          if (desktopStateSnapshot.selectedWorkspaceID !== workspace.id) return;
+
+          if (workspace.status === "ready") {
+            yield* Effect.sync(() => {
+              syncProjectScopedRuntime(startupSet, startupGet, workspace);
+              startWorkspaceStartup(startupSet, startupGet, workspace);
+            });
+            if (desktopStateSnapshot.selectedWorkspaceID !== workspace.id) return;
+            yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
+          }
+
+          if (desktopStateSnapshot.selectedWorkspaceID !== workspace.id) return;
+          yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: false });
+        }),
+        "Failed to settle selected workspace:",
+      );
+      selectionSettleFiber = fiber;
+      fiber.addObserver(() => {
+        if (selectionSettleFiber === fiber) {
+          selectionSettleFiber = null;
+        }
+      });
+    };
+
+    const applyWorkspaceSelection = (
+      workspace: WorkspaceRecord,
+      navigationArea: DesktopViewStateSnapshot["navigationArea"] = "sidebar",
+    ) => {
+      selectionTargetWorkspaceID = workspace.id;
+      desktopStateSnapshot.selectedWorkspaceID = workspace.id;
+      desktopStateSnapshot.selectedProjectID = workspace.projectId;
+      desktopStateSnapshot.navigationArea = navigationArea;
+      desktopStateSnapshot.layoutTargetRuntimeId = null;
+      publishDesktopNow();
+    };
+
     const ensureWorkspaceRuntimeConnected = (workspaceId: string) =>
       Effect.gen(function* () {
         if (desktopStateSnapshot.runtimes[workspaceId]?.connectionState === "connected") return;
@@ -889,31 +1033,18 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             ? cause
             : workspaceSelectionError(cause, workspaceId),
       }).pipe(
-        Effect.flatMap((workspace) =>
-          Effect.gen(function* () {
-            yield* updateDesktopState((state) => {
-              state.selectedWorkspaceID = workspace.id;
-              state.selectedProjectID = workspace.projectId;
-              state.navigationArea = "sidebar";
-              state.layoutTargetRuntimeId = null;
+        Effect.tap((workspace) =>
+          Effect.sync(() => {
+            applyWorkspaceSelection(workspace, "sidebar");
+            void invoke("save_selection", {
+              projectId: workspace.projectId,
+              workspaceId: workspace.id,
             });
-            yield* Effect.sync(() => {
-              void invoke("save_selection", {
-                projectId: workspace.projectId,
-                workspaceId: workspace.id,
-              });
-              void invoke("mark_workspace_opened", { workspaceId: workspace.id });
-            });
-            if (workspace.status === "ready") {
-              yield* Effect.sync(() => {
-                syncProjectScopedRuntime(startupSet, startupGet, workspace);
-                startWorkspaceStartup(startupSet, startupGet, workspace);
-              });
-              yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
-            }
-            yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
+            void invoke("mark_workspace_opened", { workspaceId: workspace.id });
+            startSelectionSettle(workspace);
           }),
         ),
+        Effect.asVoid,
       );
 
     const selectWorkspaceRelative = (
@@ -921,12 +1052,12 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       navigationArea: DesktopViewStateSnapshot["navigationArea"] = "sidebar",
     ) =>
       Effect.gen(function* () {
-        const visibleWorkspaces = desktopStateSnapshot.workspaces.filter(
-          (workspace) => workspace.status !== "archived",
-        );
+        const visibleWorkspaces = getVisibleSidebarWorkspaces();
         if (visibleWorkspaces.length === 0) return;
         const currentIndex = visibleWorkspaces.findIndex(
-          (workspace) => workspace.id === desktopStateSnapshot.selectedWorkspaceID,
+          (workspace) =>
+            workspace.id ===
+            (selectionTargetWorkspaceID ?? desktopStateSnapshot.selectedWorkspaceID),
         );
         const nextIndex = Math.max(
           0,
@@ -955,7 +1086,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           startWorkspaceStartup(startupSet, startupGet, workspace);
         });
         yield* hydrateProjectRuntimePanel(projectRuntimeKey(workspace.projectId));
-        yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
+        yield* refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: false });
       });
 
     const updateWorkspaceRuntime = (
@@ -1004,23 +1135,24 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       );
 
     const handleTerminalOutput = (workspaceId: string, data: string) =>
-      updateDesktopState((state) => {
-        if (!state.prAwaitingWorkspaceIds.has(workspaceId)) return;
+      Effect.sync(() => {
+        if (!desktopStateSnapshot.prAwaitingWorkspaceIds.has(workspaceId)) return;
 
         const match = data.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/);
         if (!match) return;
 
         const prUrl = match[0];
         const prNumber = parseInt(match[1], 10);
-        const next = new Set(state.prAwaitingWorkspaceIds);
+        const next = new Set(desktopStateSnapshot.prAwaitingWorkspaceIds);
         next.delete(workspaceId);
-        state.prAwaitingWorkspaceIds = next;
-        const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+        desktopStateSnapshot.prAwaitingWorkspaceIds = next;
+        const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === workspaceId);
         if (workspace) {
           workspace.prUrl = prUrl;
           workspace.prNumber = prNumber;
           workspace.prState = "open";
         }
+        scheduleDesktopPublish();
         void invoke("pr_link", { workspaceId, prUrl, prNumber });
       });
 
@@ -1270,7 +1402,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             if (autoCreatedWorkspaceId) {
               desktopStateSnapshot.selectedWorkspaceID = autoCreatedWorkspaceId;
             }
-            publish();
+            publishDesktopNow();
             await invoke("save_selection", {
               projectId: project.id,
               workspaceId: autoCreatedWorkspaceId ?? desktopStateSnapshot.selectedWorkspaceID,
@@ -1298,7 +1430,8 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               if (desktopStateSnapshot.layoutTargetRuntimeId === runtimeId) {
                 desktopStateSnapshot.layoutTargetRuntimeId = null;
               }
-              publish();
+              scheduleDesktopPublish();
+              scheduleRuntimePublish();
               await invoke("remove_project", { projectId });
               const appState = await invoke<AppState>("load_app_state");
               applyAppState(appState);
@@ -1424,7 +1557,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                   setTimeout(() => {
                     if (desktopStateSnapshot.prAwaitingWorkspaceIds.has(workspaceId)) {
                       desktopStateSnapshot.prAwaitingWorkspaceIds.delete(workspaceId);
-                      publish();
+                      scheduleDesktopPublish();
                     }
                   }, 90_000);
                 })
@@ -1551,17 +1684,23 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           Effect.asVoid,
         ),
       createWorkspace: (projectId, workspaceKind) =>
-        Effect.tryPromise({
-          try: async () => {
-            const created = await invoke<WorkspaceRecord>("create_workspace", {
-              projectId,
-              ...(workspaceKind != null ? { workspaceKind } : {}),
-            });
+        Effect.gen(function* () {
+          const created = yield* Effect.tryPromise({
+            try: () =>
+              invoke<WorkspaceRecord>("create_workspace", {
+                projectId,
+                ...(workspaceKind != null ? { workspaceKind } : {}),
+              }),
+            catch: (cause) => workspaceSelectionError(cause),
+          });
+          yield* Effect.sync(() => {
             pendingInitialTerminalWorkspaceIds.add(created.id);
-            const appState = await invoke<AppState>("load_app_state");
-            applyAppState(appState);
-          },
-          catch: (cause) => workspaceSelectionError(cause),
+            desktopStateSnapshot.projects = desktopStateSnapshot.projects.map((entry) =>
+              entry.id === projectId ? { ...entry, isExpanded: true } : entry,
+            );
+            patchWorkspaceRecord(created);
+          });
+          yield* selectWorkspaceById(created.id);
         }),
       retryWorkspace: (workspaceId) =>
         Effect.gen(function* () {
@@ -1570,13 +1709,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           });
           yield* Effect.tryPromise({
             try: async () => {
-              await invoke("retry_workspace", { workspaceId });
-              const appState = await invoke<AppState>("load_app_state");
-              applyAppState(appState);
+              const updated = await invoke<WorkspaceRecord>("retry_workspace", { workspaceId });
+              patchWorkspaceRecord(updated);
             },
             catch: (cause) => workspaceSelectionError(cause, workspaceId),
           });
-          yield* maybeStartSelectedWorkspace();
         }),
       removeWorkspace: (workspaceId) =>
         Effect.gen(function* () {

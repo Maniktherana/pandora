@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
@@ -17,9 +17,14 @@ export default function useKeyboardShortcuts({
   onToggleSidebar,
   onToggleBottomPanel,
 }: UseKeyboardShortcutsParams) {
+  const lastWorkspaceShortcutRef = useRef<{ direction: -1 | 1; at: number } | null>(null);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const workspaces = useDesktopView((view) => view.workspaces);
+  const hasSelectedWorkspace = useDesktopView(
+    (view) =>
+      view.selectedWorkspaceID != null &&
+      view.workspaces.some((workspace) => workspace.id === view.selectedWorkspaceID),
+  );
   const {
     activateSidebarSelection,
     navigateSidebar,
@@ -27,6 +32,16 @@ export default function useKeyboardShortcuts({
     updateWorkspacePrState,
   } = useWorkspaceActions();
   const { cycleTab } = useLayoutActions();
+
+  const shouldHandleWorkspaceShortcut = useCallback((direction: -1 | 1) => {
+    const now = performance.now();
+    const previous = lastWorkspaceShortcutRef.current;
+    if (previous && previous.direction === direction && now - previous.at < 24) {
+      return false;
+    }
+    lastWorkspaceShortcutRef.current = { direction, at: now };
+    return true;
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -52,13 +67,13 @@ export default function useKeyboardShortcuts({
           case "ArrowRight":
             if (navigationArea === "sidebar" && selectedWorkspaceID) {
               e.preventDefault();
-              const ws = workspaces.find((w) => w.id === selectedWorkspaceID);
-              if (ws) activateSidebarSelection();
+              if (hasSelectedWorkspace) activateSidebarSelection();
             }
             break;
           case "ArrowUp":
             if (e.altKey) {
               e.preventDefault();
+              if (!shouldHandleWorkspaceShortcut(-1)) break;
               switchWorkspaceRelative(-1);
               break;
             }
@@ -70,6 +85,7 @@ export default function useKeyboardShortcuts({
           case "ArrowDown":
             if (e.altKey) {
               e.preventDefault();
+              if (!shouldHandleWorkspaceShortcut(1)) break;
               switchWorkspaceRelative(1);
               break;
             }
@@ -119,7 +135,8 @@ export default function useKeyboardShortcuts({
     onToggleSidebar,
     selectedWorkspaceID,
     switchWorkspaceRelative,
-    workspaces,
+    hasSelectedWorkspace,
+    shouldHandleWorkspaceShortcut,
   ]);
 
   useEffect(() => {
@@ -146,9 +163,11 @@ export default function useKeyboardShortcuts({
           onToggleBottomPanel();
           break;
         case "previous-workspace":
+          if (!shouldHandleWorkspaceShortcut(-1)) break;
           switchWorkspaceRelative(-1);
           break;
         case "next-workspace":
+          if (!shouldHandleWorkspaceShortcut(1)) break;
           switchWorkspaceRelative(1);
           break;
         case "open-pr":
@@ -169,6 +188,7 @@ export default function useKeyboardShortcuts({
     onToggleBottomPanel,
     onToggleSidebar,
     switchWorkspaceRelative,
+    shouldHandleWorkspaceShortcut,
   ]);
 
   useEffect(() => {

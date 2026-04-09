@@ -21,6 +21,7 @@ import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
+import DotGridLoader from "@/components/dot-grid-loader";
 import ProjectTerminalSidebar from "./project-terminal-sidebar";
 import { ProjectTerminalAnchorInfo } from "../project-terminal.types";
 import { createSlotMap, createSessionMap } from "../project-terminal.utils";
@@ -243,8 +244,15 @@ export default function ProjectTerminalView({ runtime, workspaceId }: ProjectTer
       <div className="flex h-full min-h-0 flex-row">
         <div className="relative min-h-0 min-w-0 flex-1">
           {!panel || panel.groups.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-500">
-              No terminals
+            <div className="flex h-full items-center justify-center px-4 text-center text-[var(--theme-text-subtle)]">
+              <div className="flex flex-col items-center">
+                <DotGridLoader
+                  variant="default"
+                  gridSize={5}
+                  sizeClassName="h-8 w-8"
+                  className="opacity-90"
+                />
+              </div>
             </div>
           ) : (
             panel.groups.map((group, groupIndex) => {

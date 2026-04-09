@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
@@ -24,7 +24,16 @@ export default function TerminalSurface({
   anchorElement = null,
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onFocusRef = useRef(onFocus);
   const runtime = useDesktopRuntime();
+
+  useEffect(() => {
+    onFocusRef.current = onFocus;
+  }, [onFocus]);
+
+  const handleFocus = useCallback(() => {
+    onFocusRef.current?.();
+  }, []);
 
   useLayoutEffect(() => {
     if (!sessionID) return;
@@ -49,14 +58,14 @@ export default function TerminalSurface({
             anchorElement: currentAnchor,
             visible,
             focused,
-            onFocus,
+            onFocus: handleFocus,
           }),
         ),
       )
       .catch((error) => {
         console.error("Failed to register native terminal surface:", error);
       });
-  }, [anchorElement, focused, onFocus, runtime, sessionID, surfaceId, visible, workspaceId]);
+  }, [anchorElement, focused, handleFocus, runtime, sessionID, surfaceId, visible, workspaceId]);
 
   useEffect(() => {
     if (!sessionID) return;
@@ -81,7 +90,7 @@ export default function TerminalSurface({
       <div
         ref={containerRef}
         className="h-full w-full"
-        onMouseDown={onFocus}
+        onMouseDown={handleFocus}
         style={{ background: "transparent" }}
       />
     </div>

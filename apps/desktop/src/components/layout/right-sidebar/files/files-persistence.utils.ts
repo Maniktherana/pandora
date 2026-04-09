@@ -53,26 +53,55 @@ export async function loadFileTreeExpandedPaths(workspaceId: string): Promise<st
 
 /** Serialize expanded-map updates so concurrent read-modify-write cannot drop a workspace's paths. */
 let persistExpandedChain: Promise<void> = Promise.resolve();
+const persistExpandedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const persistExpandedSnapshots = new Map<string, string[]>();
+const persistExpandedResolvers = new Map<string, Array<() => void>>();
 
 export function persistFileTreeExpandedPaths(
   workspaceId: string,
   paths: Iterable<string>,
 ): Promise<void> {
   const nextPaths = Array.from(new Set(paths)).sort();
-  const run = async () => {
-    const raw = await getUiState(UI_KEYS.workspaceFileTreeExpanded);
-    const map = parseExpansionMap(raw);
-    if (nextPaths.length === 0) {
-      delete map[workspaceId];
-    } else {
-      map[workspaceId] = nextPaths;
+  persistExpandedSnapshots.set(workspaceId, nextPaths);
+
+  return new Promise((resolve) => {
+    const pendingResolvers = persistExpandedResolvers.get(workspaceId) ?? [];
+    pendingResolvers.push(resolve);
+    persistExpandedResolvers.set(workspaceId, pendingResolvers);
+
+    const existingTimer = persistExpandedTimers.get(workspaceId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
     }
-    await setUiState(UI_KEYS.workspaceFileTreeExpanded, JSON.stringify(map));
-  };
-  persistExpandedChain = persistExpandedChain.then(run).catch((e) => {
-    console.error("persistFileTreeExpandedPaths failed", e);
+
+    const timer = setTimeout(() => {
+      persistExpandedTimers.delete(workspaceId);
+      const snapshot = persistExpandedSnapshots.get(workspaceId) ?? [];
+      const run = async () => {
+        const raw = await getUiState(UI_KEYS.workspaceFileTreeExpanded);
+        const map = parseExpansionMap(raw);
+        if (snapshot.length === 0) {
+          delete map[workspaceId];
+        } else {
+          map[workspaceId] = snapshot;
+        }
+        await setUiState(UI_KEYS.workspaceFileTreeExpanded, JSON.stringify(map));
+      };
+
+      persistExpandedChain = persistExpandedChain
+        .then(run)
+        .catch((e) => {
+          console.error("persistFileTreeExpandedPaths failed", e);
+        })
+        .finally(() => {
+          const resolvers = persistExpandedResolvers.get(workspaceId) ?? [];
+          persistExpandedResolvers.delete(workspaceId);
+          resolvers.forEach((done) => done());
+        });
+    }, 500);
+
+    persistExpandedTimers.set(workspaceId, timer);
   });
-  return persistExpandedChain;
 }
 
 type FileTreeOpenMap = Record<string, boolean>;

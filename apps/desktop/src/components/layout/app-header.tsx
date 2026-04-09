@@ -76,6 +76,7 @@ function resolveTargetBranch(ctx: HeaderBranchContext, workspaceId: string): str
 }
 
 interface AppHeaderProps {
+  booting: boolean;
   sidebarVisible: boolean;
   selectedWorkspace: WorkspaceRecord | null;
   bottomPanelOpen: boolean;
@@ -87,6 +88,7 @@ interface AppHeaderProps {
 }
 
 export default function AppHeader({
+  booting,
   sidebarVisible,
   selectedWorkspace,
   bottomPanelOpen,
@@ -188,7 +190,7 @@ export default function AppHeader({
         </Button>
       )}
 
-      {selectedWorkspace && ownerLabel && (
+      {selectedWorkspace && ownerLabel ? (
         <div className="ml-3 flex min-w-0 items-center" data-tauri-drag-region>
           <Breadcrumb className="min-w-0">
             <BreadcrumbList className="flex-nowrap gap-1 overflow-hidden text-sm text-[var(--theme-text-subtle)]">
@@ -272,7 +274,17 @@ export default function AppHeader({
             </BreadcrumbList>
           </Breadcrumb>
         </div>
-      )}
+      ) : booting ? (
+        <div className="ml-3 flex min-w-0 items-center gap-3 text-[var(--theme-text-subtle)]">
+          <HugeiconsIcon
+            icon={GitMergeIcon}
+            strokeWidth={1}
+            className="size-5 shrink-0 text-[var(--theme-text-subtle)]"
+          />
+          <div className="h-2.5 w-28 rounded-full bg-[var(--theme-panel-hover)]" />
+          <div className="h-2.5 w-20 rounded-full bg-[var(--theme-panel-hover)] opacity-70" />
+        </div>
+      ) : null}
 
       <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
 

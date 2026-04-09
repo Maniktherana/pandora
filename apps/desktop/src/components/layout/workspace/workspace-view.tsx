@@ -17,7 +17,7 @@ import TerminalSurface from "@/components/terminal/terminal-surface";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
-import { useDesktopView, useWorkspaceView } from "@/hooks/use-desktop-view";
+import { useDesktopView, useRuntimeState, useUiPreferencesView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
@@ -27,6 +27,7 @@ import type { SessionState } from "@/lib/shared/types";
 import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
+import DotGridLoader from "@/components/dot-grid-loader";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
 
 const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
@@ -138,7 +139,7 @@ function PaneView({
   hideTabBar = false,
   isResizing,
 }: PaneViewProps) {
-  const runtime = useWorkspaceView(workspaceId, (view) => view.runtime);
+  const runtime = useRuntimeState(workspaceId);
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
@@ -290,7 +291,16 @@ function PaneView({
           </div>
         )}
 
-        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && null}
+        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-[var(--theme-text-subtle)]">
+            <DotGridLoader
+              variant="default"
+              gridSize={5}
+              sizeClassName="h-8 w-8"
+              className="opacity-90"
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -478,6 +488,9 @@ export function WorkspaceRuntimeView({
 function EmptyWorkspaceState() {
   const workspace = useDesktopView((view) => view.selectedWorkspace);
   const project = useDesktopView((view) => view.selectedProject);
+  const booting = useUiPreferencesView(
+    (view) => !view.sidebarHydrated || !view.fileTreeHydrated,
+  );
   const workspaceCommands = useWorkspaceActions();
   const handleRetryWorkspace = useCallback(() => {
     if (!workspace) return;
@@ -489,6 +502,15 @@ function EmptyWorkspaceState() {
   }, [workspace, workspaceCommands]);
 
   if (!workspace) {
+    if (booting) {
+      return (
+        <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
+          <div className="text-center">
+            <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+          </div>
+        </div>
+      );
+    }
     if (!project) {
       return (
         <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
@@ -513,9 +535,12 @@ function EmptyWorkspaceState() {
     return (
       <div className="flex items-center justify-center h-full text-[var(--theme-text-subtle)]">
         <div className="text-center">
-          <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--theme-text-faint)] border-t-[var(--theme-interactive)]" />
-          <p className="text-sm">Creating workspace...</p>
-          <p className="mt-1 text-xs text-[var(--theme-text-faint)]">Setting up git worktree</p>
+          <DotGridLoader
+            variant="default"
+            gridSize={5}
+            sizeClassName="h-8 w-8"
+            className="opacity-90"
+          />
         </div>
       </div>
     );
@@ -579,12 +604,16 @@ function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function WorkspaceRuntimeLoading({ message }: { message: string }) {
+function WorkspaceRuntimeLoading() {
   return (
     <div className="flex h-full items-center justify-center text-[var(--theme-text-subtle)]">
       <div className="text-center">
-        <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--theme-text-faint)] border-t-[var(--theme-interactive)]" />
-        <p className="text-sm">{message}</p>
+        <DotGridLoader
+          variant="default"
+          gridSize={5}
+          sizeClassName="h-8 w-8"
+          className="opacity-90"
+        />
       </div>
     </div>
   );
@@ -593,9 +622,7 @@ function WorkspaceRuntimeLoading({ message }: { message: string }) {
 export default function WorkspaceView() {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const runtime = useDesktopView((view) =>
-    view.selectedWorkspaceID ? (view.runtimes[view.selectedWorkspaceID] ?? null) : null,
-  );
+  const runtime = useRuntimeState(selectedWorkspaceID ?? "");
   const workspaceCommands = useWorkspaceActions();
   const handleRootPointerDownCapture = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(null);
@@ -607,13 +634,18 @@ export default function WorkspaceView() {
   }
 
   if (!runtime) {
-    return <WorkspaceRuntimeLoading message="Loading workspace…" />;
+    return <WorkspaceRuntimeLoading />;
+  }
+
+  if (
+    runtime.connectionState !== "connected" ||
+    runtime.layoutLoading ||
+    !runtime.layoutLoaded
+  ) {
+    return <WorkspaceRuntimeLoading />;
   }
 
   if (!runtime.root) {
-    if (runtime.layoutLoading) {
-      return <WorkspaceRuntimeLoading message="Starting workspace…" />;
-    }
     return <EmptyWorkspaceLayout workspaceId={selectedWorkspaceID!} />;
   }
 

@@ -15,6 +15,7 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
 import { useScmLineStatsQuery } from "@/components/layout/right-sidebar/scm/scm-queries";
+import DotGridLoader from "@/components/dot-grid-loader";
 
 type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
@@ -88,7 +89,15 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
         <span className="min-w-0 ml-1 flex-1 truncate text-sm text-[var(--theme-text-subtle)]">
           {workspace.name}
         </span>
-        {!isFailed && (
+        {workspace.status === "creating" ? (
+          <DotGridLoader
+            variant="default"
+            gridSize={3}
+            sizeClassName="h-4 w-4"
+            className="mr-1 shrink-0 opacity-80"
+          />
+        ) : null}
+        {!isFailed && workspace.status !== "creating" && (
           <div className="relative h-4 w-16 shrink-0">
             <span className="absolute inset-0 flex items-center justify-end gap-1 transition-opacity group-hover:opacity-0">
               {addedCount > 0 && (

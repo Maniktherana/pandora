@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tauri::AppHandle;
+use tauri::Emitter;
 
 pub struct DbState(pub Arc<AppDatabase>);
 
@@ -92,6 +93,7 @@ pub fn list_workspaces(
 /// git root (no new worktree).
 #[tauri::command]
 pub async fn create_workspace(
+    app_handle: AppHandle,
     db: tauri::State<'_, DbState>,
     project_id: String,
     workspace_kind: Option<WorkspaceKind>,
@@ -115,37 +117,48 @@ pub async fn create_workspace(
     db.0.upsert_workspace(&optimistic)?;
 
     let workspace = optimistic.clone();
+    let workspace_for_create = workspace.clone();
+    let workspace_for_failure = workspace.clone();
     let project_clone = project.clone();
     let db_arc = db.0.clone();
-    let optimistic_id = optimistic.id.clone();
+    let app_handle_clone = app_handle.clone();
 
-    tokio::task::spawn_blocking(
-        move || match git::create_worktree(&workspace, &project_clone) {
-            Ok(ready) => {
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            git::create_worktree(&workspace_for_create, &project_clone)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(ready)) => {
                 let _ = db_arc.upsert_workspace(&ready);
+                let _ = app_handle_clone.emit("workspace_record_changed", &ready);
             }
-            Err(e) => {
-                let mut failed = workspace;
+            Ok(Err(error)) => {
+                let mut failed = workspace_for_failure.clone();
                 failed.status = WorkspaceStatus::Failed;
-                failed.failure_message = Some(e);
+                failed.failure_message = Some(error);
                 failed.updated_at = now_iso8601();
                 let _ = db_arc.upsert_workspace(&failed);
+                let _ = app_handle_clone.emit("workspace_record_changed", &failed);
             }
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+            Err(error) => {
+                let mut failed = workspace_for_failure;
+                failed.status = WorkspaceStatus::Failed;
+                failed.failure_message = Some(error.to_string());
+                failed.updated_at = now_iso8601();
+                let _ = db_arc.upsert_workspace(&failed);
+                let _ = app_handle_clone.emit("workspace_record_changed", &failed);
+            }
+        }
+    });
 
-    let final_ws =
-        db.0.load_workspaces(None)
-            .into_iter()
-            .find(|w| w.id == optimistic_id)
-            .unwrap_or(optimistic);
-    Ok(final_ws)
+    Ok(optimistic)
 }
 
 #[tauri::command]
 pub async fn retry_workspace(
+    app_handle: AppHandle,
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<WorkspaceRecord, String> {
@@ -179,31 +192,41 @@ pub async fn retry_workspace(
     db.0.upsert_workspace(&updating)?;
 
     let db_arc = db.0.clone();
-    let ws_id = workspace.id.clone();
+    let workspace_for_retry = workspace.clone();
+    let workspace_for_failure = workspace.clone();
+    let app_handle_clone = app_handle.clone();
 
-    tokio::task::spawn_blocking(move || {
-        match git::retry_worktree(&workspace, &project, &other_workspaces) {
-            Ok(ready) => {
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            git::retry_worktree(&workspace_for_retry, &project, &other_workspaces)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(ready)) => {
                 let _ = db_arc.upsert_workspace(&ready);
+                let _ = app_handle_clone.emit("workspace_record_changed", &ready);
             }
-            Err(e) => {
-                let mut failed = workspace;
+            Ok(Err(error)) => {
+                let mut failed = workspace_for_failure.clone();
                 failed.status = WorkspaceStatus::Failed;
-                failed.failure_message = Some(e);
+                failed.failure_message = Some(error);
                 failed.updated_at = now_iso8601();
                 let _ = db_arc.upsert_workspace(&failed);
+                let _ = app_handle_clone.emit("workspace_record_changed", &failed);
+            }
+            Err(error) => {
+                let mut failed = workspace_for_failure;
+                failed.status = WorkspaceStatus::Failed;
+                failed.failure_message = Some(error.to_string());
+                failed.updated_at = now_iso8601();
+                let _ = db_arc.upsert_workspace(&failed);
+                let _ = app_handle_clone.emit("workspace_record_changed", &failed);
             }
         }
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    });
 
-    let final_ws =
-        db.0.load_workspaces(None)
-            .into_iter()
-            .find(|w| w.id == ws_id)
-            .unwrap_or(updating);
-    Ok(final_ws)
+    Ok(updating)
 }
 
 #[tauri::command]
