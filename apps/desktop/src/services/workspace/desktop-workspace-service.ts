@@ -142,6 +142,10 @@ export interface DesktopWorkspaceServiceApi {
   ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly activateSidebarSelection: () => Effect.Effect<void, WorkspaceSelectionError>;
   readonly navigateSidebar: (offset: number) => Effect.Effect<void>;
+  readonly switchWorkspaceRelative: (
+    offset: number,
+    navigationArea?: DesktopViewStateSnapshot["navigationArea"],
+  ) => Effect.Effect<void>;
   readonly setNavigationArea: (
     area: DesktopViewStateSnapshot["navigationArea"],
   ) => Effect.Effect<void>;
@@ -369,6 +373,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     };
     const connectionWaiters = new Map<string, Array<() => void>>();
     const pendingDefaultTerminalSeeds = new Set<string>();
+    const pendingInitialTerminalWorkspaceIds = new Set<string>();
     const publish = () => publishDesktopView(desktopStateSnapshot);
     const getEffectiveLayoutRuntimeId = () =>
       desktopStateSnapshot.layoutTargetRuntimeId ?? desktopStateSnapshot.selectedWorkspaceID;
@@ -398,6 +403,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           delete desktopStateSnapshot.runtimes[runtimeId];
         }
       }
+      for (const workspaceId of pendingInitialTerminalWorkspaceIds) {
+        if (!allowedRuntimeIds.has(workspaceId)) {
+          pendingInitialTerminalWorkspaceIds.delete(workspaceId);
+        }
+      }
 
       publish();
     };
@@ -420,14 +430,21 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         publish();
       });
 
-    /** When the daemon has not created any terminal slot yet, seed one so the workspace always has a terminal tab. */
+    /**
+     * Only newly created workspaces should get an initial terminal automatically.
+     * Existing workspaces may legitimately have no terminals and should stay empty.
+     */
     const ensureWorkspaceDefaultTerminal = (workspaceId: string) => {
       if (isProjectRuntimeKey(workspaceId)) return;
+      if (!pendingInitialTerminalWorkspaceIds.has(workspaceId)) return;
       const runtime = desktopStateSnapshot.runtimes[workspaceId];
       if (!runtime) return;
       if (runtime.layoutLoading) return;
       if (runtime.connectionState !== "connected") return;
-      if (runtime.slots.some((s) => s.kind === "terminal_slot")) return;
+      if (runtime.slots.some((s) => s.kind === "terminal_slot")) {
+        pendingInitialTerminalWorkspaceIds.delete(workspaceId);
+        return;
+      }
       if (pendingDefaultTerminalSeeds.has(workspaceId)) return;
       pendingDefaultTerminalSeeds.add(workspaceId);
       void import("@/app/desktop-runtime")
@@ -440,7 +457,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                     (slot) => slot.kind === "terminal_slot",
                   ) ?? false,
               );
-              if (alreadySeeded) return;
+              if (alreadySeeded) {
+                pendingInitialTerminalWorkspaceIds.delete(workspaceId);
+                return;
+              }
 
               const client = yield* daemonGateway.getClient();
               if (!client) return;
@@ -448,6 +468,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               const seeded = seedWorkspaceTerminal(client, workspaceId);
               const session = yield* sessionCache.get(workspaceId);
               yield* session.commands.addTerminalTab(seeded.slotID);
+              pendingInitialTerminalWorkspaceIds.delete(workspaceId);
             }),
           ),
         )
@@ -895,6 +916,32 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       );
 
+    const selectWorkspaceRelative = (
+      offset: number,
+      navigationArea: DesktopViewStateSnapshot["navigationArea"] = "sidebar",
+    ) =>
+      Effect.gen(function* () {
+        const visibleWorkspaces = desktopStateSnapshot.workspaces.filter(
+          (workspace) => workspace.status !== "archived",
+        );
+        if (visibleWorkspaces.length === 0) return;
+        const currentIndex = visibleWorkspaces.findIndex(
+          (workspace) => workspace.id === desktopStateSnapshot.selectedWorkspaceID,
+        );
+        const nextIndex = Math.max(
+          0,
+          Math.min(visibleWorkspaces.length - 1, (currentIndex >= 0 ? currentIndex : 0) + offset),
+        );
+        const workspace = visibleWorkspaces[nextIndex];
+        if (!workspace) return;
+        yield* selectWorkspaceById(workspace.id);
+        if (navigationArea !== "sidebar") {
+          yield* updateDesktopState((state) => {
+            state.navigationArea = navigationArea;
+          });
+        }
+      }).pipe(Effect.catchAll(() => Effect.void));
+
     const maybeStartSelectedWorkspace = () =>
       Effect.gen(function* () {
         const selectedWorkspaceId = desktopStateSnapshot.selectedWorkspaceID;
@@ -1215,6 +1262,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
                 workspaceKind: "linked",
               });
               autoCreatedWorkspaceId = created.id;
+              pendingInitialTerminalWorkspaceIds.add(created.id);
             }
             const appState = await invoke<AppState>("load_app_state");
             applyAppState(appState);
@@ -1289,20 +1337,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             cause instanceof WorkspaceSelectionError ? cause : workspaceSelectionError(cause),
           ),
         ),
-      navigateSidebar: (offset) =>
-        Effect.gen(function* () {
-          if (desktopStateSnapshot.workspaces.length === 0) return;
-          const currentIndex = desktopStateSnapshot.workspaces.findIndex(
-            (workspace) => workspace.id === desktopStateSnapshot.selectedWorkspaceID,
-          );
-          const nextIndex = Math.max(
-            0,
-            Math.min(desktopStateSnapshot.workspaces.length - 1, currentIndex + offset),
-          );
-          const workspace = desktopStateSnapshot.workspaces[nextIndex];
-          if (!workspace) return;
-          yield* selectWorkspaceById(workspace.id);
-        }).pipe(Effect.catchAll(() => Effect.void)),
+      navigateSidebar: (offset) => selectWorkspaceRelative(offset, "sidebar"),
+      switchWorkspaceRelative: (offset, navigationArea = "workspace") =>
+        selectWorkspaceRelative(offset, navigationArea),
       setNavigationArea: (area) =>
         updateDesktopState((state) => {
           state.navigationArea = area;
@@ -1516,10 +1553,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       createWorkspace: (projectId, workspaceKind) =>
         Effect.tryPromise({
           try: async () => {
-            await invoke("create_workspace", {
+            const created = await invoke<WorkspaceRecord>("create_workspace", {
               projectId,
               ...(workspaceKind != null ? { workspaceKind } : {}),
             });
+            pendingInitialTerminalWorkspaceIds.add(created.id);
             const appState = await invoke<AppState>("load_app_state");
             applyAppState(appState);
           },

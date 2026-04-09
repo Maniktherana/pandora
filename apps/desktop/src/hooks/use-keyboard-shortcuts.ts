@@ -20,8 +20,12 @@ export default function useKeyboardShortcuts({
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const workspaces = useDesktopView((view) => view.workspaces);
-  const { activateSidebarSelection, navigateSidebar, updateWorkspacePrState } =
-    useWorkspaceActions();
+  const {
+    activateSidebarSelection,
+    navigateSidebar,
+    switchWorkspaceRelative,
+    updateWorkspacePrState,
+  } = useWorkspaceActions();
   const { cycleTab } = useLayoutActions();
 
   useEffect(() => {
@@ -53,12 +57,22 @@ export default function useKeyboardShortcuts({
             }
             break;
           case "ArrowUp":
+            if (e.altKey) {
+              e.preventDefault();
+              switchWorkspaceRelative(-1);
+              break;
+            }
             if (navigationArea === "sidebar") {
               e.preventDefault();
               navigateSidebar(-1);
             }
             break;
           case "ArrowDown":
+            if (e.altKey) {
+              e.preventDefault();
+              switchWorkspaceRelative(1);
+              break;
+            }
             if (navigationArea === "sidebar") {
               e.preventDefault();
               navigateSidebar(1);
@@ -104,6 +118,7 @@ export default function useKeyboardShortcuts({
     onToggleBottomPanel,
     onToggleSidebar,
     selectedWorkspaceID,
+    switchWorkspaceRelative,
     workspaces,
   ]);
 
@@ -130,6 +145,12 @@ export default function useKeyboardShortcuts({
         case "toggle-bottom-terminal":
           onToggleBottomPanel();
           break;
+        case "previous-workspace":
+          switchWorkspaceRelative(-1);
+          break;
+        case "next-workspace":
+          switchWorkspaceRelative(1);
+          break;
         case "open-pr":
           window.dispatchEvent(new CustomEvent("pandora:open-pr"));
           break;
@@ -141,7 +162,14 @@ export default function useKeyboardShortcuts({
     return () => {
       unlisten?.();
     };
-  }, [cycleTab, onCloseTab, onNewTerminal, onToggleBottomPanel, onToggleSidebar]);
+  }, [
+    cycleTab,
+    onCloseTab,
+    onNewTerminal,
+    onToggleBottomPanel,
+    onToggleSidebar,
+    switchWorkspaceRelative,
+  ]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;

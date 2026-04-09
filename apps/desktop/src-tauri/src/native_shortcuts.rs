@@ -22,6 +22,8 @@ mod key {
     pub const LEFT_BRACKET: u32 = 33;
     pub const RIGHT_BRACKET: u32 = 30;
     pub const GRAVE: u32 = 50;
+    pub const ARROW_DOWN: u32 = 125;
+    pub const ARROW_UP: u32 = 126;
 }
 
 /// Called from `native_terminal_view.m` before delivering keys to Ghostty.
@@ -36,6 +38,22 @@ pub extern "C" fn pandora_try_emit_app_shortcut(
     alt: bool,
 ) -> u8 {
     if alt {
+        if cmd {
+            let Some(app) = APP.get() else {
+                return 0;
+            };
+            match keycode {
+                key::ARROW_UP => {
+                    let _ = app.emit("app-shortcut", "previous-workspace");
+                    return 1;
+                }
+                key::ARROW_DOWN => {
+                    let _ = app.emit("app-shortcut", "next-workspace");
+                    return 1;
+                }
+                _ => {}
+            }
+        }
         return 0;
     }
     let Some(app) = APP.get() else {

@@ -32,6 +32,15 @@ export function useWorkspaceActions() {
         ),
       navigateSidebar: (offset: number) =>
         run(Effect.flatMap(DesktopWorkspaceService, (service) => service.navigateSidebar(offset))),
+      switchWorkspaceRelative: (
+        offset: number,
+        navigationArea?: DesktopViewStateSnapshot["navigationArea"],
+      ) =>
+        run(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.switchWorkspaceRelative(offset, navigationArea),
+          ),
+        ),
       setNavigationArea: (area: DesktopViewStateSnapshot["navigationArea"]) =>
         run(Effect.flatMap(DesktopWorkspaceService, (service) => service.setNavigationArea(area))),
       setSearchText: (text: string) =>

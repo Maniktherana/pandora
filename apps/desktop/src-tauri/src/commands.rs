@@ -102,16 +102,16 @@ pub async fn create_workspace(
         .find(|p| p.id == project_id)
         .ok_or("Project not found")?;
 
-    let existing_count = db.0.load_workspaces(Some(&project_id)).len();
+    let existing_workspaces = db.0.load_workspaces(Some(&project_id));
     let kind = workspace_kind.unwrap_or(WorkspaceKind::Worktree);
 
     if kind == WorkspaceKind::Linked {
-        let linked = git::make_linked_workspace(&project, existing_count)?;
+        let linked = git::make_linked_workspace(&project, &existing_workspaces)?;
         db.0.upsert_workspace(&linked)?;
         return Ok(linked);
     }
 
-    let optimistic = git::make_optimistic_workspace(&project, existing_count);
+    let optimistic = git::make_optimistic_workspace(&project, &existing_workspaces)?;
     db.0.upsert_workspace(&optimistic)?;
 
     let workspace = optimistic.clone();
@@ -166,6 +166,11 @@ pub async fn retry_workspace(
         .into_iter()
         .find(|p| p.id == workspace.project_id)
         .ok_or("Project not found")?;
+    let other_workspaces: Vec<_> =
+        db.0.load_workspaces(Some(&workspace.project_id))
+            .into_iter()
+            .filter(|entry| entry.id != workspace.id)
+            .collect();
 
     let mut updating = workspace.clone();
     updating.status = WorkspaceStatus::Creating;
@@ -176,16 +181,18 @@ pub async fn retry_workspace(
     let db_arc = db.0.clone();
     let ws_id = workspace.id.clone();
 
-    tokio::task::spawn_blocking(move || match git::retry_worktree(&workspace, &project) {
-        Ok(ready) => {
-            let _ = db_arc.upsert_workspace(&ready);
-        }
-        Err(e) => {
-            let mut failed = workspace;
-            failed.status = WorkspaceStatus::Failed;
-            failed.failure_message = Some(e);
-            failed.updated_at = now_iso8601();
-            let _ = db_arc.upsert_workspace(&failed);
+    tokio::task::spawn_blocking(move || {
+        match git::retry_worktree(&workspace, &project, &other_workspaces) {
+            Ok(ready) => {
+                let _ = db_arc.upsert_workspace(&ready);
+            }
+            Err(e) => {
+                let mut failed = workspace;
+                failed.status = WorkspaceStatus::Failed;
+                failed.failure_message = Some(e);
+                failed.updated_at = now_iso8601();
+                let _ = db_arc.upsert_workspace(&failed);
+            }
         }
     })
     .await
@@ -675,12 +682,11 @@ pub fn pr_gather_context(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<git::PrContext, String> {
-    let workspace = db
-        .0
-        .load_workspaces(None)
-        .into_iter()
-        .find(|w| w.id == workspace_id)
-        .ok_or("Workspace not found")?;
+    let workspace =
+        db.0.load_workspaces(None)
+            .into_iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or("Workspace not found")?;
     git::gather_pr_context(&workspace.worktree_path)
 }
 
@@ -689,19 +695,17 @@ pub fn header_branch_context(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<git::HeaderBranchContext, String> {
-    let workspace = db
-        .0
-        .load_workspaces(None)
-        .into_iter()
-        .find(|w| w.id == workspace_id)
-        .ok_or("Workspace not found")?;
-    let owner = db
-        .0
-        .load_projects()
-        .into_iter()
-        .find(|p| p.id == workspace.project_id)
-        .and_then(|p| p.git_remote_owner)
-        .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
+    let workspace =
+        db.0.load_workspaces(None)
+            .into_iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or("Workspace not found")?;
+    let owner =
+        db.0.load_projects()
+            .into_iter()
+            .find(|p| p.id == workspace.project_id)
+            .and_then(|p| p.git_remote_owner)
+            .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
     git::gather_header_branch_context(&workspace.worktree_path, owner)
 }
 
@@ -710,12 +714,11 @@ pub fn pr_check_status(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<Option<git::GhPrInfo>, String> {
-    let workspace = db
-        .0
-        .load_workspaces(None)
-        .into_iter()
-        .find(|w| w.id == workspace_id)
-        .ok_or("Workspace not found")?;
+    let workspace =
+        db.0.load_workspaces(None)
+            .into_iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or("Workspace not found")?;
     let pr_number = match workspace.pr_number {
         Some(n) => n,
         None => return Ok(None),
@@ -804,9 +807,12 @@ fn copy_name_destination(original_dest: &Path, copy_index: usize) -> Result<Path
     let parent = original_dest
         .parent()
         .ok_or_else(|| format!("Cannot determine parent for '{}'", original_dest.display()))?;
-    let file_name = original_dest
-        .file_name()
-        .ok_or_else(|| format!("Cannot determine filename for '{}'", original_dest.display()))?;
+    let file_name = original_dest.file_name().ok_or_else(|| {
+        format!(
+            "Cannot determine filename for '{}'",
+            original_dest.display()
+        )
+    })?;
     let file_name = file_name.to_string_lossy();
 
     let suffix = if copy_index == 1 {
@@ -820,11 +826,21 @@ fn copy_name_destination(original_dest: &Path, copy_index: usize) -> Result<Path
     } else {
         let stem = original_dest
             .file_stem()
-            .ok_or_else(|| format!("Cannot determine file stem for '{}'", original_dest.display()))?
+            .ok_or_else(|| {
+                format!(
+                    "Cannot determine file stem for '{}'",
+                    original_dest.display()
+                )
+            })?
             .to_string_lossy();
         let extension = original_dest
             .extension()
-            .ok_or_else(|| format!("Cannot determine extension for '{}'", original_dest.display()))?
+            .ok_or_else(|| {
+                format!(
+                    "Cannot determine extension for '{}'",
+                    original_dest.display()
+                )
+            })?
             .to_string_lossy();
         format!("{stem}{suffix}.{extension}")
     };
@@ -974,10 +990,7 @@ pub fn rename_workspace_entry(
 }
 
 #[tauri::command]
-pub fn delete_workspace_entry(
-    workspace_root: String,
-    relative_path: String,
-) -> Result<(), String> {
+pub fn delete_workspace_entry(workspace_root: String, relative_path: String) -> Result<(), String> {
     let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
     if path.is_dir() {
         std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
