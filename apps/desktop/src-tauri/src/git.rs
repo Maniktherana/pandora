@@ -1,5 +1,6 @@
 use crate::database::now_iso8601;
 use crate::models::*;
+use rand::seq::SliceRandom;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -147,35 +148,186 @@ fn slugify(raw: &str) -> String {
     result.trim_matches('-').to_string()
 }
 
-fn generate_slug() -> String {
-    use rand::Rng;
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
-    let mut rng = rand::thread_rng();
-    (0..8)
-        .map(|_| chars[rng.gen_range(0..chars.len())])
+const WORKTREE_NAMES: &[&str] = &[
+    "achilles",
+    "aether",
+    "aphrodite",
+    "apollo",
+    "ares",
+    "artemis",
+    "asclepius",
+    "asteria",
+    "astraeus",
+    "atalanta",
+    "athena",
+    "atlas",
+    "bellerophon",
+    "chaos",
+    "coeus",
+    "crius",
+    "cronus",
+    "demeter",
+    "deucalion",
+    "dione",
+    "dionysus",
+    "eos",
+    "epimetheus",
+    "erebus",
+    "eris",
+    "eros",
+    "gaia",
+    "hades",
+    "hebe",
+    "hecate",
+    "helios",
+    "hephaestus",
+    "hera",
+    "heracles",
+    "hermes",
+    "hestia",
+    "hippolyta",
+    "hyperion",
+    "hypnos",
+    "iapetus",
+    "iris",
+    "leto",
+    "metis",
+    "mnemosyne",
+    "nemesis",
+    "nike",
+    "nyx",
+    "oceanus",
+    "orpheus",
+    "pallas",
+    "pan",
+    "persephone",
+    "perseus",
+    "phoebe",
+    "pontus",
+    "poseidon",
+    "prometheus",
+    "rhea",
+    "selene",
+    "tartarus",
+    "tethys",
+    "thanatos",
+    "theia",
+    "themis",
+    "theseus",
+    "triton",
+    "uranus",
+    "zeus",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceIdentity {
+    name: String,
+    slug: String,
+}
+
+fn build_workspace_name(parts: &[&str]) -> String {
+    parts.join(" ")
+}
+
+fn build_workspace_slug(parts: &[&str]) -> String {
+    parts.join("-")
+}
+
+fn existing_workspace_names(existing_workspaces: &[WorkspaceRecord]) -> BTreeSet<String> {
+    existing_workspaces
+        .iter()
+        .map(|workspace| workspace.name.trim().to_lowercase())
         .collect()
 }
 
-const WORKTREE_NAMES: &[&str] = &[
-    "Achilles", "Aether", "Aphrodite", "Apollo", "Ares", "Artemis", "Asclepius", "Asteria",
-    "Astraeus", "Atalanta", "Athena", "Atlas", "Bellerophon", "Chaos", "Coeus", "Crius",
-    "Cronus", "Demeter", "Deucalion", "Dione", "Dionysus", "Eos", "Epimetheus", "Erebus",
-    "Eris", "Eros", "Gaia", "Hades", "Hebe", "Hecate", "Helios", "Hephaestus", "Hera",
-    "Heracles", "Hermes", "Hestia", "Hippolyta", "Hyperion", "Hypnos", "Iapetus", "Iris",
-    "Leto", "Metis", "Mnemosyne", "Nemesis", "Nike", "Nyx", "Oceanus", "Orpheus", "Pallas",
-    "Pan", "Persephone", "Perseus", "Phoebe", "Pontus", "Poseidon", "Prometheus", "Rhea",
-    "Selene", "Tartarus", "Tethys", "Thanatos", "Theia", "Themis", "Theseus", "Triton",
-    "Uranus", "Zeus",
-];
-
-fn generate_workspace_name(existing_count: usize) -> String {
-    let base = WORKTREE_NAMES[existing_count % WORKTREE_NAMES.len()];
-    let cycle = existing_count / WORKTREE_NAMES.len();
-    if cycle == 0 {
-        base.to_string()
-    } else {
-        format!("{} {}", base, cycle + 1)
+fn pick_workspace_name_part<'a, R: rand::Rng + ?Sized>(
+    rng: &mut R,
+    current_parts: &[&'a str],
+) -> &'a str {
+    let mut available_parts: Vec<&str> = WORKTREE_NAMES
+        .iter()
+        .copied()
+        .filter(|candidate| !current_parts.contains(candidate))
+        .collect();
+    if available_parts.is_empty() {
+        available_parts = WORKTREE_NAMES.to_vec();
     }
+    available_parts
+        .choose(rng)
+        .copied()
+        .unwrap_or(WORKTREE_NAMES[0])
+}
+
+fn select_workspace_identity<R, F>(
+    rng: &mut R,
+    taken_names: &BTreeSet<String>,
+    mut slug_available: F,
+) -> WorkspaceIdentity
+where
+    R: rand::Rng + ?Sized,
+    F: FnMut(&str) -> bool,
+{
+    let mut parts = vec![pick_workspace_name_part(rng, &[])];
+    loop {
+        let name = build_workspace_name(&parts);
+        let slug = build_workspace_slug(&parts);
+        if !taken_names.contains(&name) && slug_available(&slug) {
+            return WorkspaceIdentity { name, slug };
+        }
+        parts.push(pick_workspace_name_part(rng, &parts));
+    }
+}
+
+fn local_branch_exists(git_root_path: &str, branch: &str) -> bool {
+    Command::new("git")
+        .args([
+            "-C",
+            git_root_path,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{}", branch),
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn generate_linked_workspace_identity(
+    existing_workspaces: &[WorkspaceRecord],
+) -> WorkspaceIdentity {
+    let mut rng = rand::thread_rng();
+    let taken_names = existing_workspace_names(existing_workspaces);
+    let taken_slugs: BTreeSet<String> = existing_workspaces
+        .iter()
+        .map(|workspace| workspace.git_worktree_slug.clone())
+        .collect();
+
+    select_workspace_identity(&mut rng, &taken_names, |slug| !taken_slugs.contains(slug))
+}
+
+fn generate_worktree_identity(
+    project: &ProjectRecord,
+    owner: &str,
+    existing_workspaces: &[WorkspaceRecord],
+) -> WorkspaceIdentity {
+    let mut rng = rand::thread_rng();
+    let taken_names = existing_workspace_names(existing_workspaces);
+    let taken_slugs: BTreeSet<String> = existing_workspaces
+        .iter()
+        .map(|workspace| workspace.git_worktree_slug.clone())
+        .collect();
+
+    select_workspace_identity(&mut rng, &taken_names, |slug| {
+        if taken_slugs.contains(slug) {
+            return false;
+        }
+        if Path::new(&worktree_path(&project.id, owner, slug)).exists() {
+            return false;
+        }
+        let branch = format!("{}/{}", owner, slug);
+        !local_branch_exists(&project.git_root_path, &branch)
+    })
 }
 
 pub fn pandora_home() -> String {
@@ -211,19 +363,19 @@ pub fn current_branch(git_root_path: &str) -> Result<String, String> {
 /// Linked workspace: uses the project git checkout at `git_root_path` (no `git worktree add`).
 pub fn make_linked_workspace(
     project: &ProjectRecord,
-    existing_count: usize,
+    existing_workspaces: &[WorkspaceRecord],
 ) -> Result<WorkspaceRecord, String> {
     let branch = current_branch(&project.git_root_path)?;
-    let slug = generate_slug();
+    let identity = generate_linked_workspace_identity(existing_workspaces);
     let now = now_iso8601();
 
     Ok(WorkspaceRecord {
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.id.clone(),
-        name: generate_workspace_name(existing_count),
+        name: identity.name,
         git_branch_name: branch,
         git_worktree_owner: "linked".into(),
-        git_worktree_slug: slug,
+        git_worktree_slug: identity.slug,
         worktree_path: project.git_root_path.clone(),
         workspace_context_subpath: project.git_context_subpath.clone(),
         workspace_kind: WorkspaceKind::Linked,
@@ -240,21 +392,21 @@ pub fn make_linked_workspace(
 
 pub fn make_optimistic_workspace(
     project: &ProjectRecord,
-    existing_count: usize,
-) -> WorkspaceRecord {
+    existing_workspaces: &[WorkspaceRecord],
+) -> Result<WorkspaceRecord, String> {
     let owner = resolve_remote_owner(&project.git_root_path).unwrap_or_else(|| "workspace".into());
-    let slug = generate_slug();
-    let branch = format!("{}/{}", owner, slug);
-    let wt_path = worktree_path(&project.id, &owner, &slug);
+    let identity = generate_worktree_identity(project, &owner, existing_workspaces);
+    let branch = format!("{}/{}", owner, identity.slug);
+    let wt_path = worktree_path(&project.id, &owner, &identity.slug);
     let now = now_iso8601();
 
-    WorkspaceRecord {
+    Ok(WorkspaceRecord {
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.id.clone(),
-        name: generate_workspace_name(existing_count),
+        name: identity.name,
         git_branch_name: branch,
         git_worktree_owner: owner,
-        git_worktree_slug: slug,
+        git_worktree_slug: identity.slug,
         worktree_path: wt_path,
         workspace_context_subpath: project.git_context_subpath.clone(),
         workspace_kind: WorkspaceKind::Worktree,
@@ -266,7 +418,7 @@ pub fn make_optimistic_workspace(
         pr_url: None,
         pr_number: None,
         pr_state: None,
-    }
+    })
 }
 
 pub fn create_worktree(
@@ -293,6 +445,7 @@ pub fn create_worktree(
 pub fn retry_worktree(
     workspace: &WorkspaceRecord,
     project: &ProjectRecord,
+    existing_workspaces: &[WorkspaceRecord],
 ) -> Result<WorkspaceRecord, String> {
     if workspace.workspace_kind != WorkspaceKind::Worktree {
         return Err("Only worktree workspaces can be retried.".into());
@@ -300,10 +453,10 @@ pub fn retry_worktree(
     // Remove partial leftovers
     let _ = std::fs::remove_dir_all(&workspace.worktree_path);
 
-    let slug = generate_slug();
     let owner = &workspace.git_worktree_owner;
-    let new_path = worktree_path(&project.id, owner, &slug);
-    let new_branch = format!("{}/{}", owner, slug);
+    let identity = generate_worktree_identity(project, owner, existing_workspaces);
+    let new_path = worktree_path(&project.id, owner, &identity.slug);
+    let new_branch = format!("{}/{}", owner, identity.slug);
 
     run_git(&[
         "-C",
@@ -316,9 +469,10 @@ pub fn retry_worktree(
     ])?;
 
     let mut refreshed = workspace.clone();
+    refreshed.name = identity.name;
     refreshed.workspace_kind = WorkspaceKind::Worktree;
     refreshed.git_branch_name = new_branch;
-    refreshed.git_worktree_slug = slug;
+    refreshed.git_worktree_slug = identity.slug;
     refreshed.worktree_path = new_path;
     refreshed.status = WorkspaceStatus::Ready;
     refreshed.failure_message = None;
@@ -420,6 +574,39 @@ fn run_git_diff_limited(args: &[&str], max_bytes: usize) -> Result<ScmDiffResult
     let stdout = run_git_stdout_bytes(args)?;
     let (diff, truncated) = truncate_utf8_bytes(&stdout, max_bytes);
     Ok(ScmDiffResult { diff, truncated })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn select_workspace_identity_returns_lowercase_single_name_when_available() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let identity = select_workspace_identity(&mut rng, &BTreeSet::new(), |_| true);
+
+        assert_eq!(identity.name, identity.name.to_lowercase());
+        assert_eq!(identity.slug, identity.slug.to_lowercase());
+        assert!(!identity.name.contains(' '));
+        assert_eq!(identity.slug, identity.name);
+    }
+
+    #[test]
+    fn select_workspace_identity_appends_another_name_when_all_single_names_are_taken() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(13);
+        let taken_names = WORKTREE_NAMES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<BTreeSet<_>>();
+
+        let identity = select_workspace_identity(&mut rng, &taken_names, |_| true);
+
+        assert!(identity.name.contains(' '));
+        assert!(identity.slug.contains('-'));
+        assert_eq!(identity.slug, identity.name.replace(' ', "-"));
+        assert!(!taken_names.contains(&identity.name));
+    }
 }
 
 /// `git diff` for a single path under `worktree_path`. `staged` uses `--cached`.
@@ -556,7 +743,11 @@ fn parse_numstat_by_path(raw: &str) -> Vec<ScmPathLineStats> {
         let added = added.parse::<u64>().unwrap_or(0);
         let removed = removed.parse::<u64>().unwrap_or(0);
         let path = path.rsplit('\t').next().unwrap_or(path).to_string();
-        stats.push(ScmPathLineStats { path, added, removed });
+        stats.push(ScmPathLineStats {
+            path,
+            added,
+            removed,
+        });
     }
     stats
 }
@@ -639,21 +830,30 @@ pub fn git_path_line_stats(
     sanitize_repo_relative_path(relative_path)?;
 
     if staged {
-        return Ok(parse_numstat(&run_git(&[
+        return Ok(parse_numstat(
+            &run_git(&[
+                "-C",
+                worktree_path,
+                "diff",
+                "--cached",
+                "--numstat",
+                "--",
+                relative_path,
+            ])
+            .unwrap_or_default(),
+        ));
+    }
+
+    let stats = parse_numstat(
+        &run_git(&[
             "-C",
             worktree_path,
             "diff",
-            "--cached",
             "--numstat",
             "--",
             relative_path,
         ])
-        .unwrap_or_default()));
-    }
-
-    let stats = parse_numstat(
-        &run_git(&["-C", worktree_path, "diff", "--numstat", "--", relative_path])
-            .unwrap_or_default(),
+        .unwrap_or_default(),
     );
     if stats.added > 0 || stats.removed > 0 {
         return Ok(stats);
@@ -719,17 +919,17 @@ pub fn git_path_line_stats_bulk(
     };
 
     if !staged {
-      for path in untracked_paths {
-          let full_path = Path::new(worktree_path).join(path);
-          if !full_path.is_file() {
-              continue;
-          }
-          results.push(ScmPathLineStats {
-              path: path.clone(),
-              added: count_text_lines(&full_path),
-              removed: 0,
-          });
-      }
+        for path in untracked_paths {
+            let full_path = Path::new(worktree_path).join(path);
+            if !full_path.is_file() {
+                continue;
+            }
+            results.push(ScmPathLineStats {
+                path: path.clone(),
+                added: count_text_lines(&full_path),
+                removed: 0,
+            });
+        }
     }
 
     Ok(results)
@@ -990,14 +1190,27 @@ pub struct HeaderBranchContext {
 /// Determine the default branch (main or master) for a repository.
 fn default_branch(worktree_path: &str) -> String {
     // Check remote HEAD first
-    if let Ok(out) = run_git(&["-C", worktree_path, "symbolic-ref", "refs/remotes/origin/HEAD"]) {
+    if let Ok(out) = run_git(&[
+        "-C",
+        worktree_path,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+    ]) {
         let trimmed = out.trim();
         if let Some(branch) = trimmed.strip_prefix("refs/remotes/origin/") {
             return branch.to_string();
         }
     }
     // Fallback: check if main exists, else master
-    if run_git(&["-C", worktree_path, "rev-parse", "--verify", "refs/heads/main"]).is_ok() {
+    if run_git(&[
+        "-C",
+        worktree_path,
+        "rev-parse",
+        "--verify",
+        "refs/heads/main",
+    ])
+    .is_ok()
+    {
         return "main".into();
     }
     "master".into()
@@ -1015,12 +1228,21 @@ fn normalize_branch_name(raw: &str) -> Option<String> {
     Some(branch.to_string())
 }
 
-fn list_available_branches(worktree_path: &str, default_target_branch: &str) -> Result<Vec<String>, String> {
+fn list_available_branches(
+    worktree_path: &str,
+    default_target_branch: &str,
+) -> Result<Vec<String>, String> {
     verify_git_worktree(worktree_path)?;
 
     let mut branches = BTreeSet::new();
 
-    let local_refs = run_git(&["-C", worktree_path, "for-each-ref", "refs/heads", "--format=%(refname:short)"])?;
+    let local_refs = run_git(&[
+        "-C",
+        worktree_path,
+        "for-each-ref",
+        "refs/heads",
+        "--format=%(refname:short)",
+    ])?;
     for branch in local_refs.lines().filter_map(normalize_branch_name) {
         branches.insert(branch);
     }
@@ -1052,8 +1274,11 @@ pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
     let is_default_branch = branch_name == base_branch;
 
     let commit_log = run_git(&[
-        "-C", worktree_path,
-        "log", &format!("{}..HEAD", base_branch), "--oneline",
+        "-C",
+        worktree_path,
+        "log",
+        &format!("{}..HEAD", base_branch),
+        "--oneline",
     ])
     .unwrap_or_default()
     .trim()
@@ -1062,8 +1287,12 @@ pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
     let has_commits = !commit_log.is_empty();
 
     let diff_stat = run_git(&[
-        "-C", worktree_path,
-        "diff", &format!("{}...HEAD", base_branch), "--stat", "--stat-count=50",
+        "-C",
+        worktree_path,
+        "diff",
+        &format!("{}...HEAD", base_branch),
+        "--stat",
+        "--stat-count=50",
     ])
     .unwrap_or_default()
     .trim()
@@ -1115,10 +1344,13 @@ pub struct GhPrInfo {
 pub fn gh_pr_status(worktree_path: &str, pr_number: i64) -> Result<GhPrInfo, String> {
     let output = Command::new("gh")
         .args([
-            "pr", "view",
+            "pr",
+            "view",
             &pr_number.to_string(),
-            "--json", "state",
-            "-q", ".state",
+            "--json",
+            "state",
+            "-q",
+            ".state",
         ])
         .current_dir(worktree_path)
         .output()
@@ -1129,7 +1361,9 @@ pub fn gh_pr_status(worktree_path: &str, pr_number: i64) -> Result<GhPrInfo, Str
         return Err(stderr);
     }
 
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
+    let state = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_lowercase();
     Ok(GhPrInfo { state })
 }
 

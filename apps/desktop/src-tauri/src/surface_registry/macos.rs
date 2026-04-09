@@ -451,8 +451,17 @@ impl SurfaceRegistry {
         app_handle: AppHandle,
     ) -> Result<(), String> {
         let t0 = Instant::now();
-        tlog!("CREATE", "START surface={} session={} workspace={} rect=({:.0},{:.0} {:.0}x{:.0})",
-            surface_id, session_id, workspace_id, rect.x, rect.y, rect.width, rect.height);
+        tlog!(
+            "CREATE",
+            "START surface={} session={} workspace={} rect=({:.0},{:.0} {:.0}x{:.0})",
+            surface_id,
+            session_id,
+            workspace_id,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height
+        );
 
         let app = ghostty_app::get_ghostty_app()
             .ok_or_else(|| "Ghostty app not initialized".to_string())?;
@@ -640,8 +649,13 @@ impl SurfaceRegistry {
             registry.flush_surface_output(&app_handle, &surface_id);
         }
 
-        tlog!("CREATE", "DONE surface={} session={} took={}µs",
-            surface_id, session_id, t0.elapsed().as_micros());
+        tlog!(
+            "CREATE",
+            "DONE surface={} session={} took={}µs",
+            surface_id,
+            session_id,
+            t0.elapsed().as_micros()
+        );
         Ok(())
     }
 
@@ -694,7 +708,12 @@ impl SurfaceRegistry {
             // Only log if slow.
             let elapsed = t0.elapsed().as_micros();
             if elapsed > 1000 {
-                tlog!("UPDATE", "surface={} NO-OP (unchanged) took={}µs", surface_id, elapsed);
+                tlog!(
+                    "UPDATE",
+                    "surface={} NO-OP (unchanged) took={}µs",
+                    surface_id,
+                    elapsed
+                );
             }
             return Ok(());
         }
@@ -748,10 +767,20 @@ impl SurfaceRegistry {
             surface.focused = focused;
         }
 
-        tlog!("UPDATE", "surface={} vis={} foc={} overlay={:?} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
-            surface_id, visible, focused, overlay_mode,
-            prev_rect.x, prev_rect.y, prev_rect.width, prev_rect.height, prev_rect.scale_factor,
-            t0.elapsed().as_micros());
+        tlog!(
+            "UPDATE",
+            "surface={} vis={} foc={} overlay={:?} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
+            surface_id,
+            visible,
+            focused,
+            overlay_mode,
+            prev_rect.x,
+            prev_rect.y,
+            prev_rect.width,
+            prev_rect.height,
+            prev_rect.scale_factor,
+            t0.elapsed().as_micros()
+        );
 
         Ok(())
     }
@@ -845,8 +874,13 @@ impl SurfaceRegistry {
 
         unsafe { Self::teardown_native_surface(native_surface) };
 
-        tlog!("DESTROY", "DONE surface={} session={} took={}µs",
-            surface_id, session_id, t0.elapsed().as_micros());
+        tlog!(
+            "DESTROY",
+            "DONE surface={} session={} took={}µs",
+            surface_id,
+            session_id,
+            t0.elapsed().as_micros()
+        );
         Ok(())
     }
 
@@ -879,8 +913,13 @@ impl SurfaceRegistry {
                         .entry(session_id.to_string())
                         .or_default()
                         .push(data.to_vec());
-                    tlog!("FEED", "session={} bytes={} → pending (no route) took={}µs",
-                        session_id, data.len(), t0.elapsed().as_micros());
+                    tlog!(
+                        "FEED",
+                        "session={} bytes={} → pending (no route) took={}µs",
+                        session_id,
+                        data.len(),
+                        t0.elapsed().as_micros()
+                    );
                     return false;
                 }
             }
@@ -897,8 +936,14 @@ impl SurfaceRegistry {
                         .entry(session_id.to_string())
                         .or_default()
                         .push(data.to_vec());
-                    tlog!("FEED", "session={} surface={} bytes={} → pending (no mailbox) took={}µs",
-                        session_id, surface_id, data.len(), t0.elapsed().as_micros());
+                    tlog!(
+                        "FEED",
+                        "session={} surface={} bytes={} → pending (no mailbox) took={}µs",
+                        session_id,
+                        surface_id,
+                        data.len(),
+                        t0.elapsed().as_micros()
+                    );
                     return false;
                 }
             }
@@ -929,8 +974,16 @@ impl SurfaceRegistry {
         let elapsed = t0.elapsed().as_micros();
         // Only log if slow (>500µs) or we scheduled a flush, to avoid flooding the log.
         if scheduled || elapsed > 500 {
-            tlog!("FEED", "session={} surface={} bytes={} queue={} scheduled={} took={}µs",
-                session_id, surface_id, data.len(), queue_len, scheduled, elapsed);
+            tlog!(
+                "FEED",
+                "session={} surface={} bytes={} queue={} scheduled={} took={}µs",
+                session_id,
+                surface_id,
+                data.len(),
+                queue_len,
+                scheduled,
+                elapsed
+            );
         }
 
         true
@@ -981,8 +1034,14 @@ impl SurfaceRegistry {
             }
         }
 
-        tlog!("FOCUS", "surface={} total_surfaces={} changed={} took={}µs",
-            surface_id, total, changed, t0.elapsed().as_micros());
+        tlog!(
+            "FOCUS",
+            "surface={} total_surfaces={} changed={} took={}µs",
+            surface_id,
+            total,
+            changed,
+            t0.elapsed().as_micros()
+        );
         Ok(())
     }
 }
@@ -1008,12 +1067,22 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
 
     // Log PTY input (user keystrokes / ghostty-generated input going to daemon).
     if len <= 64 {
-        tlog!("PTY_IN", "session={} workspace={} bytes={} data={:?}",
-            session_id, workspace_id, len,
-            String::from_utf8_lossy(data));
+        tlog!(
+            "PTY_IN",
+            "session={} workspace={} bytes={} data={:?}",
+            session_id,
+            workspace_id,
+            len,
+            String::from_utf8_lossy(data)
+        );
     } else {
-        tlog!("PTY_IN", "session={} workspace={} bytes={}",
-            session_id, workspace_id, len);
+        tlog!(
+            "PTY_IN",
+            "session={} workspace={} bytes={}",
+            session_id,
+            workspace_id,
+            len
+        );
     }
     let payload = serde_json::json!({
         "type": "input",
@@ -1061,8 +1130,16 @@ unsafe extern "C" fn receive_resize_callback(
     let workspace_id = ctx.workspace_id.clone();
     let app_handle = ctx.app_handle.clone();
 
-    tlog!("PTY_RESIZE", "session={} workspace={} cols={} rows={} px={}x{}",
-        session_id, workspace_id, cols, rows, _width_px, _height_px);
+    tlog!(
+        "PTY_RESIZE",
+        "session={} workspace={} cols={} rows={} px={}x{}",
+        session_id,
+        workspace_id,
+        cols,
+        rows,
+        _width_px,
+        _height_px
+    );
     let payload = serde_json::json!({
         "type": "resize",
         "sessionID": session_id,

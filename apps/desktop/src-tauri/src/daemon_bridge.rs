@@ -219,7 +219,12 @@ fn start_daemon_runtime(
                 rt.connected = true;
             }
 
-            tlog!("DAEMON", "runtime={} CONNECTED via {}", runtime_id, socket_path);
+            tlog!(
+                "DAEMON",
+                "runtime={} CONNECTED via {}",
+                runtime_id,
+                socket_path
+            );
 
             // Emit connection event scoped to workspace
             let _ = app.emit(
@@ -259,7 +264,8 @@ fn start_daemon_runtime(
 
                         let mut emitted_to_surface = false;
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&wrapped) {
-                            let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                            let msg_type =
+                                parsed.get("type").and_then(|v| v.as_str()).unwrap_or("?");
 
                             if msg_type == "output_chunk" {
                                 if let (Some(session_id), Some(data)) = (
@@ -288,8 +294,15 @@ fn start_daemon_runtime(
                                 }
                             } else {
                                 // Log non-output messages (these are infrequent).
-                                tlog!("DAEMON", "runtime={} msg #{} type={} len={} read={}µs",
-                                    runtime_id, msg_count, msg_type, wrapped.len(), read_us);
+                                tlog!(
+                                    "DAEMON",
+                                    "runtime={} msg #{} type={} len={} read={}µs",
+                                    runtime_id,
+                                    msg_count,
+                                    msg_type,
+                                    wrapped.len(),
+                                    read_us
+                                );
                             }
                         }
 
@@ -298,8 +311,15 @@ fn start_daemon_runtime(
                         }
                     }
                     Err(e) => {
-                        tlog!("DAEMON", "runtime={} READ ERROR after {} msgs ({} output chunks, {} bytes): {}",
-                            runtime_id, msg_count, output_chunk_count, output_bytes_total, e);
+                        tlog!(
+                            "DAEMON",
+                            "runtime={} READ ERROR after {} msgs ({} output chunks, {} bytes): {}",
+                            runtime_id,
+                            msg_count,
+                            output_chunk_count,
+                            output_bytes_total,
+                            e
+                        );
                         eprintln!("Daemon read error for runtime {}: {}", runtime_id, e);
                         break;
                     }

@@ -248,10 +248,13 @@ fn main() {
                                         ws.pr_number,
                                         Some(&info.state),
                                     );
-                                    let _ = poll_handle.emit("pr-state-changed", serde_json::json!({
-                                        "workspaceId": ws.id,
-                                        "prState": info.state,
-                                    }));
+                                    let _ = poll_handle.emit(
+                                        "pr-state-changed",
+                                        serde_json::json!({
+                                            "workspaceId": ws.id,
+                                            "prState": info.state,
+                                        }),
+                                    );
                                 }
                             }
                         }
@@ -272,14 +275,12 @@ fn main() {
             // Main-thread heartbeat: proves the main thread is alive.
             // When this stops appearing in the log, the main thread is frozen.
             let hb_handle = handle.clone();
-            std::thread::spawn(move || {
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    let hb = hb_handle.clone();
-                    let _ = hb.run_on_main_thread(move || {
-                        tlog!("HEARTBEAT", "main thread alive");
-                    });
-                }
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let hb = hb_handle.clone();
+                let _ = hb.run_on_main_thread(move || {
+                    tlog!("HEARTBEAT", "main thread alive");
+                });
             });
 
             Ok(())

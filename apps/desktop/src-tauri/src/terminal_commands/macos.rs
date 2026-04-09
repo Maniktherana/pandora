@@ -30,13 +30,22 @@ pub fn terminal_surface_create(
     rect: SurfaceRect,
 ) -> Result<(), String> {
     let t0 = Instant::now();
-    tlog!("CMD", "terminal_surface_create DISPATCH surface={} session={}", surface_id, session_id);
+    tlog!(
+        "CMD",
+        "terminal_surface_create DISPATCH surface={} session={}",
+        surface_id,
+        session_id
+    );
 
     let ns_window = window.ns_window().map_err(|e| e.to_string())? as usize;
     let registry = registry.inner().clone();
     let sid = surface_id.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    tlog!("CMD", "terminal_surface_create WAITING_FOR_MAIN surface={}", sid);
+    tlog!(
+        "CMD",
+        "terminal_surface_create WAITING_FOR_MAIN surface={}",
+        sid
+    );
     window
         .run_on_main_thread(move || {
             registry.set_window(ns_window as *mut _);
@@ -45,12 +54,23 @@ pub fn terminal_surface_create(
         })
         .map_err(|e| e.to_string())?;
     let dispatch_us = t0.elapsed().as_micros();
-    tlog!("CMD", "terminal_surface_create DISPATCHED surface={} dispatch={}µs, WAITING_FOR_RESULT", sid, dispatch_us);
+    tlog!(
+        "CMD",
+        "terminal_surface_create DISPATCHED surface={} dispatch={}µs, WAITING_FOR_RESULT",
+        sid,
+        dispatch_us
+    );
 
     let result = rx.recv().map_err(|e| e.to_string())?;
     let total_us = t0.elapsed().as_micros();
-    tlog!("CMD", "terminal_surface_create DONE surface={} dispatch={}µs total={}µs ok={}",
-        sid, dispatch_us, total_us, result.is_ok());
+    tlog!(
+        "CMD",
+        "terminal_surface_create DONE surface={} dispatch={}µs total={}µs ok={}",
+        sid,
+        dispatch_us,
+        total_us,
+        result.is_ok()
+    );
     result
 }
 
@@ -68,7 +88,13 @@ pub fn terminal_surface_update(
     let registry = registry.inner().clone();
     let sid = surface_id.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    tlog!("CMD", "terminal_surface_update WAITING_FOR_MAIN surface={} vis={} foc={}", sid, visible, focused);
+    tlog!(
+        "CMD",
+        "terminal_surface_update WAITING_FOR_MAIN surface={} vis={} foc={}",
+        sid,
+        visible,
+        focused
+    );
     window
         .run_on_main_thread(move || {
             let _ = tx.send(registry.update_surface(&surface_id, rect, visible, focused));
@@ -79,8 +105,15 @@ pub fn terminal_surface_update(
     let result = rx.recv().map_err(|e| e.to_string())?;
     let total_us = t0.elapsed().as_micros();
 
-    tlog!("CMD", "terminal_surface_update DONE surface={} vis={} foc={} dispatch={}µs total={}µs",
-        sid, visible, focused, dispatch_us, total_us);
+    tlog!(
+        "CMD",
+        "terminal_surface_update DONE surface={} vis={} foc={} dispatch={}µs total={}µs",
+        sid,
+        visible,
+        focused,
+        dispatch_us,
+        total_us
+    );
     result
 }
 
@@ -94,15 +127,28 @@ pub fn terminal_surface_destroy(
     let registry = registry.inner().clone();
     let sid = surface_id.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    tlog!("CMD", "terminal_surface_destroy WAITING_FOR_MAIN surface={}", sid);
+    tlog!(
+        "CMD",
+        "terminal_surface_destroy WAITING_FOR_MAIN surface={}",
+        sid
+    );
     window
         .run_on_main_thread(move || {
             let _ = tx.send(registry.destroy_surface(&surface_id));
         })
         .map_err(|e| e.to_string())?;
-    tlog!("CMD", "terminal_surface_destroy DISPATCHED surface={}, WAITING_FOR_RESULT", sid);
+    tlog!(
+        "CMD",
+        "terminal_surface_destroy DISPATCHED surface={}, WAITING_FOR_RESULT",
+        sid
+    );
     let result = rx.recv().map_err(|e| e.to_string())?;
-    tlog!("CMD", "terminal_surface_destroy DONE surface={} took={}µs", sid, t0.elapsed().as_micros());
+    tlog!(
+        "CMD",
+        "terminal_surface_destroy DONE surface={} took={}µs",
+        sid,
+        t0.elapsed().as_micros()
+    );
     result
 }
 
@@ -117,19 +163,33 @@ pub fn terminal_surface_focus(
     let registry = registry.inner().clone();
     let sid = surface_id.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    tlog!("CMD", "terminal_surface_focus WAITING_FOR_MAIN surface={}", sid);
+    tlog!(
+        "CMD",
+        "terminal_surface_focus WAITING_FOR_MAIN surface={}",
+        sid
+    );
     window
         .run_on_main_thread(move || {
             let _ = tx.send(registry.focus_surface(&surface_id));
         })
         .map_err(|e| e.to_string())?;
     let dispatch_us = t0.elapsed().as_micros();
-    tlog!("CMD", "terminal_surface_focus DISPATCHED surface={} dispatch={}µs, WAITING_FOR_RESULT", sid, dispatch_us);
+    tlog!(
+        "CMD",
+        "terminal_surface_focus DISPATCHED surface={} dispatch={}µs, WAITING_FOR_RESULT",
+        sid,
+        dispatch_us
+    );
 
     let result = rx.recv().map_err(|e| e.to_string())?;
     let total_us = t0.elapsed().as_micros();
-    tlog!("CMD", "terminal_surface_focus DONE surface={} dispatch={}µs total={}µs",
-        sid, dispatch_us, total_us);
+    tlog!(
+        "CMD",
+        "terminal_surface_focus DONE surface={} dispatch={}µs total={}µs",
+        sid,
+        dispatch_us,
+        total_us
+    );
     result
 }
 
