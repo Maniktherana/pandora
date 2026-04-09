@@ -200,7 +200,7 @@ export default function AppHeader({
                     className="size-5 shrink-0 text-[var(--theme-text-subtle)]"
                   />
                   <BreadcrumbPage className="truncate text-xs font-mono font-normal text-[var(--theme-text-subtle)]">
-                    {ownerLabel}/{branchContext?.currentBranch ?? selectedWorkspace.gitBranchName}
+                    {branchContext?.currentBranch ?? selectedWorkspace.gitBranchName}
                   </BreadcrumbPage>
                 </div>
               </BreadcrumbItem>
