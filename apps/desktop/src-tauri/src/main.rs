@@ -197,11 +197,17 @@ fn main() {
             let menu = build_app_menu(&app.handle())?;
             app.set_menu(menu)?;
 
-            // Transparent window: ensure WKWebView disables opaque backing (drawsBackground /
-            // underPageBackgroundColor). Without this, clear HTML still composites as black on macOS.
             #[cfg(target_os = "macos")]
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            }
+
+            if let Some(w) = app.get_webview_window("main") {
+                w.on_window_event(|event| {
+                    if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                        std::process::exit(0);
+                    }
+                });
             }
 
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -214,11 +220,9 @@ fn main() {
                 .build()
                 .expect("Failed to create tokio runtime");
 
-            // PR status polling: check open PRs every 60s for merge/close
             let poll_handle = handle.clone();
             let poll_db = poll_handle.state::<DbState>().0.clone();
             std::thread::spawn(move || {
-                // Give the app a moment to initialize before starting polls
                 std::thread::sleep(std::time::Duration::from_secs(10));
                 if !git::gh_cli_available() {
                     return;
@@ -250,7 +254,6 @@ fn main() {
                 }
             });
 
-            // Start tokio runtime in background for async operations
             std::thread::spawn(move || {
                 rt.block_on(async {
                     loop {
@@ -259,8 +262,6 @@ fn main() {
                 });
             });
 
-            // Main-thread heartbeat: proves the main thread is alive.
-            // When this stops appearing in the log, the main thread is frozen.
             let hb_handle = handle.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
