@@ -71,19 +71,20 @@ export default function LeftSidebar({ booting, onCollapse, onOpenSettings }: Lef
         ))}
 
         {!booting && projects.length === 0 && (
-          <div className="mt-8 px-4 text-center text-xs text-[var(--theme-text-faint)]">
-            <div className="space-y-2">
-              <p>No projects yet</p>
-              <Button
-                onClick={() => void handleAddProject()}
-                variant="link"
-                size="xs"
-                className="h-auto p-0 text-[var(--theme-interactive)]"
-              >
-                Add a project
-              </Button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => void handleAddProject()}
+            className="flex h-10 w-full cursor-pointer select-none justify-center items-center gap-2 rounded-md border border-transparent px-2.5 text-left text-sm outline-none transition-colors focus-visible:border-[var(--theme-border)] hover:bg-[var(--theme-panel-hover)]"
+          >
+            <span className="min-w-0 ml-1 truncate text-[var(--theme-text-subtle)]">
+              Add a project
+            </span>
+            <HugeiconsIcon
+              icon={PlusSignIcon}
+              strokeWidth={2}
+              className="h-3.5 w-3.5 shrink-0 text-[var(--theme-text-subtle)]"
+            />
+          </button>
         )}
       </div>
 

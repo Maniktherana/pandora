@@ -79,7 +79,10 @@ export const TerminalCommandServiceLive = Layer.scoped(
     const createProjectTerminal = (runtimeId: string, index?: number) =>
       Effect.gen(function* () {
         const client = yield* getClient(runtimeId);
-        const seeded = seedProjectTerminal(client, runtimeId);
+        const seeded = yield* Effect.tryPromise({
+          try: () => seedProjectTerminal(client, runtimeId),
+          catch: (cause) => new TerminalCommandError({ cause, runtimeId }),
+        });
         yield* workspaceService.addProjectTerminalGroup(runtimeId, seeded.slotID, index);
         yield* workspaceService.setProjectTerminalPanelVisible(runtimeId, true);
       });
@@ -130,7 +133,10 @@ export const TerminalCommandServiceLive = Layer.scoped(
           yield* workspaceService.ensureWorkspaceRuntimeConnected(runtimeId);
           yield* Effect.flatMap(getClient(runtimeId), (client) =>
             Effect.gen(function* () {
-              const seeded = seedWorkspaceTerminal(client, runtimeId);
+              const seeded = yield* Effect.tryPromise({
+                try: () => seedWorkspaceTerminal(client, runtimeId),
+                catch: (cause) => new TerminalCommandError({ cause, runtimeId }),
+              });
               const session = yield* workspaceService.getWorkspaceSession(runtimeId);
               yield* session.commands.addTerminalTab(seeded.slotID);
             }),
@@ -146,7 +152,10 @@ export const TerminalCommandServiceLive = Layer.scoped(
           yield* workspaceService.ensureWorkspaceRuntimeConnected(runtimeId);
           const client = yield* getClient(runtimeId);
           yield* Effect.gen(function* () {
-            const seeded = seedWorkspaceTerminal(client, runtimeId);
+            const seeded = yield* Effect.tryPromise({
+              try: () => seedWorkspaceTerminal(client, runtimeId),
+              catch: (cause) => new TerminalCommandError({ cause, runtimeId }),
+            });
             const session = yield* workspaceService.getWorkspaceSession(runtimeId);
             yield* session.commands.addTerminalTab(seeded.slotID);
           });
@@ -162,7 +171,10 @@ export const TerminalCommandServiceLive = Layer.scoped(
       splitProjectTerminalGroup: (runtimeId, groupId) =>
         Effect.gen(function* () {
           const client = yield* getClient(runtimeId);
-          const seeded = seedProjectTerminal(client, runtimeId);
+          const seeded = yield* Effect.tryPromise({
+            try: () => seedProjectTerminal(client, runtimeId),
+            catch: (cause) => new TerminalCommandError({ cause, runtimeId }),
+          });
           yield* workspaceService.splitProjectTerminalGroup(runtimeId, groupId, seeded.slotID);
           yield* workspaceService.setProjectTerminalPanelVisible(runtimeId, true);
         }),

@@ -31,12 +31,16 @@ struct WorkspaceRuntime {
 /// Global state managing all workspace runtimes.
 pub struct DaemonState {
     runtimes: Arc<Mutex<HashMap<String, Arc<Mutex<WorkspaceRuntime>>>>>,
+    /// One mutex per `runtime_id`: serializes bootstrap so concurrent `start_*_runtime` calls cannot
+    /// each spawn a sidecar and overwrite the same map entry (duplicate PIDs, broken `daemon_send`).
+    start_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl DaemonState {
     pub fn new() -> Self {
         Self {
             runtimes: Arc::new(Mutex::new(HashMap::new())),
+            start_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -113,8 +117,18 @@ fn start_daemon_runtime(
 ) {
     let state = app.state::<DaemonState>();
     let runtimes = state.runtimes.clone();
+    let start_locks = state.start_locks.clone();
 
     tauri::async_runtime::spawn(async move {
+        let lock_arc = {
+            let mut locks = start_locks.lock().await;
+            locks
+                .entry(runtime_id.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let mut startup_guard = Some(lock_arc.lock().await);
+
         let existing_runtime = {
             let map = runtimes.lock().await;
             map.get(&runtime_id).cloned()
@@ -167,7 +181,7 @@ fn start_daemon_runtime(
             }
         }
 
-        // Create runtime entry
+        // Create runtime entry (second and later callers block on startup_guard until we release it).
         let runtime = Arc::new(Mutex::new(WorkspaceRuntime {
             writer: None,
             daemon_process: None,
@@ -182,6 +196,7 @@ fn start_daemon_runtime(
         let pid = std::process::id();
         let pandora_home = crate::git::pandora_home();
 
+        let mut sidecar_started = false;
         match app.shell().sidecar("pandorad") {
             Ok(cmd) => match cmd
                 .args([&workspace_path, &default_cwd, &runtime_id])
@@ -190,6 +205,7 @@ fn start_daemon_runtime(
                 .spawn()
             {
                 Ok((mut rx, child)) => {
+                    sidecar_started = true;
                     eprintln!("Daemon PID {} for runtime {}", child.pid(), runtime_id);
                     tauri::async_runtime::spawn(async move {
                         while rx.recv().await.is_some() {}
@@ -204,6 +220,13 @@ fn start_daemon_runtime(
             Err(e) => {
                 eprintln!("Failed to resolve pandorad sidecar: {}", e);
             }
+        }
+
+        if !sidecar_started {
+            let mut map = runtimes.lock().await;
+            map.remove(&runtime_id);
+            let _ = startup_guard.take();
+            return;
         }
 
         // Connect to socket
@@ -227,6 +250,9 @@ fn start_daemon_runtime(
                 rt.writer = Some(writer);
                 rt.connected = true;
             }
+
+            // Allow other `start_*_runtime` calls to run: they will see `connected` and replay snapshot.
+            let _ = startup_guard.take();
 
             tlog!(
                 "DAEMON",
@@ -396,6 +422,8 @@ pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
             let _ = child.kill();
         }
     }
+    let mut locks = state.start_locks.lock().await;
+    locks.remove(workspace_id);
 }
 
 /// Tauri command: send a message to a specific workspace's daemon.

@@ -89,7 +89,7 @@ import {
   rebuildTerminalAgentStatuses,
   sessionAgentActivity,
 } from "@/lib/terminal/agent-activity";
-import { seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
+import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export interface WorkspaceSessionService {
@@ -270,7 +270,9 @@ function publishDesktopView(snapshot: DesktopViewStateSnapshot) {
 }
 
 function publishRuntimeState(runtimes: Record<string, WorkspaceRuntimeState>) {
-  useRuntimeStore.getState().setRuntimeState(runtimes);
+  // Shallow clone so Zustand always sees a new `runtimeState` reference; mutating the snapshot
+  // record in place would otherwise reuse the same object identity and can skip subscriber updates.
+  useRuntimeStore.getState().setRuntimeState({ ...runtimes });
 }
 
 function cloneRuntimeState(runtime: WorkspaceRuntimeState): WorkspaceRuntimeState {
@@ -611,9 +613,52 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           const client = yield* daemonGateway.getClient();
           if (!client) return;
 
-          const seeded = seedWorkspaceTerminal(client, workspaceId);
+          const seeded = yield* Effect.tryPromise({
+            try: () => seedWorkspaceTerminal(client, workspaceId),
+            catch: (cause) => cause,
+          });
           const session = yield* sessionCache.get(workspaceId);
           yield* session.commands.addTerminalTab(seeded.slotID);
+
+          // Bottom panel uses the per-project runtime (`project:<id>`), not the workspace
+          // editor runtime — seed a project terminal too or the panel stays on the loader.
+          const workspaceRecord = desktopStateSnapshot.workspaces.find((w) => w.id === workspaceId);
+          if (workspaceRecord) {
+            const projectRuntimeId = projectRuntimeKey(workspaceRecord.projectId);
+            for (let i = 0; i < 100; i++) {
+              const projRuntime = desktopStateSnapshot.runtimes[projectRuntimeId];
+              if (projRuntime?.connectionState === "connected") {
+                if ((projRuntime.terminalPanel?.groups.length ?? 0) === 0) {
+                  yield* Effect.tryPromise({
+                    try: () => seedProjectTerminal(client, projectRuntimeId),
+                    catch: (cause) => cause,
+                  }).pipe(
+                    Effect.flatMap((seededProj) =>
+                      mutateRuntimeState(projectRuntimeId, (runtime) => {
+                        addProjectTerminalGroupInRuntime(runtime, seededProj.slotID);
+                        setProjectTerminalPanelVisibleInRuntime(runtime, true);
+                      }).pipe(
+                        Effect.tap(() =>
+                          refreshRuntimeTerminalStartup(projectRuntimeId, {
+                            rebuildHiddenQueue: true,
+                          }),
+                        ),
+                        Effect.asVoid,
+                      ),
+                    ),
+                    Effect.catchAll((err) =>
+                      Effect.sync(() =>
+                        console.warn("Failed to seed default project bottom terminal:", err),
+                      ),
+                    ),
+                  );
+                }
+                break;
+              }
+              yield* Effect.sleep("100 millis");
+            }
+          }
+
           pendingInitialTerminalWorkspaceIds.delete(workspaceId);
         }),
         "Failed to seed default workspace terminal:",
@@ -1487,6 +1532,12 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               desktopStateSnapshot.selectedWorkspaceID = autoCreatedWorkspaceId;
             }
             publishDesktopNow();
+            if (autoCreatedWorkspaceId) {
+              const ws = desktopStateSnapshot.workspaces.find((w) => w.id === autoCreatedWorkspaceId);
+              if (ws?.status === "ready") {
+                startSelectionSettle(ws);
+              }
+            }
             await invoke("save_selection", {
               projectId: project.id,
               workspaceId: autoCreatedWorkspaceId ?? desktopStateSnapshot.selectedWorkspaceID,

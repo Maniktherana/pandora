@@ -89,7 +89,7 @@ describe("getVisibleProjectTerminalSlotIds", () => {
     expect(getVisibleProjectTerminalSlotIds(panel)).toEqual(["slot-c", "slot-d"]);
   });
 
-  test("returns no slots when the panel is hidden", () => {
+  test("returns active group slots even when panel.visible is false (lazy connect for collapsed panel)", () => {
     const panel: TerminalPanelState = {
       visible: false,
       activeGroupIndex: 0,
@@ -97,7 +97,7 @@ describe("getVisibleProjectTerminalSlotIds", () => {
       groups: [{ id: "group-a", children: ["slot-a"] }],
     };
 
-    expect(getVisibleProjectTerminalSlotIds(panel)).toEqual([]);
+    expect(getVisibleProjectTerminalSlotIds(panel)).toEqual(["slot-a"]);
   });
 
   test("returns all project slots in panel order", () => {

@@ -382,7 +382,11 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       entry.resizeObserver?.disconnect();
       entries.delete(surfaceId);
       if (!entry.created) return;
-      await invoke("terminal_surface_destroy", { surfaceId });
+      try {
+        await invoke("terminal_surface_destroy", { surfaceId });
+      } catch {
+        // Vite HMR / webview reload can tear down the IPC bridge while teardown runs.
+      }
     };
 
     const parkSurfaceEntry = async (surfaceId: string) => {
@@ -397,12 +401,16 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       entry.onFocus = undefined;
       entry.lastSignature = null;
       if (!entry.created || !entry.lastRect) return;
-      await invoke("terminal_surface_update", {
-        surfaceId,
-        rect: entry.lastRect,
-        visible: false,
-        focused: false,
-      });
+      try {
+        await invoke("terminal_surface_update", {
+          surfaceId,
+          rect: entry.lastRect,
+          visible: false,
+          focused: false,
+        });
+      } catch {
+        // Same as destroy: reload can invalidate IPC mid-flight.
+      }
     };
 
     const destroyWorkspaceSurfaces = async (workspaceId: string) => {

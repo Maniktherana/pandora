@@ -102,19 +102,14 @@ function PaneTerminalAnchorSlot({
     terminalRegistration?.workspaceVisible,
   ]);
 
+  // Unregister only on real unmount or identity change — not when tab/focus toggles (those update via the effect above).
   useLayoutEffect(() => {
     if (!terminalRegistration) return;
     return () => {
-      const workspaceVisible = terminalRegistration.workspaceVisible;
-      console.debug("[terminal-surface]", "anchor unregister", {
-        workspaceId,
-        sessionId,
-        visible: workspaceVisible && isActiveTab,
-        focused: workspaceVisible && isFocused && isActiveTab,
-      });
+      console.debug("[terminal-surface]", "anchor unregister", { workspaceId, sessionId });
       terminalRegistration.register(sessionId, null);
     };
-  }, [terminalRegistration, sessionId, workspaceId, isActiveTab, isFocused]);
+  }, [terminalRegistration, sessionId, workspaceId]);
 
   return (
     <div
@@ -164,8 +159,18 @@ function PaneView({
     .map((t, i) => (t.kind === "terminal" ? { slotId: t.slotId, idx: i } : null))
     .filter((x): x is { slotId: string; idx: number } => x !== null);
 
-  const anyTerminalRunning = terminalSlots.some(({ slotId }) =>
-    Object.values(sessionsMap).some((s) => s.slotID === slotId && s.status === "running"),
+  const terminalSlotHasRenderableSession = (slotId: string) => {
+    const slot = slotsMap[slotId];
+    const sessionForSlot =
+      Object.values(sessionsMap).find(
+        (s) => s.slotID === slotId && s.status === "running",
+      ) ?? (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
+    const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
+    return sessionId != null;
+  };
+
+  const anyTerminalRenderable = terminalSlots.some(({ slotId }) =>
+    terminalSlotHasRenderableSession(slotId),
   );
 
   const onlyEditors =
@@ -291,7 +296,7 @@ function PaneView({
           </div>
         )}
 
-        {!onlyEditors && !anyTerminalRunning && terminalSlots.length > 0 && (
+        {!onlyEditors && !anyTerminalRenderable && terminalSlots.length > 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-[var(--theme-text-subtle)]">
             <DotGridLoader
               variant="default"

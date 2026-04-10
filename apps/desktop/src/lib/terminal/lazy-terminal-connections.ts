@@ -21,7 +21,7 @@ export function getOrderedWorkspaceTerminalSlotIds(root: LayoutNode | null): str
 }
 
 export function getVisibleProjectTerminalSlotIds(panel: TerminalPanelState | null): string[] {
-  if (!panel?.visible || panel.groups.length === 0) return [];
+  if (!panel || panel.groups.length === 0) return [];
 
   const activeGroup = panel.groups[panel.activeGroupIndex] ?? panel.groups[0];
   if (!activeGroup) return [];

@@ -81,7 +81,9 @@ export class DaemonClient {
           cause,
         }),
     }).pipe(
-      Effect.retry(Schedule.intersect(Schedule.exponential("100 millis"), Schedule.recurs(2))),
+      Effect.retry(
+        Schedule.spaced("100 millis").pipe(Schedule.intersect(Schedule.recurs(20))),
+      ),
       Effect.catchAll((error) =>
         Effect.sync(() => {
           console.error("Daemon send failed after retries:", error);

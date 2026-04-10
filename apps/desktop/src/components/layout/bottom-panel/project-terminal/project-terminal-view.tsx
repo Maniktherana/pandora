@@ -77,20 +77,16 @@ function ProjectTerminalAnchorSlot({
       focused: isVisible && ownsNativeFocus && isFocused,
       onFocus: handleFocus,
     });
-  }, [handleFocus, isFocused, isVisible, ownsNativeFocus, registerTerminalAnchor, sessionId]);
+  }, [handleFocus, isFocused, isVisible, ownsNativeFocus, registerTerminalAnchor, sessionId, workspaceId]);
 
+  // Unregister only on unmount / session or context change — visibility updates go through the effect above.
   useLayoutEffect(() => {
     if (!registerTerminalAnchor) return;
     return () => {
-      console.debug("[terminal-surface]", "anchor unregister", {
-        workspaceId,
-        sessionId,
-        visible: isVisible,
-        focused: isVisible && isFocused,
-      });
+      console.debug("[terminal-surface]", "anchor unregister", { workspaceId, sessionId });
       registerTerminalAnchor(sessionId, null);
     };
-  }, [registerTerminalAnchor, sessionId, workspaceId, isVisible, isFocused]);
+  }, [registerTerminalAnchor, sessionId, workspaceId]);
 
   return (
     <div
