@@ -31,6 +31,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
+  const workspaceFileTreeSplitRef = useRef<HTMLDivElement>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const sidebarResizeWidthRef = useRef<number | null>(null);
   const selectedThemeId = useSettingsStore((state) => state.selectedThemeId);
@@ -154,15 +155,30 @@ export default function App() {
     );
   }, [selectedWs?.id, selectedWs?.status, uiPreferencesCommands]);
 
+  const resolveFileTreePanelPercent = useCallback(() => {
+    const measured = workspaceFileTreeSplitRef.current?.getBoundingClientRect().width ?? 0;
+    const groupWidth =
+      measured > 0
+        ? measured
+        : Math.max(
+            1,
+            (typeof window !== "undefined" ? window.innerWidth : 1200) -
+              (sidebarVisible ? sidebarWidth : 0),
+          );
+    const pct = (sidebarWidth / groupWidth) * 100;
+    return Math.min(55, Math.max(12, pct));
+  }, [sidebarWidth, sidebarVisible]);
+
   useLayoutEffect(() => {
     const p = fileTreePanelRef.current;
     if (!p) return;
     if (fileTreeOpen && selectedWsStatus === "ready") {
-      p.expand(12);
+      // expand(minSize) restores from collapsed; 12 was forcing a tiny strip. Match left sidebar width in %.
+      p.expand(resolveFileTreePanelPercent());
     } else {
       p.collapse();
     }
-  }, [fileTreeOpen, selectedWsStatus]);
+  }, [fileTreeOpen, selectedWsStatus, resolveFileTreePanelPercent]);
 
   useLayoutEffect(() => {
     const p = bottomPanelRef.current;
@@ -265,59 +281,68 @@ export default function App() {
                 <TabDragProvider>
                   <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
                     <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
-                      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-                        <ResizablePanel defaultSize={72} minSize={45}>
-                          <div
-                            className="h-full min-h-0 min-w-0"
-                            data-workspace-drop-root="true"
-                            data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
-                            onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
-                          >
-                            <ErrorBoundary name="workspace">
-                              <div className="relative h-full min-h-0">
-                                <WorkspaceView />
-                              </div>
-                            </ErrorBoundary>
-                          </div>
-                        </ResizablePanel>
-                  <PanelResizeHandle
-                    onDragging={setIsResizingPanels}
-                    className={cn(
-                      "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
-                      fileTreeOpen && selectedWsStatus === "ready"
-                        ? "cursor-col-resize"
-                        : "hidden",
-                    )}
-                  />
-                  <ResizablePanel
-                    ref={fileTreePanelRef}
-                    collapsible
-                    collapsedSize={0}
-                    defaultSize={fileTreeOpen && selectedWsStatus === "ready" ? 28 : 0}
-                    minSize={12}
-                    maxSize={50}
-                    className="min-h-0 min-w-0"
-                  >
-                    <div
-                      className="h-full min-h-0 min-w-0"
-                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
-                    >
-                      <ErrorBoundary name="file-tree">
-                        {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (
-                          <RightSidebar
-                            key={selectedWs.id}
-                            workspaceRoot={selectedWs.worktreePath}
-                            workspaceId={selectedWs.id}
-                            workspaceName={selectedWs.name}
-                            projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
-                            mode={rightSidebarMode}
+                      <div
+                        ref={workspaceFileTreeSplitRef}
+                        className="h-full min-h-0 min-w-0 w-full"
+                      >
+                        <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                          <ResizablePanel defaultSize={72} minSize={45}>
+                            <div
+                              className="h-full min-h-0 min-w-0"
+                              data-workspace-drop-root="true"
+                              data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
+                              onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                            >
+                              <ErrorBoundary name="workspace">
+                                <div className="relative h-full min-h-0">
+                                  <WorkspaceView />
+                                </div>
+                              </ErrorBoundary>
+                            </div>
+                          </ResizablePanel>
+                          <PanelResizeHandle
+                            onDragging={setIsResizingPanels}
+                            className={cn(
+                              "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
+                              fileTreeOpen && selectedWsStatus === "ready"
+                                ? "cursor-col-resize"
+                                : "hidden",
+                            )}
                           />
-                        ) : null}
-                      </ErrorBoundary>
-                    </div>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              </ResizablePanel>
+                          <ResizablePanel
+                            ref={fileTreePanelRef}
+                            collapsible
+                            collapsedSize={0}
+                            defaultSize={
+                              fileTreeOpen && selectedWsStatus === "ready"
+                                ? resolveFileTreePanelPercent()
+                                : 0
+                            }
+                            minSize={12}
+                            maxSize={55}
+                            className="min-h-0 min-w-0"
+                          >
+                            <div
+                              className="h-full min-h-0 min-w-0"
+                              onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                            >
+                              <ErrorBoundary name="file-tree">
+                                {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (
+                                  <RightSidebar
+                                    key={selectedWs.id}
+                                    workspaceRoot={selectedWs.worktreePath}
+                                    workspaceId={selectedWs.id}
+                                    workspaceName={selectedWs.name}
+                                    projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
+                                    mode={rightSidebarMode}
+                                  />
+                                ) : null}
+                              </ErrorBoundary>
+                            </div>
+                          </ResizablePanel>
+                        </ResizablePanelGroup>
+                      </div>
+                    </ResizablePanel>
 
               {selectedWs?.status === "ready" && (
                 <>
