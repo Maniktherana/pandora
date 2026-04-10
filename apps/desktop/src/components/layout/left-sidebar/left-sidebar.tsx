@@ -87,7 +87,7 @@ export default function LeftSidebar({ booting, onCollapse, onOpenSettings }: Lef
         )}
       </div>
 
-      <div className="flex h-10 items-center border-t border-[var(--theme-border)] px-3">
+      <div className="flex h-10 items-center px-3">
         <Button
           onClick={onOpenSettings}
           variant="ghost"

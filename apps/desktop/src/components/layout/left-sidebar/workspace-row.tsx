@@ -147,7 +147,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                   event.stopPropagation();
                   workspaceCommands.restoreWorkspace(workspace.id);
                 }}
-                className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 p-0 opacity-0 transition-opacity active:translate-y-0 group-hover:opacity-100"
+                className="absolute inset-y-0 right-0 my-auto h-4 w-4 p-0 opacity-0 transition-opacity active:not-aria-[haspopup]:translate-y-0 group-hover:opacity-100"
                 title="Restore workspace"
                 aria-label="Restore workspace"
               >
@@ -161,7 +161,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                   event.stopPropagation();
                   workspaceCommands.archiveWorkspace(workspace.id);
                 }}
-                className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 p-0 opacity-0 transition-opacity active:translate-y-0 group-hover:opacity-100"
+                className="absolute inset-y-0 right-0 my-auto h-4 w-4 p-0 opacity-0 transition-opacity active:not-aria-[haspopup]:translate-y-0 group-hover:opacity-100"
                 title="Archive workspace"
                 aria-label="Archive workspace"
               >

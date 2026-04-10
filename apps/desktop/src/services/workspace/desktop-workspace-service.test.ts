@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { shouldAutoOpenTerminalSlot } from "./desktop-workspace-service";
+import { findNearestWorkspaceInProject, shouldAutoOpenTerminalSlot } from "./desktop-workspace-service";
 
 describe("shouldAutoOpenTerminalSlot", () => {
   test("returns true for terminal slots that have defs but no running sessions", () => {
@@ -76,5 +76,55 @@ describe("shouldAutoOpenTerminalSlot", () => {
         },
       }),
     ).toBe(false);
+  });
+});
+
+describe("findNearestWorkspaceInProject", () => {
+  test("prefers the next visible workspace in the same project", () => {
+    expect(
+      findNearestWorkspaceInProject(
+        [
+          { id: "a", projectId: "project-1", status: "ready" },
+          { id: "b", projectId: "project-1", status: "ready" },
+          { id: "c", projectId: "project-1", status: "ready" },
+        ],
+        "b",
+      )?.id,
+    ).toBe("c");
+  });
+
+  test("falls back to the previous visible workspace when archiving the last one", () => {
+    expect(
+      findNearestWorkspaceInProject(
+        [
+          { id: "a", projectId: "project-1", status: "ready" },
+          { id: "b", projectId: "project-1", status: "ready" },
+        ],
+        "b",
+      )?.id,
+    ).toBe("a");
+  });
+
+  test("ignores archived workspaces and other projects", () => {
+    expect(
+      findNearestWorkspaceInProject(
+        [
+          { id: "a", projectId: "project-1", status: "ready" },
+          { id: "b", projectId: "project-1", status: "ready" },
+          { id: "c", projectId: "project-1", status: "archived" },
+          { id: "d", projectId: "project-2", status: "ready" },
+        ],
+        "b",
+      )?.id,
+    ).toBe("a");
+  });
+
+  test("returns null when no other visible workspace exists in the project", () => {
+    expect(
+      findNearestWorkspaceInProject(
+        [{ id: "a", projectId: "project-1", status: "ready" }],
+        "a",
+      ),
+    ).toBeNull();
   });
 });

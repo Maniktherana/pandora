@@ -39,6 +39,13 @@ export interface WorkspaceStartupController {
   ) => void;
 }
 
+export function shouldStartWorkspaceStartup(runtime: WorkspaceRuntimeState | undefined) {
+  if (!runtime) return true;
+  if (runtime.layoutLoading) return true;
+  if (!runtime.layoutLoaded) return true;
+  return runtime.connectionState !== "connected";
+}
+
 export function createWorkspaceRuntimeState(
   workspaceId: string,
   {
@@ -253,7 +260,7 @@ export function createWorkspaceStartupController(): WorkspaceStartupController {
     if (workspace.status !== "ready") return;
 
     const runtime = get().runtimes[workspace.id];
-    if (runtime?.layoutLoaded) return;
+    if (!shouldStartWorkspaceStartup(runtime)) return;
     if (runtime?.layoutLoading && current?.workspaceId === workspace.id) return;
 
     ensureWorkspaceStartupRuntime(set, get, workspace);

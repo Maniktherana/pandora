@@ -281,6 +281,25 @@ function compareCreatedAtDesc<T extends { createdAt: string }>(a: T, b: T) {
   return b.createdAt.localeCompare(a.createdAt);
 }
 
+function replaceWorkspaceRecord(
+  workspaces: WorkspaceRecord[],
+  workspaceId: string,
+  mutate: (workspace: WorkspaceRecord) => void,
+) {
+  let changed = false;
+  const nextWorkspaces = workspaces.map((workspace) => {
+    if (workspace.id !== workspaceId) {
+      return workspace;
+    }
+    changed = true;
+    const nextWorkspace = structuredClone(workspace);
+    mutate(nextWorkspace);
+    return nextWorkspace;
+  });
+
+  return changed ? nextWorkspaces.sort(compareCreatedAtDesc) : workspaces;
+}
+
 function persistWorkspaceLayout(snapshot: DesktopStateSnapshot, workspaceId: string) {
   const runtime = snapshot.runtimes[workspaceId];
   const root =
@@ -374,6 +393,26 @@ export function shouldAutoOpenTerminalSlot(slot: SlotState | undefined) {
     slot.sessionIDs.length === 0 &&
     slot.sessionDefIDs.length > 0,
   );
+}
+
+export function findNearestWorkspaceInProject(
+  workspaces: readonly Pick<WorkspaceRecord, "id" | "projectId" | "status">[],
+  workspaceId: string,
+) {
+  const workspace = workspaces.find((entry) => entry.id === workspaceId);
+  if (!workspace || workspace.status === "archived") {
+    return null;
+  }
+
+  const projectWorkspaces = workspaces.filter(
+    (entry) => entry.projectId === workspace.projectId && entry.status !== "archived",
+  );
+  const projectIndex = projectWorkspaces.findIndex((entry) => entry.id === workspaceId);
+  if (projectIndex < 0) {
+    return null;
+  }
+
+  return projectWorkspaces[projectIndex + 1] ?? projectWorkspaces[projectIndex - 1] ?? null;
 }
 
 export const DesktopWorkspaceServiceLive = Layer.scoped(
@@ -1032,7 +1071,10 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         yield* waitForWorkspaceConnection(workspaceId);
       });
 
-    const selectWorkspaceById = (workspaceId: string) =>
+    const selectWorkspaceById = (
+      workspaceId: string,
+      navigationArea: DesktopViewStateSnapshot["navigationArea"] = "sidebar",
+    ) =>
       Effect.try({
         try: () => {
           const workspace = desktopStateSnapshot.workspaces.find(
@@ -1050,7 +1092,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
       }).pipe(
         Effect.tap((workspace) =>
           Effect.sync(() => {
-            applyWorkspaceSelection(workspace, "sidebar");
+            applyWorkspaceSelection(workspace, navigationArea);
             void invoke("save_selection", {
               projectId: workspace.projectId,
               workspaceId: workspace.id,
@@ -1608,34 +1650,57 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       archiveWorkspace: (workspaceId) =>
         Effect.gen(function* () {
+          const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === workspaceId);
+          if (!workspace) {
+            return yield* Effect.fail(
+              workspaceSelectionError(new Error("Workspace not found"), workspaceId),
+            );
+          }
+
+          const wasSelected = desktopStateSnapshot.selectedWorkspaceID === workspaceId;
+          const nextWorkspace = wasSelected
+            ? findNearestWorkspaceInProject(desktopStateSnapshot.workspaces, workspaceId)
+            : null;
+
           yield* terminalSurfaceService
             .removeWorkspaceSurfaces(workspaceId)
             .pipe(Effect.orElseSucceed(() => undefined));
           yield* updateDesktopState(
             (state) => {
-              const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
-              if (workspace) {
-                workspace.status = "archived";
+              state.workspaces = replaceWorkspaceRecord(state.workspaces, workspaceId, (current) => {
+                current.status = "archived";
+              });
+              if (state.layoutTargetRuntimeId === workspaceId) {
+                state.layoutTargetRuntimeId = null;
               }
             },
             { sync: true },
           );
+          if (wasSelected && nextWorkspace) {
+            yield* selectWorkspaceById(nextWorkspace.id, desktopStateSnapshot.navigationArea);
+          } else if (wasSelected) {
+            yield* updateDesktopState(
+              (state) => {
+                state.selectedWorkspaceID = null;
+                state.selectedProjectID = workspace.projectId;
+                state.layoutTargetRuntimeId = null;
+              },
+              { sync: true },
+            );
+            yield* Effect.tryPromise({
+              try: () =>
+                invoke("save_selection", {
+                  projectId: workspace.projectId,
+                  workspaceId: null,
+                }),
+              catch: (cause) => workspaceSelectionError(cause, workspaceId),
+            }).pipe(Effect.orElseSucceed(() => undefined));
+          }
           const deleteWorktree = useSettingsStore.getState().archiveDeletesWorktree;
           yield* Effect.tryPromise({
             try: () => invoke("archive_workspace", { workspaceId, deleteWorktree }),
             catch: (cause) => cause,
           });
-          if (desktopStateSnapshot.selectedWorkspaceID === workspaceId) {
-            const next = desktopStateSnapshot.workspaces.find(
-              (workspace) =>
-                workspace.projectId === desktopStateSnapshot.selectedProjectID &&
-                workspace.id !== workspaceId &&
-                workspace.status !== "archived",
-            );
-            if (next) {
-              yield* selectWorkspaceById(next.id);
-            }
-          }
         }).pipe(
           Effect.mapError((cause) =>
             cause instanceof WorkspaceSelectionError
@@ -1647,10 +1712,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.gen(function* () {
           yield* updateDesktopState(
             (state) => {
-              const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
-              if (workspace) {
+              state.workspaces = replaceWorkspaceRecord(state.workspaces, workspaceId, (workspace) => {
                 workspace.status = "ready";
-              }
+              });
             },
             { sync: true },
           );
