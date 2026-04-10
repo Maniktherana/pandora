@@ -10,6 +10,7 @@ export interface TerminalSurfaceProps {
   surfaceId: string;
   visible: boolean;
   focused: boolean;
+  overlayExempt?: boolean;
   onFocus?: () => void;
   anchorElement?: HTMLElement | null;
 }
@@ -20,6 +21,7 @@ export default function TerminalSurface({
   surfaceId,
   visible,
   focused,
+  overlayExempt = false,
   onFocus,
   anchorElement = null,
 }: TerminalSurfaceProps) {
@@ -58,6 +60,7 @@ export default function TerminalSurface({
             anchorElement: currentAnchor,
             visible,
             focused,
+            overlayExempt,
             onFocus: handleFocus,
           }),
         ),
@@ -65,7 +68,7 @@ export default function TerminalSurface({
       .catch((error) => {
         console.error("Failed to register native terminal surface:", error);
       });
-  }, [anchorElement, focused, handleFocus, runtime, sessionID, surfaceId, visible, workspaceId]);
+  }, [anchorElement, focused, handleFocus, overlayExempt, runtime, sessionID, surfaceId, visible, workspaceId]);
 
   useEffect(() => {
     if (!sessionID) return;

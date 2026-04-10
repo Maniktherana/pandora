@@ -19,6 +19,9 @@ mod key {
     pub const T: u32 = 17;
     pub const P: u32 = 35;
     pub const B: u32 = 11;
+    pub const COMMA: u32 = 43;
+    pub const EQUAL: u32 = 24;
+    pub const MINUS: u32 = 27;
     pub const LEFT_BRACKET: u32 = 33;
     pub const RIGHT_BRACKET: u32 = 30;
     pub const GRAVE: u32 = 50;
@@ -96,6 +99,18 @@ pub extern "C" fn pandora_try_emit_app_shortcut(
             }
             P if shift => {
                 emit("open-pr");
+                return 1;
+            }
+            COMMA if !shift => {
+                emit("open-settings");
+                return 1;
+            }
+            EQUAL => {
+                emit("zoom-in");
+                return 1;
+            }
+            MINUS => {
+                emit("zoom-out");
                 return 1;
             }
             Q if !shift => {

@@ -29,11 +29,13 @@ use tauri::Manager;
 const MENU_CLOSE_TAB_ID: &str = "pandora.close-tab";
 const MENU_PREVIOUS_TAB_ID: &str = "pandora.previous-tab";
 const MENU_NEXT_TAB_ID: &str = "pandora.next-tab";
+const MENU_SETTINGS_ID: &str = "pandora.settings";
 
 fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
     let pkg_info = app.package_info();
 
     let close_tab = MenuItem::with_id(app, MENU_CLOSE_TAB_ID, "Close Tab", true, Some("Cmd+W"))?;
+    let settings = MenuItem::with_id(app, MENU_SETTINGS_ID, "Settings…", true, Some("Cmd+,"))?;
     let previous_tab = MenuItem::with_id(
         app,
         MENU_PREVIOUS_TAB_ID,
@@ -52,6 +54,8 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
                 true,
                 &[
                     &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &settings,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
@@ -115,6 +119,9 @@ fn main() {
             MENU_NEXT_TAB_ID => {
                 let _ = app.emit("app-shortcut", "next-tab");
             }
+            MENU_SETTINGS_ID => {
+                let _ = app.emit("app-shortcut", "open-settings");
+            }
             _ => {}
         })
         .manage(daemon_bridge::DaemonState::new())
@@ -126,6 +133,7 @@ fn main() {
             // Native terminal surfaces (Ghostty on macOS arm64; stubs elsewhere)
             terminal_commands::terminal_surface_create,
             terminal_commands::terminal_surface_update,
+            terminal_commands::terminal_surface_set_font_size,
             terminal_commands::terminal_surface_destroy,
             terminal_commands::terminal_surface_focus,
             terminal_commands::terminal_surfaces_begin_web_overlay,
@@ -182,6 +190,7 @@ fn main() {
             commands::pr_write_instruction,
             commands::pr_link,
             commands::archive_workspace,
+            commands::restore_workspace,
             commands::copy_into_workspace,
             commands::move_within_workspace,
             commands::rename_workspace_entry,

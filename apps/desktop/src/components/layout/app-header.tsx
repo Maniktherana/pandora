@@ -31,6 +31,7 @@ import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import type { HeaderBranchContext, WorkspaceRecord } from "@/lib/shared/types";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { cn } from "@/lib/shared/utils";
+import { useSettingsStore } from "@/state/settings-store";
 
 const TARGET_BRANCH_STORAGE_KEY_PREFIX = "pandora.header.targetBranch.";
 

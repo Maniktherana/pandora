@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Context, Effect, Layer } from "effect";
 import { NativeSurfaceError } from "@/services/service-errors";
+import { useSettingsStore } from "@/state/settings-store";
 
 export interface SurfaceRect {
   readonly x: number;
@@ -19,6 +20,7 @@ export interface ManagedSurfaceRegistration {
   anchorElement: HTMLElement | null;
   visible: boolean;
   focused: boolean;
+  overlayExempt?: boolean;
   onFocus?: () => void;
 }
 
@@ -45,12 +47,16 @@ export interface TerminalSurfaceServiceApi {
   readonly upsertSurface: (
     input: ManagedSurfaceRegistration,
   ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly setAllSurfaceFontSizes: (
+    fontSize: number,
+  ) => Effect.Effect<void, NativeSurfaceError>;
   readonly parkSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeWorkspaceSurfaces: (
     workspaceId: string,
   ) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeAllSurfaces: () => Effect.Effect<void, NativeSurfaceError>;
+  readonly refreshAllSurfaces: () => Effect.Effect<void, NativeSurfaceError>;
   readonly beginWebOverlay: (
     mode: NativeTerminalOverlayMode,
   ) => Effect.Effect<void, NativeSurfaceError>;
@@ -89,6 +95,22 @@ function snapRect(el: HTMLElement): NativeSyncPayload | null {
       visible: el.isConnected,
     }),
   };
+}
+
+function getObservedElements(anchor: HTMLElement): HTMLElement[] {
+  const elements: HTMLElement[] = [];
+  const seen = new Set<HTMLElement>();
+  let current: HTMLElement | null = anchor;
+
+  while (current) {
+    if (!seen.has(current)) {
+      elements.push(current);
+      seen.add(current);
+    }
+    current = current.parentElement;
+  }
+
+  return elements;
 }
 
 export const TerminalSurfaceServiceLive = Layer.effect(
@@ -145,6 +167,10 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     };
 
     const isWebOverlayActive = () => Object.values(webOverlayDepth).some((depth) => depth > 0);
+    const shouldDeferForOverlay = (
+      entry: ManagedSurfaceEntry,
+      ignoreOverlay: boolean,
+    ) => isWebOverlayActive() && !ignoreOverlay && !entry.overlayExempt;
 
     const buildPayload = (entry: ManagedSurfaceEntry) => {
       if (!entry.anchorElement) {
@@ -216,11 +242,14 @@ export const TerminalSurfaceServiceLive = Layer.effect(
           entry.pendingCreate = false;
           entry.created = true;
           try {
+            const termFontSize = useSettingsStore.getState().terminalFontSize;
             await invoke("terminal_surface_create", {
               workspaceId: entry.workspaceId,
               sessionId: entry.sessionId,
               surfaceId: entry.surfaceId,
               rect: createPayload.rect,
+              fontSize: termFontSize > 0 ? termFontSize : null,
+              overlayExempt: entry.overlayExempt,
             });
           } catch (cause) {
             entry.created = false;
@@ -254,8 +283,8 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       }
     };
 
-    const runSync = (entry: ManagedSurfaceEntry) => {
-      if (isWebOverlayActive()) {
+    const runSync = (entry: ManagedSurfaceEntry, ignoreOverlay = false) => {
+      if (shouldDeferForOverlay(entry, ignoreOverlay)) {
         needsSyncAfterOverlay = true;
         return;
       }
@@ -282,11 +311,11 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       })();
     };
 
-    const scheduleSync = (surfaceId: string, forceCreate = false) => {
+    const scheduleSync = (surfaceId: string, forceCreate = false, ignoreOverlay = false) => {
       const entry = entries.get(surfaceId);
       if (!entry) return;
       if (forceCreate) entry.pendingCreate = true;
-      if (isWebOverlayActive()) {
+      if (shouldDeferForOverlay(entry, ignoreOverlay)) {
         needsSyncAfterOverlay = true;
         clearScheduledSync(entry);
         return;
@@ -300,8 +329,30 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       if (entry.rafId != null) return;
       entry.rafId = requestAnimationFrame(() => {
         entry.rafId = null;
-        runSync(entry);
+        runSync(entry, ignoreOverlay);
       });
+    };
+
+    const scheduleSettledSyncs = (
+      surfaceId: string,
+      frames = 3,
+      forceCreate = false,
+      ignoreOverlay = false,
+    ) => {
+      if (frames <= 0) {
+        scheduleSync(surfaceId, forceCreate, ignoreOverlay);
+        return;
+      }
+
+      let remainingFrames = frames;
+      const tick = () => {
+        scheduleSync(surfaceId, forceCreate, ignoreOverlay);
+        remainingFrames -= 1;
+        if (remainingFrames > 0) {
+          requestAnimationFrame(tick);
+        }
+      };
+      requestAnimationFrame(tick);
     };
 
     const syncAll = () => {
@@ -316,9 +367,11 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       if (!nextAnchor) return;
 
       const observer = new ResizeObserver(() => {
-        scheduleSync(entry.surfaceId);
+        scheduleSettledSyncs(entry.surfaceId, 3);
       });
-      observer.observe(nextAnchor);
+      for (const element of getObservedElements(nextAnchor)) {
+        observer.observe(element);
+      }
       entry.resizeObserver = observer;
     };
 
@@ -378,6 +431,7 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     }).catch(() => {});
 
     window.addEventListener("resize", syncAll);
+    document.addEventListener("scroll", syncAll, true);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         syncAll();
@@ -422,11 +476,15 @@ export const TerminalSurfaceServiceLive = Layer.effect(
                 syncInFlight: false,
                 resyncRequested: false,
                 pendingCreate: true,
+                overlayExempt: input.overlayExempt ?? false,
               };
               entries.set(input.surfaceId, entry);
               replaceObserver(entry, input.anchorElement);
+              scheduleSettledSyncs(input.surfaceId, 4);
             } else {
               const anchorChanged = entry.anchorElement !== input.anchorElement;
+              const overlayExempt = input.overlayExempt ?? false;
+              const overlayChanged = entry.overlayExempt !== overlayExempt;
               if (anchorChanged) {
                 console.debug("[terminal-surface]", "anchor changed", {
                   workspaceId: input.workspaceId,
@@ -442,13 +500,34 @@ export const TerminalSurfaceServiceLive = Layer.effect(
               entry.visible = input.visible;
               entry.focused = input.focused;
               entry.onFocus = input.onFocus;
+              entry.overlayExempt = overlayExempt;
               if (anchorChanged) {
                 replaceObserver(entry, input.anchorElement);
+                scheduleSettledSyncs(input.surfaceId, 4);
+              }
+              if (overlayChanged) {
+                entry.pendingCreate = true;
               }
             }
             scheduleSync(input.surfaceId);
           },
           catch: (cause) => nativeSurfaceError(cause, input.surfaceId),
+        }),
+      setAllSurfaceFontSizes: (fontSize) =>
+        Effect.tryPromise({
+          try: async () => {
+            const supported = await getNativeSupport();
+            if (!supported) return;
+
+            for (const entry of entries.values()) {
+              if (!entry.created) continue;
+              await invoke("terminal_surface_set_font_size", {
+                surfaceId: entry.surfaceId,
+                fontSize,
+              });
+            }
+          },
+          catch: (cause) => nativeSurfaceError(cause, "set-all-surface-font-sizes"),
         }),
       parkSurface: (surfaceId) =>
         Effect.tryPromise({
@@ -469,6 +548,21 @@ export const TerminalSurfaceServiceLive = Layer.effect(
         Effect.tryPromise({
           try: () => destroyAllSurfaces(),
           catch: (cause) => nativeSurfaceError(cause, "all-surfaces"),
+        }),
+      refreshAllSurfaces: () =>
+        Effect.tryPromise({
+          try: async () => {
+            for (const entry of entries.values()) {
+              clearScheduledSync(entry);
+              if (entry.syncInFlight) {
+                entry.pendingCreate = true;
+                entry.resyncRequested = true;
+                continue;
+              }
+              await syncSurface(entry, true);
+            }
+          },
+          catch: (cause) => nativeSurfaceError(cause, "refresh-all-surfaces"),
         }),
       beginWebOverlay: (mode) =>
         Effect.tryPromise({

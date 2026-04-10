@@ -85,6 +85,12 @@ export function useWorkspaceActions() {
             service.archiveWorkspace(workspaceId),
           ),
         ),
+      restoreWorkspace: (workspaceId: string) =>
+        run(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.restoreWorkspace(workspaceId),
+          ),
+        ),
       connectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.connect())),
       disconnectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect())),
     }),

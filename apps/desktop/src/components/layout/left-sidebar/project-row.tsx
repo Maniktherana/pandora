@@ -17,6 +17,7 @@ type ProjectRowProps = {
 export function ProjectRow({ project }: ProjectRowProps) {
   const allWorkspaces = useDesktopView((view) => view.workspaces);
   const workspaceCommands = useWorkspaceActions();
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
   const projectWorkspaces = useMemo(
     () => allWorkspaces.filter((workspace) => workspace.projectId === project.id),
     [allWorkspaces, project.id],
@@ -24,6 +25,11 @@ export function ProjectRow({ project }: ProjectRowProps) {
   const workspaces = useMemo(
     () =>
       projectWorkspaces.filter((workspace) => workspace.status !== "archived"),
+    [projectWorkspaces],
+  );
+  const archivedWorkspaces = useMemo(
+    () =>
+      projectWorkspaces.filter((workspace) => workspace.status === "archived"),
     [projectWorkspaces],
   );
   const [lastWorkspaceKind, setLastWorkspaceKind] = useState<"worktree" | "linked">("linked");
@@ -106,8 +112,33 @@ export function ProjectRow({ project }: ProjectRowProps) {
               onCreateLinked={createLinked}
             />
           )}
+          {archivedWorkspaces.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              <div
+                className="flex h-7 select-none cursor-pointer items-center gap-1.5 rounded-md px-2.5 hover:bg-[var(--theme-panel-hover)]"
+                onClick={() => setArchivedExpanded(!archivedExpanded)}
+              >
+                <HugeiconsIcon
+                  icon={archivedExpanded ? ArrowDown01Icon : ArrowRight01Icon}
+                  strokeWidth={2}
+                  className="size-3 shrink-0 text-[var(--theme-text-subtle)]"
+                />
+                <span className="text-xs text-[var(--theme-text-subtle)]">
+                  Archived ({archivedWorkspaces.length})
+                </span>
+              </div>
+              {archivedExpanded && (
+                <div className="space-y-0.5">
+                  {archivedWorkspaces.map((workspace) => (
+                    <MemoWorkspaceRow key={workspace.id} workspace={workspace} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+

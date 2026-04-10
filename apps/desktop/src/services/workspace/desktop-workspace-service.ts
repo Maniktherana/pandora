@@ -16,6 +16,7 @@ import type {
 } from "@/lib/shared/types";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
 import { useRuntimeStore } from "@/state/runtime-store";
+import { useSettingsStore } from "@/state/settings-store";
 import { buildDesktopView, type DesktopViewStateSnapshot } from "@/state/desktop-view-projections";
 import { DesktopStateLoadError, WorkspaceSelectionError } from "@/services/service-errors";
 import { DaemonEventQueue } from "@/services/daemon/daemon-event-queue";
@@ -181,6 +182,7 @@ export interface DesktopWorkspaceServiceApi {
   readonly updateWorkspacePrState: (workspaceId: string, prState: string) => Effect.Effect<void>;
   readonly setPrAwaiting: (workspaceId: string, awaiting: boolean) => Effect.Effect<void>;
   readonly archiveWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
+  readonly restoreWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly addProjectTerminalGroup: (
     workspaceId: string,
     slotId: string,
@@ -1186,6 +1188,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
     const processDaemonEvent = Effect.flatMap(eventQueue.take(), (event) =>
       Effect.gen(function* () {
+        // Skip events from the settings terminal preview — it's not a real workspace
+        if (event.workspaceId === "__settings_terminal__") return;
+
         switch (event.type) {
           case "connection_state_changed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
@@ -1606,11 +1611,19 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
           yield* terminalSurfaceService
             .removeWorkspaceSurfaces(workspaceId)
             .pipe(Effect.orElseSucceed(() => undefined));
-          yield* updateDesktopState((state) => {
-            const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
-            if (workspace) {
-              workspace.status = "archived";
-            }
+          yield* updateDesktopState(
+            (state) => {
+              const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+              if (workspace) {
+                workspace.status = "archived";
+              }
+            },
+            { sync: true },
+          );
+          const deleteWorktree = useSettingsStore.getState().archiveDeletesWorktree;
+          yield* Effect.tryPromise({
+            try: () => invoke("archive_workspace", { workspaceId, deleteWorktree }),
+            catch: (cause) => cause,
           });
           if (desktopStateSnapshot.selectedWorkspaceID === workspaceId) {
             const next = desktopStateSnapshot.workspaces.find(
@@ -1623,6 +1636,28 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               yield* selectWorkspaceById(next.id);
             }
           }
+        }).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof WorkspaceSelectionError
+              ? cause
+              : workspaceSelectionError(cause, workspaceId),
+          ),
+        ),
+      restoreWorkspace: (workspaceId) =>
+        Effect.gen(function* () {
+          yield* updateDesktopState(
+            (state) => {
+              const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+              if (workspace) {
+                workspace.status = "ready";
+              }
+            },
+            { sync: true },
+          );
+          yield* Effect.tryPromise({
+            try: () => invoke("restore_workspace", { workspaceId }),
+            catch: (cause) => cause,
+          });
         }).pipe(
           Effect.mapError((cause) =>
             cause instanceof WorkspaceSelectionError

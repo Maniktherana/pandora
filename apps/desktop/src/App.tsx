@@ -8,6 +8,7 @@ import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/layout/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
 import AppHeader from "@/components/layout/app-header";
+import SettingsPanel from "@/components/settings/settings-panel";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
@@ -16,19 +17,73 @@ import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/file
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
+import { useBootstrapDesktop, useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
+import { useSettingsStore, getFontFamily, getMonoFont, getTerminalFont } from "@/state/settings-store";
+import { applyTheme, themes } from "@/lib/theme";
+import { Effect } from "effect";
+import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const [rightSidebarMode, setRightSidebarMode] = useState<LeftPanelMode>("files");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const sidebarResizeWidthRef = useRef<number | null>(null);
+  const selectedThemeId = useSettingsStore((state) => state.selectedThemeId);
+  const uiFontFamily = useSettingsStore((state) => state.uiFontFamily);
+  const uiFontCustom = useSettingsStore((state) => state.uiFontCustom);
+  const monoFontFamily = useSettingsStore((state) => state.monoFontFamily);
+  const monoFontCustom = useSettingsStore((state) => state.monoFontCustom);
+  const terminalFontFamily = useSettingsStore((state) => state.terminalFontFamily);
+  const terminalFontCustom = useSettingsStore((state) => state.terminalFontCustom);
+  const editorFontSize = useSettingsStore((state) => state.editorFontSize);
+  const terminalFontSize = useSettingsStore((state) => state.terminalFontSize);
+  const runtime = useDesktopRuntime();
+  const terminalFontSizeHydratedRef = useRef(false);
   useBootstrapDesktop();
-  useNativeTerminalOverlay(isResizingPanels ? "semi-transparent" : null);
+  useNativeTerminalOverlay(settingsOpen ? "opaque" : isResizingPanels ? "semi-transparent" : null);
+
+  // Apply stored theme and fonts on mount and when they change
+  useEffect(() => {
+    const theme = themes.find((t) => t.id === selectedThemeId);
+    if (theme) applyTheme(theme);
+  }, [selectedThemeId]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--theme-font-sans", getFontFamily(uiFontFamily, uiFontCustom));
+    document.documentElement.style.setProperty("--theme-font-mono", getMonoFont(monoFontFamily, monoFontCustom));
+    document.documentElement.style.setProperty("--theme-font-terminal", getTerminalFont(terminalFontFamily, terminalFontCustom));
+    document.documentElement.style.setProperty("--theme-font-editor-size", `${editorFontSize}px`);
+    document.documentElement.style.setProperty("--theme-font-terminal-size", `${terminalFontSize}px`);
+  }, [
+    editorFontSize,
+    monoFontFamily,
+    monoFontCustom,
+    terminalFontCustom,
+    terminalFontFamily,
+    terminalFontSize,
+    uiFontCustom,
+    uiFontFamily,
+  ]);
+
+  useEffect(() => {
+    if (!terminalFontSizeHydratedRef.current) {
+      terminalFontSizeHydratedRef.current = true;
+      return;
+    }
+
+    void runtime.runPromise(
+      Effect.flatMap(TerminalSurfaceService, (service) =>
+        service.setAllSurfaceFontSizes(terminalFontSize),
+      ).pipe(
+        Effect.catchAll(() => Effect.void),
+      ),
+    );
+  }, [runtime, terminalFontSize]);
 
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
   const selectedWsStatus = useDesktopView((view) => view.selectedWorkspace?.status ?? null);
@@ -64,6 +119,16 @@ export default function App() {
     uiPreferencesCommands.setSidebarVisible(!sidebarVisible);
   }, [sidebarVisible, uiPreferencesCommands]);
 
+  const handleOpenSettings = useCallback(() => {
+    workspaceCommands.setLayoutTargetRuntimeId(null);
+    setSettingsOpen(true);
+  }, [workspaceCommands]);
+
+  const handleCloseSettings = useCallback(() => {
+    workspaceCommands.setLayoutTargetRuntimeId(null);
+    setSettingsOpen(false);
+  }, [workspaceCommands]);
+
   const handleSelectRightSidebarMode = useCallback(
     (mode: LeftPanelMode) => {
       if (selectedWs?.status !== "ready") return;
@@ -79,6 +144,7 @@ export default function App() {
     onCloseTab: handleCloseFocusedTab,
     onToggleSidebar: handleToggleSidebar,
     onToggleBottomPanel: toggleBottomPanel,
+    onOpenSettings: handleOpenSettings,
   });
 
   useEffect(() => {
@@ -110,11 +176,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      {sidebarVisible && (
+      {sidebarVisible && !settingsOpen && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
           <LeftSidebar
             booting={booting}
             onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)}
+            onOpenSettings={handleOpenSettings}
           />
           <div
             role="separator"
@@ -169,38 +236,50 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex h-full min-w-0 flex-1 flex-col bg-[#151515]">
-        <AppHeader
-          booting={booting}
-          sidebarVisible={sidebarVisible}
-          selectedWorkspace={selectedWs}
-          bottomPanelOpen={bottomPanelOpen}
-          fileTreeOpen={fileTreeOpen}
-          rightSidebarMode={rightSidebarMode}
-          onToggleSidebar={handleShowSidebar}
-          onToggleBottomPanel={toggleBottomPanel}
-          onSelectRightSidebarMode={handleSelectRightSidebarMode}
-        />
+      <div className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen ? "bg-transparent" : "bg-[#151515]"}`}>
+        {settingsOpen ? (
+          <ErrorBoundary name="settings">
+            <SettingsPanel
+              onClose={handleCloseSettings}
+              sidebarWidth={sidebarWidth}
+              activeWorkspaceId={selectedWsId ?? null}
+              activeWorkspacePath={selectedWs?.status === "ready" ? selectedWs.worktreePath : null}
+            />
+          </ErrorBoundary>
+        ) : (
+          <>
+            <AppHeader
+              booting={booting}
+              sidebarVisible={sidebarVisible}
+              selectedWorkspace={selectedWs}
+              bottomPanelOpen={bottomPanelOpen}
+              fileTreeOpen={fileTreeOpen}
+              rightSidebarMode={rightSidebarMode}
+              onToggleSidebar={handleShowSidebar}
+              onToggleBottomPanel={toggleBottomPanel}
+              onSelectRightSidebarMode={handleSelectRightSidebarMode}
+            />
 
-        <div className="flex-1 min-h-0 flex flex-col">
-          <TabDragProvider>
-            <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
-              <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
-                <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-                  <ResizablePanel defaultSize={72} minSize={45}>
-                    <div
-                      className="h-full min-h-0 min-w-0"
-                      data-workspace-drop-root="true"
-                      data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
-                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
-                    >
-                      <ErrorBoundary name="workspace">
-                        <div className="relative h-full min-h-0">
-                          <WorkspaceView />
-                        </div>
-                      </ErrorBoundary>
-                    </div>
-                  </ResizablePanel>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {(
+                <TabDragProvider>
+                  <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
+                    <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
+                      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                        <ResizablePanel defaultSize={72} minSize={45}>
+                          <div
+                            className="h-full min-h-0 min-w-0"
+                            data-workspace-drop-root="true"
+                            data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
+                            onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                          >
+                            <ErrorBoundary name="workspace">
+                              <div className="relative h-full min-h-0">
+                                <WorkspaceView />
+                              </div>
+                            </ErrorBoundary>
+                          </div>
+                        </ResizablePanel>
                   <PanelResizeHandle
                     onDragging={setIsResizingPanels}
                     className={cn(
@@ -214,7 +293,7 @@ export default function App() {
                     ref={fileTreePanelRef}
                     collapsible
                     collapsedSize={0}
-                    defaultSize={28}
+                    defaultSize={fileTreeOpen && selectedWsStatus === "ready" ? 28 : 0}
                     minSize={12}
                     maxSize={50}
                     className="min-h-0 min-w-0"
@@ -253,7 +332,7 @@ export default function App() {
                     ref={bottomPanelRef}
                     collapsible
                     collapsedSize={0}
-                    defaultSize={28}
+                    defaultSize={bottomPanelOpen ? 28 : 0}
                     minSize={12}
                     maxSize={55}
                     className="min-h-0"
@@ -266,9 +345,12 @@ export default function App() {
                   </ResizablePanel>
                 </>
               )}
-            </ResizablePanelGroup>
-          </TabDragProvider>
-        </div>
+                  </ResizablePanelGroup>
+                </TabDragProvider>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

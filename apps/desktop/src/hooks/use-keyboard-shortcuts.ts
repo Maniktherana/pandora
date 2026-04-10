@@ -3,12 +3,49 @@ import { useCallback, useEffect, useRef } from "react";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useSettingsStore } from "@/state/settings-store";
 
 interface UseKeyboardShortcutsParams {
   onNewTerminal: () => void;
   onCloseTab: () => void;
   onToggleSidebar: () => void;
   onToggleBottomPanel: () => void;
+  onOpenSettings: () => void;
+}
+
+type FontZoomDirection = 1 | -1;
+
+export function getFontZoomDirection(event: {
+  key: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+}) {
+  if ((!event.metaKey && !event.ctrlKey) || event.altKey) {
+    return null;
+  }
+
+  switch (event.key) {
+    case "=":
+    case "+":
+      return 1 satisfies FontZoomDirection;
+    case "-":
+    case "_":
+      return -1 satisfies FontZoomDirection;
+    default:
+      return null;
+  }
+}
+
+function isMonacoEditorTarget(target: EventTarget | null) {
+  if (typeof Element === "undefined") return false;
+  const element =
+    target instanceof Element
+      ? target
+      : document.activeElement instanceof Element
+        ? document.activeElement
+        : null;
+  return Boolean(element?.closest(".monaco-editor"));
 }
 
 export default function useKeyboardShortcuts({
@@ -16,10 +53,12 @@ export default function useKeyboardShortcuts({
   onCloseTab,
   onToggleSidebar,
   onToggleBottomPanel,
+  onOpenSettings,
 }: UseKeyboardShortcutsParams) {
   const lastWorkspaceShortcutRef = useRef<{ direction: -1 | 1; at: number } | null>(null);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const layoutTargetRuntimeId = useDesktopView((view) => view.layoutTargetRuntimeId);
   const hasSelectedWorkspace = useDesktopView(
     (view) =>
       view.selectedWorkspaceID != null &&
@@ -32,6 +71,10 @@ export default function useKeyboardShortcuts({
     updateWorkspacePrState,
   } = useWorkspaceActions();
   const { cycleTab } = useLayoutActions();
+  const increaseEditorFontSize = useSettingsStore((state) => state.increaseEditorFontSize);
+  const decreaseEditorFontSize = useSettingsStore((state) => state.decreaseEditorFontSize);
+  const increaseTerminalFontSize = useSettingsStore((state) => state.increaseTerminalFontSize);
+  const decreaseTerminalFontSize = useSettingsStore((state) => state.decreaseTerminalFontSize);
 
   const shouldHandleWorkspaceShortcut = useCallback((direction: -1 | 1) => {
     const now = performance.now();
@@ -43,8 +86,59 @@ export default function useKeyboardShortcuts({
     return true;
   }, []);
 
+  const applyFontZoom = useCallback(
+    (direction: FontZoomDirection, target: "editor" | "terminal") => {
+      if (target === "terminal") {
+        if (direction > 0) {
+          increaseTerminalFontSize();
+        } else {
+          decreaseTerminalFontSize();
+        }
+        return;
+      }
+
+      if (direction > 0) {
+        increaseEditorFontSize();
+      } else {
+        decreaseEditorFontSize();
+      }
+    },
+    [
+      decreaseEditorFontSize,
+      decreaseTerminalFontSize,
+      increaseEditorFontSize,
+      increaseTerminalFontSize,
+    ],
+  );
+
+  const resolveFontZoomTarget = useCallback(
+    (eventTarget: EventTarget | null): "editor" | "terminal" | null => {
+      if (layoutTargetRuntimeId) return "terminal";
+      if (isMonacoEditorTarget(eventTarget)) return "editor";
+      return "terminal";
+    },
+    [layoutTargetRuntimeId],
+  );
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const zoomDirection = getFontZoomDirection(e);
+      if (zoomDirection) {
+        const target = resolveFontZoomTarget(e.target);
+        if (target) {
+          e.preventDefault();
+          applyFontZoom(zoomDirection, target);
+          return;
+        }
+      }
+
+      // Handle settings shortcut globally (always work)
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        onOpenSettings();
+        return;
+      }
+
       if (e.metaKey) {
         switch (e.key) {
           case "[":
@@ -122,17 +216,25 @@ export default function useKeyboardShortcuts({
       }
     };
 
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
   }, [
     activateSidebarSelection,
+    applyFontZoom,
     cycleTab,
+    decreaseEditorFontSize,
+    decreaseTerminalFontSize,
+    increaseEditorFontSize,
+    increaseTerminalFontSize,
+    layoutTargetRuntimeId,
     navigationArea,
     navigateSidebar,
     onCloseTab,
     onNewTerminal,
+    onOpenSettings,
     onToggleBottomPanel,
     onToggleSidebar,
+    resolveFontZoomTarget,
     selectedWorkspaceID,
     switchWorkspaceRelative,
     hasSelectedWorkspace,
@@ -173,6 +275,15 @@ export default function useKeyboardShortcuts({
         case "open-pr":
           window.dispatchEvent(new CustomEvent("pandora:open-pr"));
           break;
+        case "open-settings":
+          onOpenSettings();
+          break;
+        case "zoom-in":
+          applyFontZoom(1, "terminal");
+          break;
+        case "zoom-out":
+          applyFontZoom(-1, "terminal");
+          break;
       }
     }).then((fn) => {
       unlisten = fn;
@@ -183,7 +294,9 @@ export default function useKeyboardShortcuts({
     };
   }, [
     cycleTab,
+    applyFontZoom,
     onCloseTab,
+    onOpenSettings,
     onNewTerminal,
     onToggleBottomPanel,
     onToggleSidebar,

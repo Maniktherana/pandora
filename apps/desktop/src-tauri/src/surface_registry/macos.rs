@@ -17,6 +17,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::CString;
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -80,6 +81,7 @@ struct NativeSurface {
     rect: SurfaceRect,
     visible: bool,
     focused: bool,
+    overlay_exempt: bool,
 }
 
 // Safety: NativeSurface contains raw pointers that are only accessed
@@ -265,12 +267,19 @@ impl SurfaceRegistry {
     fn apply_view_overlay(
         view: *mut AnyObject,
         visible: bool,
+        overlay_exempt: bool,
         overlay_mode: Option<WebOverlayMode>,
     ) {
         unsafe {
             if !visible {
                 let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
                 let _: () = objc2::msg_send![view, setHidden: true];
+                return;
+            }
+
+            if overlay_exempt {
+                let _: () = objc2::msg_send![view, setHidden: false];
+                let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
                 return;
             }
 
@@ -449,6 +458,8 @@ impl SurfaceRegistry {
         session_id: String,
         rect: SurfaceRect,
         app_handle: AppHandle,
+        font_size: Option<f32>,
+        overlay_exempt: bool,
     ) -> Result<(), String> {
         let t0 = Instant::now();
         tlog!(
@@ -562,6 +573,7 @@ impl SurfaceRegistry {
         };
         config.backend = ghostty_surface_io_backend_e::GHOSTTY_SURFACE_IO_BACKEND_HOST_MANAGED;
         config.scale_factor = rect.scale_factor;
+        config.font_size = font_size.unwrap_or(0.0);
         config.context = ghostty_surface_context_e::GHOSTTY_SURFACE_CONTEXT_WINDOW;
         config.receive_userdata = callback_ctx_raw as *mut c_void;
         config.receive_buffer = Some(receive_buffer_callback);
@@ -604,6 +616,7 @@ impl SurfaceRegistry {
             rect,
             visible: true,
             focused: false,
+            overlay_exempt,
         };
 
         let mut should_flush_output = false;
@@ -628,6 +641,7 @@ impl SurfaceRegistry {
                 Self::apply_view_overlay(
                     Retained::as_ptr(&s.ns_view) as *mut AnyObject,
                     visible,
+                    s.overlay_exempt,
                     overlay_mode,
                 );
             }
@@ -676,7 +690,14 @@ impl SurfaceRegistry {
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         let overlay_mode = self.effective_web_overlay_mode();
-        let (ghostty_surface, ns_view_ptr, prev_rect, prev_visible, prev_focused) = {
+        let (
+            ghostty_surface,
+            ns_view_ptr,
+            prev_rect,
+            prev_visible,
+            prev_focused,
+            overlay_exempt,
+        ) = {
             let inner = self.inner.lock().unwrap();
             let surface = match inner.surfaces.get(surface_id) {
                 Some(surface) => surface,
@@ -691,6 +712,7 @@ impl SurfaceRegistry {
                 surface.rect.clone(),
                 surface.visible,
                 surface.focused,
+                surface.overlay_exempt,
             )
         };
 
@@ -736,7 +758,7 @@ impl SurfaceRegistry {
         unsafe {
             let _: () = objc2::msg_send![ns_view, setFrame: new_frame];
         }
-        Self::apply_view_overlay(ns_view, visible, overlay_mode);
+        Self::apply_view_overlay(ns_view, visible, overlay_exempt, overlay_mode);
 
         // Update ghostty surface size (in pixels)
         let width_px = (rect.width * rect.scale_factor) as u32;
@@ -785,6 +807,46 @@ impl SurfaceRegistry {
         Ok(())
     }
 
+    pub fn set_surface_font_size(&self, surface_id: &str, font_size: f32) -> Result<(), String> {
+        let (ghostty_surface, rect) = {
+            let inner = self.inner.lock().unwrap();
+            let surface = inner
+                .surfaces
+                .get(surface_id)
+                .ok_or_else(|| format!("Surface not found: {surface_id}"))?;
+            (surface.ghostty_surface, surface.rect.clone())
+        };
+
+        let config_path = std::env::temp_dir().join(format!(
+            "pandora-ghostty-font-size-{}-{}.conf",
+            std::process::id(),
+            surface_id
+        ));
+        fs::write(&config_path, format!("font-size = {font_size}\n"))
+            .map_err(|error| error.to_string())?;
+        let config_path_cstr =
+            CString::new(config_path.to_string_lossy().as_ref()).map_err(|error| error.to_string())?;
+
+        let width_px = (rect.width * rect.scale_factor) as u32;
+        let height_px = (rect.height * rect.scale_factor) as u32;
+
+        unsafe {
+            let config = ghostty_config_new();
+            if config.is_null() {
+                return Err("ghostty_config_new returned null".to_string());
+            }
+            ghostty_config_load_default_files(config);
+            ghostty_config_load_file(config, config_path_cstr.as_ptr());
+            ghostty_config_finalize(config);
+            ghostty_surface_update_config(ghostty_surface, config);
+            ghostty_surface_set_size(ghostty_surface, width_px, height_px);
+            ghostty_surface_refresh(ghostty_surface);
+            ghostty_config_free(config);
+        }
+
+        Ok(())
+    }
+
     /// Apply a web overlay mode over all visible terminal surfaces. Pair with [`Self::end_web_overlay`].
     pub fn begin_web_overlay(&self, mode: WebOverlayMode) {
         let next_mode = {
@@ -810,12 +872,13 @@ impl SurfaceRegistry {
                     (
                         Retained::as_ptr(&surface.ns_view) as *mut AnyObject,
                         surface.visible,
+                        surface.overlay_exempt,
                     )
                 })
                 .collect::<Vec<_>>()
         };
-        for (view, visible) in views {
-            Self::apply_view_overlay(view, visible, next_mode);
+        for (view, visible, overlay_exempt) in views {
+            Self::apply_view_overlay(view, visible, overlay_exempt, next_mode);
         }
     }
 
@@ -844,12 +907,13 @@ impl SurfaceRegistry {
                     (
                         Retained::as_ptr(&surface.ns_view) as *mut AnyObject,
                         !surface.visible,
+                        surface.overlay_exempt,
                     )
                 })
                 .collect::<Vec<_>>()
         };
-        for (view, hidden) in views {
-            Self::apply_view_overlay(view, !hidden, next_mode);
+        for (view, hidden, overlay_exempt) in views {
+            Self::apply_view_overlay(view, !hidden, overlay_exempt, next_mode);
         }
     }
 

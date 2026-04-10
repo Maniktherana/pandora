@@ -7,6 +7,7 @@ import {
   GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
   GitPullRequestIcon,
+  Refresh01Icon,
   SplitIcon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -138,19 +139,35 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                 </span>
               )}
             </span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={(event) => {
-                event.stopPropagation();
-                workspaceCommands.archiveWorkspace(workspace.id);
-              }}
-              className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 p-0 opacity-0 transition-opacity active:translate-y-0 group-hover:opacity-100"
-              title="Archive workspace"
-              aria-label="Archive workspace"
-            >
-              <HugeiconsIcon icon={Archive03Icon} strokeWidth={2} className="size-4" />
-            </Button>
+            {workspace.status === "archived" ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  workspaceCommands.restoreWorkspace(workspace.id);
+                }}
+                className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 p-0 opacity-0 transition-opacity active:translate-y-0 group-hover:opacity-100"
+                title="Restore workspace"
+                aria-label="Restore workspace"
+              >
+                <HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} className="size-4" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  workspaceCommands.archiveWorkspace(workspace.id);
+                }}
+                className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 p-0 opacity-0 transition-opacity active:translate-y-0 group-hover:opacity-100"
+                title="Archive workspace"
+                aria-label="Archive workspace"
+              >
+                <HugeiconsIcon icon={Archive03Icon} strokeWidth={2} className="size-4" />
+              </Button>
+            )}
           </div>
         )}
         {isFailed && (

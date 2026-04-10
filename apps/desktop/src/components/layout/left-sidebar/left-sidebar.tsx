@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { LayoutAlignLeftIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { LayoutAlignLeftIcon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { useDesktopView } from "@/hooks/use-desktop-view";
@@ -10,6 +10,7 @@ import DotGridLoader from "@/components/dot-grid-loader";
 type LeftSidebarProps = {
   booting: boolean;
   onCollapse: () => void;
+  onOpenSettings: () => void;
 };
 
 function SidebarBootLoader() {
@@ -22,7 +23,7 @@ function SidebarBootLoader() {
   );
 }
 
-export default function LeftSidebar({ booting, onCollapse }: LeftSidebarProps) {
+export default function LeftSidebar({ booting, onCollapse, onOpenSettings }: LeftSidebarProps) {
   const projects = useDesktopView((view) => view.projects);
   const workspaceCommands = useWorkspaceActions();
 
@@ -84,6 +85,17 @@ export default function LeftSidebar({ booting, onCollapse }: LeftSidebarProps) {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="flex h-10 items-center border-t border-[var(--theme-border)] px-3">
+        <Button
+          onClick={onOpenSettings}
+          variant="ghost"
+          size="icon-sm"
+          title="Settings (Cmd+,)"
+        >
+          <HugeiconsIcon icon={Settings03Icon} strokeWidth={1.5} className="size-4" />
+        </Button>
       </div>
     </div>
   );

@@ -28,6 +28,8 @@ pub fn terminal_surface_create(
     workspace_id: String,
     session_id: String,
     rect: SurfaceRect,
+    font_size: Option<f32>,
+    overlay_exempt: bool,
 ) -> Result<(), String> {
     let t0 = Instant::now();
     tlog!(
@@ -50,7 +52,15 @@ pub fn terminal_surface_create(
         .run_on_main_thread(move || {
             registry.set_window(ns_window as *mut _);
             let _ =
-                tx.send(registry.create_surface(surface_id, workspace_id, session_id, rect, app));
+                tx.send(registry.create_surface(
+                    surface_id,
+                    workspace_id,
+                    session_id,
+                    rect,
+                    app,
+                    font_size,
+                    overlay_exempt,
+                ));
         })
         .map_err(|e| e.to_string())?;
     let dispatch_us = t0.elapsed().as_micros();
@@ -115,6 +125,31 @@ pub fn terminal_surface_update(
         total_us
     );
     result
+}
+
+#[tauri::command]
+pub fn terminal_surface_set_font_size(
+    window: WebviewWindow,
+    registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    surface_id: String,
+    font_size: f32,
+) -> Result<(), String> {
+    let registry = registry.inner().clone();
+    let sid = surface_id.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(registry.set_surface_font_size(&surface_id, font_size));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())??;
+    tlog!(
+        "CMD",
+        "terminal_surface_set_font_size surface={} font_size={}",
+        sid,
+        font_size
+    );
+    Ok(())
 }
 
 #[tauri::command]

@@ -120,33 +120,51 @@ fn start_daemon_runtime(
             map.get(&runtime_id).cloned()
         };
         if let Some(existing_runtime) = existing_runtime {
-            tlog!(
-                "DAEMON",
-                "runtime={} already active; replaying connection state + snapshot",
-                runtime_id
-            );
-
             let connected = {
                 let rt = existing_runtime.lock().await;
                 rt.connected
             };
 
-            let _ = app.emit(
-                "daemon-connection",
-                serde_json::json!({
-                    "workspaceId": runtime_id,
-                    "state": if connected { "connected" } else { "connecting" }
-                })
-                .to_string(),
-            );
-
             if connected {
+                tlog!(
+                    "DAEMON",
+                    "runtime={} already active; replaying connection state + snapshot",
+                    runtime_id
+                );
+
+                let _ = app.emit(
+                    "daemon-connection",
+                    serde_json::json!({
+                        "workspaceId": runtime_id,
+                        "state": "connected"
+                    })
+                    .to_string(),
+                );
+
                 let mut rt = existing_runtime.lock().await;
                 if let Some(writer) = rt.writer.as_mut() {
                     let _ = write_lp_message(writer, r#"{"type":"request_snapshot"}"#).await;
                 }
+                return;
             }
-            return;
+
+            tlog!(
+                "DAEMON",
+                "runtime={} stale disconnected runtime found; restarting",
+                runtime_id
+            );
+
+            {
+                let mut map = runtimes.lock().await;
+                map.remove(&runtime_id);
+            }
+
+            let mut rt = existing_runtime.lock().await;
+            rt.writer = None;
+            rt.connected = false;
+            if let Some(child) = rt.daemon_process.take() {
+                let _ = child.kill();
+            }
         }
 
         // Create runtime entry
@@ -389,4 +407,3 @@ pub async fn daemon_send(
 ) -> Result<(), String> {
     send_workspace_message(state.inner(), &workspace_id, &message).await
 }
-

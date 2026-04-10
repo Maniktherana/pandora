@@ -18,6 +18,8 @@ pub fn terminal_surface_create(
     _workspace_id: String,
     _session_id: String,
     _rect: SurfaceRect,
+    _font_size: Option<f32>,
+    _overlay_exempt: bool,
 ) -> Result<(), String> {
     Err(MSG.into())
 }
@@ -41,6 +43,16 @@ pub fn terminal_surface_destroy(
     _surface_id: String,
 ) -> Result<(), String> {
     Ok(())
+}
+
+#[tauri::command]
+pub fn terminal_surface_set_font_size(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _surface_id: String,
+    _font_size: f32,
+) -> Result<(), String> {
+    Err(MSG.into())
 }
 
 #[tauri::command]

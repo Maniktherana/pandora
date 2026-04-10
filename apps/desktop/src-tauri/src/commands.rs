@@ -854,6 +854,7 @@ pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
     daemon_state: tauri::State<'_, DaemonState>,
     workspace_id: String,
+    delete_worktree: bool,
 ) -> Result<(), String> {
     let workspaces = db.0.load_workspaces(None);
     let workspace = workspaces
@@ -864,8 +865,8 @@ pub async fn archive_workspace(
     // Stop runtime
     daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
 
-    // Remove worktree if applicable
-    if workspace.workspace_kind == WorkspaceKind::Worktree {
+    // Remove worktree if applicable and if requested
+    if delete_worktree && workspace.workspace_kind == WorkspaceKind::Worktree {
         let projects = db.0.load_projects();
         if let Some(project) = projects.into_iter().find(|p| p.id == workspace.project_id) {
             let ws = workspace.clone();
@@ -879,6 +880,15 @@ pub async fn archive_workspace(
 
     // Mark as archived (keep DB record)
     db.0.update_workspace_status(&workspace_id, "archived")?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn restore_workspace(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    db.0.update_workspace_status(&workspace_id, "ready")?;
     Ok(())
 }
 

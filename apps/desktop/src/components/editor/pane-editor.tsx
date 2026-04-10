@@ -12,20 +12,7 @@ import {
   PANDORA_EDITOR_FONT_SIZE,
   PANDORA_EDITOR_LINE_HEIGHT,
 } from "@/components/editor/monaco-pandora";
-
-const editorOptions = {
-  minimap: { enabled: false },
-  fontFamily: PANDORA_EDITOR_FONT_FAMILY,
-  fontSize: PANDORA_EDITOR_FONT_SIZE,
-  lineHeight: PANDORA_EDITOR_LINE_HEIGHT,
-  wordWrap: "on" as const,
-  scrollBeyondLastLine: true,
-  automaticLayout: true,
-  tabSize: 2,
-  padding: { top: 8 },
-  /** Hide squiggles from any language service that still reports markers. */
-  renderValidationDecorations: "off" as const,
-};
+import { useSettingsStore, getMonoFont } from "@/state/settings-store";
 
 const editorLoading = (
   <div className="h-full w-full" style={{ backgroundColor: PANDORA_EDITOR_BG }} aria-hidden />
@@ -42,6 +29,27 @@ export default function PaneEditor({
   relativePath: string;
   isActive: boolean;
 }) {
+  const monoFontFamily = useSettingsStore((s) => s.monoFontFamily);
+  const monoFontCustom = useSettingsStore((s) => s.monoFontCustom);
+  const editorFontSize = useSettingsStore((s) => s.editorFontSize);
+  const resolvedFont = getMonoFont(monoFontFamily, monoFontCustom);
+
+  const editorOptions = useMemo(
+    () => ({
+      minimap: { enabled: false },
+      fontFamily: resolvedFont || PANDORA_EDITOR_FONT_FAMILY,
+      fontSize: editorFontSize || PANDORA_EDITOR_FONT_SIZE,
+      lineHeight: Math.round((editorFontSize || PANDORA_EDITOR_FONT_SIZE) * 1.6),
+      wordWrap: "on" as const,
+      scrollBeyondLastLine: true,
+      automaticLayout: true,
+      tabSize: 2,
+      padding: { top: 8 },
+      renderValidationDecorations: "off" as const,
+    }),
+    [resolvedFont, editorFontSize],
+  );
+
   const buffer = useEditorStore((s) => s.bufferByWorkspace[workspaceId]?.[relativePath] ?? "");
   const setBuffer = useEditorStore((s) => s.setBuffer);
   const mergeSaved = useEditorStore((s) => s.mergeDiskContent);
