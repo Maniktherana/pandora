@@ -26,34 +26,39 @@ pub fn list_projects(db: tauri::State<'_, DbState>) -> Vec<ProjectRecord> {
 }
 
 #[tauri::command]
-pub fn add_project(
+pub async fn add_project(
     db: tauri::State<'_, DbState>,
     selected_path: String,
 ) -> Result<ProjectRecord, String> {
-    let resolved = git::resolve_project(&selected_path)?;
+    let db = db.0.clone();
+    tokio::task::spawn_blocking(move || {
+        let resolved = git::resolve_project(&selected_path)?;
 
-    // Check for existing project at same path
-    if let Some(mut existing) = db.0.project_by_display_path(&resolved.selected_path) {
-        existing.is_expanded = true;
-        existing.updated_at = now_iso8601();
-        db.0.upsert_project(&existing)?;
-        return Ok(existing);
-    }
+        // Check for existing project at same path
+        if let Some(mut existing) = db.project_by_display_path(&resolved.selected_path) {
+            existing.is_expanded = true;
+            existing.updated_at = now_iso8601();
+            db.upsert_project(&existing)?;
+            return Ok(existing);
+        }
 
-    let now = now_iso8601();
-    let project = ProjectRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        display_path: resolved.selected_path,
-        git_root_path: resolved.git_root_path,
-        git_context_subpath: resolved.git_context_subpath,
-        display_name: resolved.display_name,
-        git_remote_owner: resolved.git_remote_owner,
-        is_expanded: true,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-    db.0.upsert_project(&project)?;
-    Ok(project)
+        let now = now_iso8601();
+        let project = ProjectRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            display_path: resolved.selected_path,
+            git_root_path: resolved.git_root_path,
+            git_context_subpath: resolved.git_context_subpath,
+            display_name: resolved.display_name,
+            git_remote_owner: resolved.git_remote_owner,
+            is_expanded: true,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        db.upsert_project(&project)?;
+        Ok(project)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -575,74 +580,92 @@ pub fn read_system_ghostty_config() -> GhosttyConfigSource {
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[tauri::command]
-pub fn read_workspace_text_file(
+pub async fn read_workspace_text_file(
     workspace_root: String,
     relative_path: String,
 ) -> Result<String, String> {
-    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
-    if !path.is_file() {
-        return Err("Not a file".to_string());
-    }
-    let len = path.metadata().map_err(|e| e.to_string())?.len();
-    if len > MAX_TEXT_FILE_BYTES {
-        return Err(format!(
-            "File is too large for the editor (max {} MB)",
-            MAX_TEXT_FILE_BYTES / (1024 * 1024)
-        ));
-    }
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
+        if !path.is_file() {
+            return Err("Not a file".to_string());
+        }
+        let len = path.metadata().map_err(|e| e.to_string())?.len();
+        if len > MAX_TEXT_FILE_BYTES {
+            return Err(format!(
+                "File is too large for the editor (max {} MB)",
+                MAX_TEXT_FILE_BYTES / (1024 * 1024)
+            ));
+        }
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn write_workspace_text_file(
+pub async fn write_workspace_text_file(
     workspace_root: String,
     relative_path: String,
     contents: String,
 ) -> Result<(), String> {
-    let path = resolve_workspace_path(&workspace_root, &relative_path, false)?;
-    if contents.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err("Content is too large to save".to_string());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&path, contents).map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        let path = resolve_workspace_path(&workspace_root, &relative_path, false)?;
+        if contents.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
+            return Err("Content is too large to save".to_string());
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, contents).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn create_workspace_directory(
+pub async fn create_workspace_directory(
     workspace_root: String,
     relative_path: String,
 ) -> Result<(), String> {
-    let dir = resolve_workspace_path(&workspace_root, &relative_path, false)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        let dir = resolve_workspace_path(&workspace_root, &relative_path, false)?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ─── SCM / diff (git in workspace work tree) ───
 
 #[tauri::command]
-pub fn scm_git_diff(
+pub async fn scm_git_diff(
     worktree_path: String,
     relative_path: String,
     staged: bool,
 ) -> Result<git::ScmDiffResult, String> {
-    git::git_file_diff(&worktree_path, &relative_path, staged)
+    tokio::task::spawn_blocking(move || git::git_file_diff(&worktree_path, &relative_path, staged))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// `source`: `"head"` → `HEAD:path`, `"index"` → `:path` (staged blob, stage 0).
 #[tauri::command]
-pub fn scm_read_git_blob(
+pub async fn scm_read_git_blob(
     worktree_path: String,
     relative_path: String,
     source: String,
 ) -> Result<String, String> {
-    git::sanitize_repo_relative_path(&relative_path)?;
-    let spec = match source.as_str() {
-        "head" => format!("HEAD:{relative_path}"),
-        "index" => format!(":{relative_path}"),
-        _ => return Err(r#"Invalid source: use "head" or "index""#.into()),
-    };
-    git::git_read_blob_text(&worktree_path, &spec)
+    tokio::task::spawn_blocking(move || {
+        git::sanitize_repo_relative_path(&relative_path)?;
+        let spec = match source.as_str() {
+            "head" => format!("HEAD:{relative_path}"),
+            "index" => format!(":{relative_path}"),
+            _ => return Err(r#"Invalid source: use "head" or "index""#.into()),
+        };
+        git::git_read_blob_text(&worktree_path, &spec)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -687,93 +710,124 @@ pub async fn scm_path_line_stats_bulk(
 }
 
 #[tauri::command]
-pub fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
-    git::git_add_paths(&worktree_path, &paths)
+pub async fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_add_paths(&worktree_path, &paths))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_stage_all(worktree_path: String) -> Result<(), String> {
-    git::git_add_all(&worktree_path)
+pub async fn scm_stage_all(worktree_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_add_all(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_unstage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
-    git::git_restore_staged_paths(&worktree_path, &paths)
+pub async fn scm_unstage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_restore_staged_paths(&worktree_path, &paths))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_unstage_all(worktree_path: String) -> Result<(), String> {
-    git::git_restore_staged_all(&worktree_path)
+pub async fn scm_unstage_all(worktree_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_restore_staged_all(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_discard_tracked(worktree_path: String, path: String) -> Result<(), String> {
-    git::git_restore_worktree_path(&worktree_path, &path)
+pub async fn scm_discard_tracked(worktree_path: String, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_restore_worktree_path(&worktree_path, &path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_discard_untracked(worktree_path: String, path: String) -> Result<(), String> {
-    git::git_clean_untracked_path(&worktree_path, &path)
+pub async fn scm_discard_untracked(worktree_path: String, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_clean_untracked_path(&worktree_path, &path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn scm_commit(worktree_path: String, message: String) -> Result<(), String> {
-    git::git_commit_message(&worktree_path, &message)
+pub async fn scm_commit(worktree_path: String, message: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::git_commit_message(&worktree_path, &message))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ─── PR + archive commands ───
 
 #[tauri::command]
-pub fn pr_gather_context(
+pub async fn pr_gather_context(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<git::PrContext, String> {
-    let workspace =
-        db.0.load_workspaces(None)
-            .into_iter()
-            .find(|w| w.id == workspace_id)
-            .ok_or("Workspace not found")?;
-    git::gather_pr_context(&workspace.worktree_path)
+    let worktree_path = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?
+        .worktree_path;
+    tokio::task::spawn_blocking(move || git::gather_pr_context(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn header_branch_context(
+pub async fn header_branch_context(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<git::HeaderBranchContext, String> {
-    let workspace =
-        db.0.load_workspaces(None)
-            .into_iter()
-            .find(|w| w.id == workspace_id)
-            .ok_or("Workspace not found")?;
-    let owner =
-        db.0.load_projects()
-            .into_iter()
-            .find(|p| p.id == workspace.project_id)
-            .and_then(|p| p.git_remote_owner)
-            .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
-    git::gather_header_branch_context(&workspace.worktree_path, owner)
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+    let owner = db
+        .0
+        .load_projects()
+        .into_iter()
+        .find(|p| p.id == workspace.project_id)
+        .and_then(|p| p.git_remote_owner)
+        .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
+    let worktree_path = workspace.worktree_path;
+    tokio::task::spawn_blocking(move || {
+        git::gather_header_branch_context(&worktree_path, owner)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn pr_check_status(
+pub async fn pr_check_status(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<Option<git::GhPrInfo>, String> {
-    let workspace =
-        db.0.load_workspaces(None)
-            .into_iter()
-            .find(|w| w.id == workspace_id)
-            .ok_or("Workspace not found")?;
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
     let pr_number = match workspace.pr_number {
         Some(n) => n,
         None => return Ok(None),
     };
-    if !git::gh_cli_available() {
-        return Ok(None);
-    }
-    let info = git::gh_pr_status(&workspace.worktree_path, pr_number)?;
-    Ok(Some(info))
+    let worktree_path = workspace.worktree_path;
+    tokio::task::spawn_blocking(move || {
+        if !git::gh_cli_available() {
+            return Ok(None);
+        }
+        let info = git::gh_pr_status(&worktree_path, pr_number)?;
+        Ok(Some(info))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
