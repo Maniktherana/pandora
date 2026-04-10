@@ -138,6 +138,18 @@ export default function AppHeader({
     }
   }, [branchPickerOpen]);
 
+  const showTargetBranchPicker =
+    !selectedWorkspace ||
+    selectedWorkspace.workspaceKind !== "linked" ||
+    selectedWorkspace.gitBranchName !== "main";
+
+  useEffect(() => {
+    if (!showTargetBranchPicker) {
+      setBranchPickerOpen(false);
+      setBranchSearch("");
+    }
+  }, [showTargetBranchPicker]);
+
   const ownerLabel = useMemo(() => {
     if (branchContext?.owner) return branchContext.owner;
     if (selectedWorkspace?.workspaceKind === "worktree" && selectedWorkspace.gitWorktreeOwner !== "linked") {
@@ -207,71 +219,73 @@ export default function AppHeader({
                   </BreadcrumbPage>
                 </div>
               </BreadcrumbItem>
-              <Fragment key="target-branch">
-                <BreadcrumbSeparator className="text-[var(--theme-text-faint)] ml-1 [&>svg]:text-[var(--theme-text-subtle)]" />
-                <BreadcrumbItem className="min-w-0 max-w-[min(260px,34vw)]">
-                  <DropdownMenu open={branchPickerOpen} onOpenChange={setBranchPickerOpen}>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          className="max-w-full gap-1 rounded-sm py-3 px-1.5 font-normal text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
-                          disabled={branchOptions.length === 0}
-                        />
-                      }
-                      title="Select target branch"
-                      aria-label="Select target branch"
-                    >
-                      <span className="truncate font-mono text-xs">
-                        {formatTargetBranch(activeTargetBranch)}
-                      </span>
-                      <HugeiconsIcon
-                        icon={ArrowDown01Icon}
-                        strokeWidth={1.8}
-                        className="size-3.5 shrink-0"
-                      />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-64 min-w-64 p-0">
-                      <div className="border-b border-[var(--theme-border)] p-1">
-                        <Input
-                          value={branchSearch}
-                          autoFocus
-                          placeholder="Search branches"
-                          onChange={(event) => setBranchSearch(event.target.value)}
-                          onKeyDown={(event) => event.stopPropagation()}
-                          className="h-7 border-[var(--theme-border)] bg-[var(--theme-panel)]"
-                        />
-                      </div>
-                      <div
-                        className="max-h-72 overflow-y-auto overscroll-contain p-1"
-                        onWheelCapture={(event) => event.stopPropagation()}
+              {showTargetBranchPicker ? (
+                <Fragment key="target-branch">
+                  <BreadcrumbSeparator className="text-[var(--theme-text-faint)] ml-1 [&>svg]:text-[var(--theme-text-subtle)]" />
+                  <BreadcrumbItem className="min-w-0 max-w-[min(260px,34vw)]">
+                    <DropdownMenu open={branchPickerOpen} onOpenChange={setBranchPickerOpen}>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            className="max-w-full gap-1 rounded-sm py-3 px-1.5 font-normal text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
+                            disabled={branchOptions.length === 0}
+                          />
+                        }
+                        title="Select target branch"
+                        aria-label="Select target branch"
                       >
-                        {filteredBranchOptions.length > 0 ? (
-                          filteredBranchOptions.map((branch) => (
-                            <DropdownMenuItem
-                              key={branch}
-                              onClick={() => handleSelectTargetBranch(branch)}
-                              className={cn(
-                                "cursor-pointer font-mono text-[11px] hover:bg-accent hover:text-accent-foreground",
-                                branch === activeTargetBranch &&
-                                  "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
-                              )}
-                            >
-                              {branch}
-                            </DropdownMenuItem>
-                          ))
-                        ) : (
-                          <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">
-                            No matching branches
-                          </div>
-                        )}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </BreadcrumbItem>
-              </Fragment>
+                        <span className="truncate font-mono text-xs">
+                          {formatTargetBranch(activeTargetBranch)}
+                        </span>
+                        <HugeiconsIcon
+                          icon={ArrowDown01Icon}
+                          strokeWidth={1.8}
+                          className="size-3.5 shrink-0"
+                        />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-64 min-w-64 p-0">
+                        <div className="border-b border-[var(--theme-border)] p-1">
+                          <Input
+                            value={branchSearch}
+                            autoFocus
+                            placeholder="Search branches"
+                            onChange={(event) => setBranchSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            className="h-7 border-[var(--theme-border)] bg-[var(--theme-panel)]"
+                          />
+                        </div>
+                        <div
+                          className="max-h-72 overflow-y-auto overscroll-contain p-1"
+                          onWheelCapture={(event) => event.stopPropagation()}
+                        >
+                          {filteredBranchOptions.length > 0 ? (
+                            filteredBranchOptions.map((branch) => (
+                              <DropdownMenuItem
+                                key={branch}
+                                onClick={() => handleSelectTargetBranch(branch)}
+                                className={cn(
+                                  "cursor-pointer font-mono text-[11px] hover:bg-accent hover:text-accent-foreground",
+                                  branch === activeTargetBranch &&
+                                    "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
+                                )}
+                              >
+                                {branch}
+                              </DropdownMenuItem>
+                            ))
+                          ) : (
+                            <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">
+                              No matching branches
+                            </div>
+                          )}
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </BreadcrumbItem>
+                </Fragment>
+              ) : null}
             </BreadcrumbList>
           </Breadcrumb>
         </div>
