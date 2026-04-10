@@ -11,8 +11,8 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "desktop:dev": "bun --cwd apps/desktop run tauri dev",
-    "desktop:build": "bun --cwd apps/desktop run tauri build",
+    "desktop:dev": "bun run --filter @pandora/desktop tauri:dev",
+    "desktop:build": "bun run --filter @pandora/desktop tauri:build",
     "daemon:dev": "bun --cwd apps/daemon run dev"
   },
   "devDependencies": {

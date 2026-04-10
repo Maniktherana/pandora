@@ -207,28 +207,12 @@ fn main() {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             ghostty_app::init_ghostty_app(app.handle().clone());
 
-            // Resolve daemon dir relative to repo root
-            let daemon_dir = std::env::current_dir()
-                .unwrap_or_default()
-                .parent()
-                .and_then(|p| p.parent())
-                .map(|p| p.join("daemon"))
-                .unwrap_or_else(|| std::path::PathBuf::from("../../daemon"));
-
             let handle = app.handle().clone();
-            let daemon_state = handle.state::<daemon_bridge::DaemonState>();
 
-            // Store daemon directory for later workspace launches
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("Failed to create tokio runtime");
-
-            let daemon_dir_clone = daemon_dir.clone();
-            let daemon_state_ref = daemon_state.inner();
-            rt.block_on(async {
-                daemon_bridge::set_daemon_dir(daemon_state_ref, daemon_dir_clone).await;
-            });
 
             // PR status polling: check open PRs every 60s for merge/close
             let poll_handle = handle.clone();

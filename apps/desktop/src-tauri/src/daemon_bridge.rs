@@ -1,4 +1,4 @@
-//! Daemon bridge — one Bun `pandorad` process per **runtime** (Unix socket + child).
+//! Daemon bridge — one embedded `pandorad` sidecar process per **runtime** (Unix socket + child).
 //!
 //! - **Workspace runtime** — key = workspace UUID; `workspace_path` is the worktree; used for
 //!   editor + workspace-scoped terminals.
@@ -12,10 +12,10 @@ use crate::surface_registry::SurfaceRegistry;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::ShellExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
@@ -24,21 +24,19 @@ use tokio::time::{sleep, Duration};
 /// Per-workspace runtime: owns the daemon process and socket connection.
 struct WorkspaceRuntime {
     writer: Option<tokio::io::WriteHalf<UnixStream>>,
-    daemon_process: Option<std::process::Child>,
+    daemon_process: Option<CommandChild>,
     connected: bool,
 }
 
 /// Global state managing all workspace runtimes.
 pub struct DaemonState {
     runtimes: Arc<Mutex<HashMap<String, Arc<Mutex<WorkspaceRuntime>>>>>,
-    daemon_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl DaemonState {
     pub fn new() -> Self {
         Self {
             runtimes: Arc::new(Mutex::new(HashMap::new())),
-            daemon_dir: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -115,7 +113,6 @@ fn start_daemon_runtime(
 ) {
     let state = app.state::<DaemonState>();
     let runtimes = state.runtimes.clone();
-    let daemon_dir_lock = state.daemon_dir.clone();
 
     tauri::async_runtime::spawn(async move {
         let existing_runtime = {
@@ -164,36 +161,30 @@ fn start_daemon_runtime(
             map.insert(runtime_id.clone(), runtime.clone());
         }
 
-        // Resolve daemon directory
-        let daemon_dir = {
-            let guard = daemon_dir_lock.lock().await;
-            guard.clone()
-        };
+        let pid = std::process::id();
+        let pandora_home = crate::git::pandora_home();
 
-        // Launch daemon process
-        if let Some(daemon_dir) = daemon_dir {
-            let pid = std::process::id();
-            let pandora_home = crate::git::pandora_home();
-
-            match StdCommand::new("bun")
-                .arg("run")
-                .arg("src/index.ts")
-                .arg(&workspace_path)
-                .arg(&default_cwd)
-                .arg(&runtime_id)
-                .current_dir(&daemon_dir)
+        match app.shell().sidecar("pandorad") {
+            Ok(cmd) => match cmd
+                .args([&workspace_path, &default_cwd, &runtime_id])
                 .env("PANDORA_PARENT_PID", pid.to_string())
                 .env("PANDORA_HOME", &pandora_home)
                 .spawn()
             {
-                Ok(child) => {
-                    eprintln!("Daemon PID {:?} for runtime {}", child.id(), runtime_id);
+                Ok((mut rx, child)) => {
+                    eprintln!("Daemon PID {} for runtime {}", child.pid(), runtime_id);
+                    tauri::async_runtime::spawn(async move {
+                        while rx.recv().await.is_some() {}
+                    });
                     let mut rt = runtime.lock().await;
                     rt.daemon_process = Some(child);
                 }
                 Err(e) => {
-                    eprintln!("Failed to start daemon for {}: {}", runtime_id, e);
+                    eprintln!("Failed to start pandorad sidecar for {}: {}", runtime_id, e);
                 }
+            },
+            Err(e) => {
+                eprintln!("Failed to resolve pandorad sidecar: {}", e);
             }
         }
 
@@ -383,7 +374,7 @@ pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
         let mut rt = runtime.lock().await;
         rt.writer = None;
         rt.connected = false;
-        if let Some(ref mut child) = rt.daemon_process {
+        if let Some(child) = rt.daemon_process.take() {
             let _ = child.kill();
         }
     }
@@ -399,8 +390,3 @@ pub async fn daemon_send(
     send_workspace_message(state.inner(), &workspace_id, &message).await
 }
 
-/// Store the daemon directory for launching.
-pub async fn set_daemon_dir(state: &DaemonState, dir: PathBuf) {
-    let mut guard = state.daemon_dir.lock().await;
-    *guard = Some(dir);
-}
