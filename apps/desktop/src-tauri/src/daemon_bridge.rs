@@ -21,18 +21,14 @@ use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
-/// Per-workspace runtime: owns the daemon process and socket connection.
 struct WorkspaceRuntime {
     writer: Option<tokio::io::WriteHalf<UnixStream>>,
     daemon_process: Option<CommandChild>,
     connected: bool,
 }
 
-/// Global state managing all workspace runtimes.
 pub struct DaemonState {
     runtimes: Arc<Mutex<HashMap<String, Arc<Mutex<WorkspaceRuntime>>>>>,
-    /// One mutex per `runtime_id`: serializes bootstrap so concurrent `start_*_runtime` calls cannot
-    /// each spawn a sidecar and overwrite the same map entry (duplicate PIDs, broken `daemon_send`).
     start_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
@@ -108,7 +104,6 @@ pub async fn send_workspace_message(
     }
 }
 
-/// Launch a daemon for the given **runtime id** (workspace UUID or `project:<id>`).
 fn start_daemon_runtime(
     app: AppHandle,
     runtime_id: String,
@@ -181,7 +176,6 @@ fn start_daemon_runtime(
             }
         }
 
-        // Create runtime entry (second and later callers block on startup_guard until we release it).
         let runtime = Arc::new(Mutex::new(WorkspaceRuntime {
             writer: None,
             daemon_process: None,
@@ -229,11 +223,9 @@ fn start_daemon_runtime(
             return;
         }
 
-        // Connect to socket
         let socket_path = socket_path_for_runtime(&workspace_path, &runtime_id);
 
         loop {
-            // Wait for socket to appear
             let sock = loop {
                 if std::path::Path::new(&socket_path).exists() {
                     match UnixStream::connect(&socket_path).await {
@@ -251,7 +243,6 @@ fn start_daemon_runtime(
                 rt.connected = true;
             }
 
-            // Allow other `start_*_runtime` calls to run: they will see `connected` and replay snapshot.
             let _ = startup_guard.take();
 
             tlog!(
@@ -261,7 +252,6 @@ fn start_daemon_runtime(
                 socket_path
             );
 
-            // Emit connection event scoped to workspace
             let _ = app.emit(
                 "daemon-connection",
                 serde_json::json!({
@@ -390,7 +380,6 @@ fn start_daemon_runtime(
     });
 }
 
-/// Workspace-scoped daemon (worktree path + cwd).
 pub fn start_workspace_runtime(
     app: AppHandle,
     workspace_id: String,
@@ -400,7 +389,6 @@ pub fn start_workspace_runtime(
     start_daemon_runtime(app, workspace_id, workspace_path, default_cwd);
 }
 
-/// Project-scoped daemon: git root as daemon root, default cwd = repo root (shared bottom terminal).
 pub fn start_project_runtime(
     app: AppHandle,
     project_id: String,
@@ -411,7 +399,6 @@ pub fn start_project_runtime(
     start_daemon_runtime(app, runtime_id, git_root_path, default_cwd);
 }
 
-/// Stop a runtime (workspace id or `project:<id>`), killing its daemon process.
 pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
     let mut map = state.runtimes.lock().await;
     if let Some(runtime) = map.remove(workspace_id) {
@@ -426,7 +413,6 @@ pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
     locks.remove(workspace_id);
 }
 
-/// Tauri command: send a message to a specific workspace's daemon.
 #[tauri::command]
 pub async fn daemon_send(
     state: tauri::State<'_, DaemonState>,
