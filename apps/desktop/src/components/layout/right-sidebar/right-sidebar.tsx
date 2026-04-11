@@ -1099,7 +1099,7 @@ export default function RightSidebar({
   }, [closeContextMenu, contextMenu, refreshTree, workspaceRoot]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-[#151515] select-none">
+    <div className="flex h-full min-w-0 flex-col bg-[var(--theme-bg)] select-none">
       {dragSession?.kind === "internal" ? <TreeDragOverlay session={dragSession} /> : null}
 
       {mode === "changes" ? (

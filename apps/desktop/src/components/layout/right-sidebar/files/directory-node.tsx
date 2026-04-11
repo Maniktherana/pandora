@@ -32,15 +32,15 @@ function scmExpandedToneTextClass(
   if (dimmed || tone === "ignored") return "aria-expanded:text-[var(--theme-text-faint)]";
   switch (tone) {
     case "added":
-      return "aria-expanded:text-[#D0FDC6]";
+      return "aria-expanded:text-[var(--theme-scm-added)]";
     case "modified":
-      return "aria-expanded:text-[#F9E38D]";
+      return "aria-expanded:text-[var(--theme-scm-modified)]";
     case "deleted":
-      return "aria-expanded:text-[#D9432A]";
+      return "aria-expanded:text-[var(--theme-scm-deleted)]";
     case "renamed":
-      return "aria-expanded:text-[var(--theme-interactive)]";
+      return "aria-expanded:text-[var(--theme-scm-renamed)]";
     case "conflict":
-      return "aria-expanded:text-[var(--theme-info)]";
+      return "aria-expanded:text-[var(--theme-scm-conflict)]";
     default:
       return "aria-expanded:text-[var(--theme-text-subtle)]";
   }
@@ -168,7 +168,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               className={cn(
                 "group relative w-full justify-start gap-2 rounded-md py-0 pr-2 pl-0 text-left text-xs font-normal transition-none",
                 {
-                  "sticky bg-[#151515] aria-expanded:bg-[#151515] dark:aria-expanded:bg-[#151515]":
+                  "sticky bg-[var(--theme-bg)] aria-expanded:bg-[var(--theme-bg)] dark:aria-expanded:bg-[var(--theme-bg)]":
                     open,
                   "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]":
                     !isStickyActive,

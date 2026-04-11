@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { TerminalThemeColors } from "@/lib/theme";
+import type { TerminalThemeColors, WorkspaceTheme } from "@/lib/theme";
 import { defaultTheme } from "@/lib/theme";
 
 /**
@@ -44,8 +44,6 @@ export function buildGhosttyThemeConfig(theme: TerminalThemeColors): string {
   if (theme.typography?.fontSize) lines.push(`font-size = ${theme.typography.fontSize}`);
   return `${lines.join("\n")}\n`;
 }
-
-const THEME_CONFIG = buildGhosttyThemeConfig(defaultTheme.terminal);
 
 const PALETTE_KEYS: Record<number, keyof TerminalThemeColors> = {
   0: "black",
@@ -113,7 +111,13 @@ export function parseGhosttyTheme(config: string): TerminalThemeColors {
   return theme;
 }
 
-export const terminalTheme: TerminalThemeColors = parseGhosttyTheme(THEME_CONFIG);
+/** Parsed Ghostty palette from a workspace pack’s `terminal.json` (for programmatic use). */
+export function terminalThemeFromWorkspace(theme: WorkspaceTheme): TerminalThemeColors {
+  return parseGhosttyTheme(buildGhosttyThemeConfig(theme.terminal));
+}
+
+/** Default workspace terminal colors (module load); prefer `var(--theme-terminal-bg)` in UI when possible. */
+export const terminalTheme: TerminalThemeColors = terminalThemeFromWorkspace(defaultTheme);
 
 export function readSystemGhosttyConfigSource(): Promise<GhosttyConfigSource> {
   return invoke<GhosttyConfigSource>("read_system_ghostty_config");

@@ -1,149 +1,95 @@
 import type { CSSProperties } from "react";
 import type { editor } from "monaco-editor";
+import { hexRgbAa, mixHex } from "./theme-color-utils";
+import type {
+  CodeEditorTheme,
+  ReactUiTheme,
+  ScmUiTheme,
+  WorkspaceTheme,
+} from "./theme.types";
 
-export type ThemeMode = "light" | "dark";
+export function deriveChromeTiers(ui: Pick<ReactUiTheme, "background" | "text" | "border">) {
+  const { background: bg, text, border } = ui;
+  return {
+    borderSubtle: mixHex(border, bg, 0.53),
+    textMuted: mixHex(text, bg, 0.42),
+    textSubtle: mixHex(text, bg, 0.644),
+    textFaint: mixHex(text, bg, 0.273),
+  };
+}
 
-export type CodeEditorTheme = {
-  typography: {
-    fontFamily: string;
-    fontSize: number;
-    lineHeight: number;
+export function defaultScmTheme(
+  ui: Pick<ReactUiTheme, "interactive" | "info">,
+): ScmUiTheme {
+  return {
+    added: "#D0FDC6",
+    modified: "#F9E38D",
+    deleted: "#D9432A",
+    renamed: ui.interactive,
+    conflict: ui.info,
   };
-  surface: {
-    base: string;
-    chrome: string;
-    hover: string;
-    separator: string;
-  };
-  text: {
-    primary: string;
-    muted: string;
-    subtle: string;
-    faint: string;
-    lineNumber: string;
-  };
-  accent: {
-    selection: string;
-    selectionInactive: string;
-  };
-  diff: {
-    add: {
-      base: string;
-      fill: string;
-      fillStrong: string;
-    };
-    delete: {
-      base: string;
-      fill: string;
-      fillStrong: string;
-    };
-    modified: {
-      base: string;
-      fill: string;
-    };
-  };
-  gutter: {
-    bar: {
-      add: string;
-      delete: string;
-      modified: string;
-    };
-  };
-  syntax: {
-    comment: string;
-    keyword: string;
-    string: string;
-    primitive: string;
-    property: string;
-    type: string;
-    constant: string;
-    operator: string;
-    punctuation: string;
-    variable: string;
-  };
-  cursor: string;
-  scrollbar: string;
-  scrollbarHover: string;
-};
+}
 
-export type ReactUiTheme = {
-  typography: {
-    sans: string;
-    mono: string;
-  };
-  background: string;
-  panel: string;
-  panelElevated: string;
-  panelHover: string;
-  panelInteractive: string;
-  border: string;
-  borderSubtle: string;
-  text: string;
-  textMuted: string;
-  textSubtle: string;
-  textFaint: string;
-  primary: string;
-  success: string;
-  successBg: string;
-  warning: string;
-  error: string;
-  errorBg: string;
-  info: string;
-  interactive: string;
-  diffAdd: string;
-  diffDelete: string;
-  syntaxComment: string;
-  syntaxKeyword: string;
-  syntaxString: string;
-  syntaxPrimitive: string;
-  syntaxProperty: string;
-  syntaxType: string;
-  syntaxConstant: string;
-  cursor: string;
-  selection: string;
-  selectionInactive: string;
-  currentLine: string;
-  scrollbar: string;
-  scrollbarHover: string;
-};
+export function mergeScmTheme(
+  ui: Pick<ReactUiTheme, "interactive" | "info">,
+  partial?: Partial<ScmUiTheme>,
+): ScmUiTheme {
+  return { ...defaultScmTheme(ui), ...partial };
+}
 
-export type TerminalThemeColors = {
-  typography?: {
-    fontFamily?: string;
-    fontSize?: number;
-  };
-  black?: string;
-  red?: string;
-  green?: string;
-  yellow?: string;
-  blue?: string;
-  magenta?: string;
-  cyan?: string;
-  white?: string;
-  brightBlack?: string;
-  brightRed?: string;
-  brightGreen?: string;
-  brightYellow?: string;
-  brightBlue?: string;
-  brightMagenta?: string;
-  brightCyan?: string;
-  brightWhite?: string;
-  background?: string;
-  foreground?: string;
-  cursor?: string;
-  cursorAccent?: string;
-  selectionBackground?: string;
-  selectionForeground?: string;
-};
+/** Slightly lift `panel` toward white for elevated surfaces (OC-2–tuned weight). */
+export function derivePanelElevated(panel: string): string {
+  return mixHex("#ffffff", panel, 0.034);
+}
 
-export type WorkspaceTheme = {
-  id: string;
-  name: string;
-  mode: ThemeMode;
-  ui: ReactUiTheme;
-  codeEditor: CodeEditorTheme;
-  terminal: TerminalThemeColors;
-};
+/** De-emphasis ramp for the editor from `primary` over `surfaceBase` (matches OC-2 literals). */
+export function deriveCodeEditorTextTiers(surfaceBase: string, primary: string) {
+  return {
+    muted: mixHex(primary, surfaceBase, 0.644),
+    subtle: mixHex(primary, surfaceBase, 0.421),
+    faint: mixHex(primary, surfaceBase, 0.273),
+    lineNumber: mixHex(primary, surfaceBase, 0.329),
+  };
+}
+
+/** shadcn semantic tokens on `:root`; values reference `--theme-*` set alongside them. */
+export function getShadcnRootCssVariables(): Record<string, string> {
+  return {
+    "--background": "var(--theme-bg, #1c1c1c)",
+    "--foreground": "var(--theme-text, #ededed)",
+    "--card": "var(--theme-panel, #232323)",
+    "--card-foreground": "var(--theme-text, #ededed)",
+    "--popover": "var(--theme-panel-elevated, #282828)",
+    "--popover-foreground": "var(--theme-text, #ededed)",
+    "--primary": "var(--theme-primary, #fab283)",
+    "--primary-foreground": "#171311",
+    "--secondary": "var(--theme-panel, #232323)",
+    "--secondary-foreground": "var(--theme-text, #ededed)",
+    "--muted": "var(--theme-panel, #232323)",
+    "--muted-foreground": "var(--theme-text-muted, #a0a0a0)",
+    "--accent": "var(--theme-panel-elevated, #282828)",
+    "--accent-foreground": "var(--theme-text, #ededed)",
+    "--destructive": "var(--theme-error, #fc533a)",
+    "--destructive-foreground": "var(--theme-text, #ededed)",
+    "--border": "var(--theme-border, #282828)",
+    "--input": "var(--theme-panel, #232323)",
+    "--ring": "var(--theme-interactive, #034cff)",
+    "--chart-1": "var(--theme-primary, #fab283)",
+    "--chart-2": "var(--theme-info, #edb2f1)",
+    "--chart-3": "var(--theme-warning, #fcd53a)",
+    "--chart-4": "var(--theme-success, #12c905)",
+    "--chart-5": "var(--theme-interactive, #034cff)",
+    "--radius": "0.625rem",
+    "--sidebar": "var(--theme-panel, #232323)",
+    "--sidebar-foreground": "var(--theme-text, #ededed)",
+    "--sidebar-primary": "var(--theme-primary, #fab283)",
+    "--sidebar-primary-foreground": "#171311",
+    "--sidebar-accent": "var(--theme-panel-elevated, #282828)",
+    "--sidebar-accent-foreground": "var(--theme-text, #ededed)",
+    "--sidebar-border": "var(--theme-border, #282828)",
+    "--sidebar-ring": "var(--theme-interactive, #034cff)",
+  };
+}
 
 export function getThemeCssVariables(theme: WorkspaceTheme): Record<string, string> {
   const ui = theme.ui;
@@ -179,10 +125,17 @@ export function getThemeCssVariables(theme: WorkspaceTheme): Record<string, stri
     "--theme-interactive": ui.interactive,
     "--theme-diff-add": ui.diffAdd,
     "--theme-diff-delete": ui.diffDelete,
+    "--theme-scm-added": ui.scm.added,
+    "--theme-scm-modified": ui.scm.modified,
+    "--theme-scm-deleted": ui.scm.deleted,
+    "--theme-scm-renamed": ui.scm.renamed,
+    "--theme-scm-conflict": ui.scm.conflict,
     "--theme-selection": ui.selection,
     "--theme-selection-inactive": ui.selectionInactive,
     "--theme-scrollbar": ui.scrollbar,
     "--theme-scrollbar-hover": ui.scrollbarHover,
+    "--theme-terminal-bg": theme.terminal.background ?? ui.background,
+    "--theme-terminal-fg": theme.terminal.foreground ?? ui.text,
     "--theme-code-surface-base": tokens.surface.base,
     "--theme-code-surface-chrome": tokens.surface.chrome,
     "--theme-code-surface-hover": tokens.surface.hover,
@@ -214,6 +167,16 @@ export function getThemeCssVariables(theme: WorkspaceTheme): Record<string, stri
     "--theme-syntax-punctuation": tokens.syntax.punctuation,
     "--theme-syntax-variable": tokens.syntax.variable,
   };
+}
+
+/** Full `:root { … }` block for static CSS (default theme); keep in sync via `generate:theme-css`. */
+export function getDocumentStaticThemeCss(theme: WorkspaceTheme): string {
+  const merged = { ...getThemeCssVariables(theme), ...getShadcnRootCssVariables() };
+  const lines = Object.entries(merged)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `  ${key}: ${value};`);
+  const body = lines.join("\n");
+  return `:root {\n${body}\n}`;
 }
 
 export function applyTheme(theme: WorkspaceTheme) {
@@ -348,14 +311,14 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
       "editorLineNumber.activeForeground": tokens.text.muted,
       "editor.selectionBackground": tokens.accent.selection,
       "editor.inactiveSelectionBackground": tokens.accent.selectionInactive,
-      "editor.selectionHighlightBackground": "#034CFF33",
-      "editor.findMatchBackground": "#FCD53A44",
-      "editor.findMatchHighlightBackground": "#FCD53A22",
-      "editor.wordHighlightBackground": "#FAB2831E",
-      "editor.wordHighlightStrongBackground": "#FAB28330",
+      "editor.selectionHighlightBackground": hexRgbAa(theme.ui.interactive, 0.2),
+      "editor.findMatchBackground": hexRgbAa(theme.ui.warning, 0.27),
+      "editor.findMatchHighlightBackground": hexRgbAa(theme.ui.warning, 0.13),
+      "editor.wordHighlightBackground": hexRgbAa(theme.ui.primary, 0.12),
+      "editor.wordHighlightStrongBackground": hexRgbAa(theme.ui.primary, 0.19),
       "editorIndentGuide.background1": tokens.surface.separator,
       "editorIndentGuide.activeBackground1": tokens.text.subtle,
-      "editorWhitespace.foreground": "#50505088",
+      "editorWhitespace.foreground": hexRgbAa(tokens.text.faint, 0.53),
       "editorGutter.background": tokens.surface.base,
       "editorGutter.addedBackground": tokens.gutter.bar.add,
       "editorGutter.modifiedBackground": tokens.gutter.bar.modified,
@@ -363,17 +326,17 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
       "editorWidget.background": theme.ui.panelElevated,
       "editorWidget.border": tokens.surface.separator,
       "editorOverviewRuler.border": "#00000000",
-      "editorOverviewRuler.addedForeground": "#B8DB8799",
-      "editorOverviewRuler.modifiedForeground": "#F5A74299",
-      "editorOverviewRuler.deletedForeground": "#E26A7599",
+      "editorOverviewRuler.addedForeground": hexRgbAa(tokens.diff.add.base, 0.6),
+      "editorOverviewRuler.modifiedForeground": hexRgbAa(tokens.diff.modified.base, 0.6),
+      "editorOverviewRuler.deletedForeground": hexRgbAa(tokens.diff.delete.base, 0.6),
       "minimap.background": tokens.surface.base,
-      "minimap.selectionHighlight": "#034CFF44",
-      "minimap.findMatchHighlight": "#FCD53A44",
-      "minimap.errorHighlight": "#FC533A66",
+      "minimap.selectionHighlight": hexRgbAa(theme.ui.interactive, 0.27),
+      "minimap.findMatchHighlight": hexRgbAa(theme.ui.warning, 0.27),
+      "minimap.errorHighlight": hexRgbAa(theme.ui.error, 0.4),
       "scrollbar.shadow": "#00000000",
-      "scrollbarSlider.background": "#50505055",
-      "scrollbarSlider.hoverBackground": "#70707088",
-      "scrollbarSlider.activeBackground": "#A0A0A088",
+      "scrollbarSlider.background": hexRgbAa(tokens.scrollbar, 0.33),
+      "scrollbarSlider.hoverBackground": hexRgbAa(tokens.scrollbarHover, 0.53),
+      "scrollbarSlider.activeBackground": hexRgbAa(tokens.text.subtle, 0.53),
       "diffEditor.insertedTextBackground": tokens.diff.add.fillStrong,
       "diffEditor.removedTextBackground": tokens.diff.delete.fillStrong,
       "diffEditor.insertedLineBackground": tokens.diff.add.fill,
@@ -381,8 +344,8 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
       "diffEditor.diagonalFill": tokens.surface.chrome,
       "diffEditorGutter.insertedLineBackground": tokens.gutter.bar.add,
       "diffEditorGutter.removedLineBackground": tokens.gutter.bar.delete,
-      "diffEditorOverview.insertedForeground": "#B8DB8788",
-      "diffEditorOverview.removedForeground": "#E26A7588",
+      "diffEditorOverview.insertedForeground": hexRgbAa(tokens.diff.add.base, 0.53),
+      "diffEditorOverview.removedForeground": hexRgbAa(tokens.diff.delete.base, 0.53),
       "list.activeSelectionBackground": tokens.accent.selection,
       "list.activeSelectionForeground": tokens.text.primary,
       "list.hoverBackground": theme.ui.panelHover,
@@ -393,7 +356,7 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
       "input.foreground": tokens.text.primary,
       "input.border": tokens.surface.separator,
       "inputOption.activeBorder": theme.ui.interactive,
-      "inputOption.activeBackground": "#034CFF22",
+      "inputOption.activeBackground": hexRgbAa(theme.ui.interactive, 0.13),
       "dropdown.background": theme.ui.panelElevated,
       "dropdown.foreground": tokens.text.primary,
       "dropdown.border": tokens.surface.separator,

@@ -20,7 +20,6 @@ import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
-import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import DotGridLoader from "@/components/dot-grid-loader";
 import ProjectTerminalSidebar from "./project-terminal-sidebar";
 import { ProjectTerminalAnchorInfo } from "../project-terminal.types";
@@ -129,7 +128,7 @@ function TerminalPane({
         "relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950",
         { "ring-1 ring-neutral-700/60": active },
       )}
-      style={{ background: terminalTheme.background ?? "#0a0a0a" }}
+      style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
       onPointerDownCapture={() => {
         if (visible) projectTerminalCommands.focusProjectTerminal(workspaceId, slot?.id ?? null);
       }}

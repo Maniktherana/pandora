@@ -543,8 +543,8 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
                           className="shrink-0"
                         />
                       ) : null}
-                      <span className="shrink-0 text-[#D0FDC6]">+{stats?.added ?? 0}</span>
-                      <span className="shrink-0 text-[#D9432A]">-{stats?.removed ?? 0}</span>
+                      <span className="shrink-0 text-[var(--theme-scm-added)]">+{stats?.added ?? 0}</span>
+                      <span className="shrink-0 text-[var(--theme-scm-deleted)]">-{stats?.removed ?? 0}</span>
                     </div>
                     <Button
                       type="button"

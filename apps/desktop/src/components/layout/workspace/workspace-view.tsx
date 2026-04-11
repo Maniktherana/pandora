@@ -25,7 +25,6 @@ import { tabKey } from "@/components/layout/workspace/layout-tree";
 import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import type { SessionState } from "@/lib/shared/types";
 import { panelResizeHandleClasses } from "@/lib/shared/utils";
-import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import { RotateCcw, Trash2 } from "lucide-react";
 import DotGridLoader from "@/components/dot-grid-loader";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
@@ -207,7 +206,7 @@ function PaneView({
       <div
         className="flex-1 min-h-0 relative"
         style={{
-          background: terminalTheme.background ?? "#0a0a0a",
+          background: "var(--theme-terminal-bg, var(--theme-bg))",
           pointerEvents: isResizing ? "none" : undefined,
         }}
         onPointerDownCapture={handlePanePointerDownCapture}

@@ -2,39 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "./theme-root.generated.css";
 
 @custom-variant dark (&:is(.dark *));
 
-@theme {
-  --color-background: var(--theme-bg);
-  --color-foreground: var(--theme-text);
-  --color-card: var(--theme-panel);
-  --color-card-foreground: var(--theme-text);
-  --color-popover: var(--theme-panel-elevated);
-  --color-popover-foreground: var(--theme-text);
-  --color-primary: var(--theme-primary);
-  --color-primary-foreground: #171311;
-  --color-secondary: var(--theme-panel);
-  --color-secondary-foreground: var(--theme-text);
-  --color-muted: var(--theme-panel);
-  --color-muted-foreground: var(--theme-text-muted);
-  --color-accent: var(--theme-panel-elevated);
-  --color-accent-foreground: var(--theme-text);
-  --color-destructive: var(--theme-error);
-  --color-destructive-foreground: var(--theme-text);
-  --color-border: var(--theme-border);
-  --color-input: var(--theme-panel);
-  --color-ring: var(--theme-interactive);
-  --radius: 0.5rem;
-  --color-sidebar-background: var(--theme-panel);
-  --color-sidebar-foreground: var(--theme-text);
-  --color-sidebar-primary: var(--theme-primary);
-  --color-sidebar-primary-foreground: #171311;
-  --color-sidebar-accent: var(--theme-panel-elevated);
-  --color-sidebar-accent-foreground: var(--theme-text);
-  --color-sidebar-border: var(--theme-border);
-  --color-sidebar-ring: var(--theme-interactive);
-}
+/* Tailwind semantic colors: single projection via shadcn tokens in :root (see @theme inline). */
 
 /* Do not set a solid body background here: unlayered rules beat @layer base and would
    paint opaque #0a0a0a over the transparent Tauri window (sidebar stays black). */
@@ -104,6 +76,7 @@ body {
   --font-heading: var(--font-sans);
   --font-sans: var(--theme-font-sans);
   --font-mono: var(--theme-font-mono);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -142,105 +115,6 @@ body {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-}
-
-:root {
-  /* Generic theme variables must always exist for Tailwind/shadcn + direct var() usage. */
-  --theme-font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --theme-font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --theme-font-editor:
-    ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --theme-font-editor-size: 13px;
-  --theme-font-editor-line-height: 24px;
-  --theme-font-terminal: "JetBrains Mono";
-  --theme-font-terminal-size: 13px;
-  --theme-bg: #151515;
-  --theme-panel: #121212;
-  --theme-panel-elevated: #1a1a1a;
-  --theme-panel-hover: #ffffff0d;
-  --theme-panel-interactive: #0d172b;
-  --theme-border: #242424;
-  --theme-border-subtle: #1d1d1d;
-  --theme-text: #ededed;
-  --theme-text-muted: #707070;
-  --theme-text-subtle: #a0a0a0;
-  --theme-text-faint: #505050;
-  --theme-primary: #fab283;
-  --theme-success: #12c905;
-  --theme-success-bg: #022b00;
-  --theme-warning: #fcd53a;
-  --theme-error: #fc533a;
-  --theme-error-bg: #1f0603;
-  --theme-info: #edb2f1;
-  --theme-interactive: #034cff;
-  --theme-diff-add: #b8db87;
-  --theme-diff-delete: #e26a75;
-  --theme-selection: #0d172b;
-  --theme-selection-inactive: #2a2a2a;
-  --theme-scrollbar: #505050;
-  --theme-scrollbar-hover: #707070;
-  --theme-code-surface-base: #151515;
-  --theme-code-surface-chrome: #121212;
-  --theme-code-surface-hover: #1b1b1b;
-  --theme-code-surface-separator: #242424;
-  --theme-code-text-primary: #ededed;
-  --theme-code-text-muted: #a0a0a0;
-  --theme-code-text-line-number: #5c5c5c;
-  --theme-code-selection: #0d172b;
-  --theme-code-selection-inactive: #2a2a2a;
-  --theme-code-diff-add-base: #b8db87;
-  --theme-code-diff-add-fill: rgb(184 219 135 / 0.12);
-  --theme-code-diff-add-fill-strong: rgb(184 219 135 / 0.2);
-  --theme-code-diff-delete-base: #e26a75;
-  --theme-code-diff-delete-fill: rgb(226 106 117 / 0.12);
-  --theme-code-diff-delete-fill-strong: rgb(226 106 117 / 0.2);
-  --theme-code-diff-modified-base: #f5a742;
-  --theme-code-diff-modified-fill: rgb(245 167 66 / 0.14);
-  --theme-code-gutter-add: #b8db87;
-  --theme-code-gutter-delete: #e26a75;
-  --theme-code-gutter-modified: #f5a742;
-  --theme-syntax-comment: #8f8f8f;
-  --theme-syntax-keyword: #edb2f1;
-  --theme-syntax-string: #00ceb9;
-  --theme-syntax-primitive: #8cb0ff;
-  --theme-syntax-property: #fab283;
-  --theme-syntax-type: #fcd53a;
-  --theme-syntax-constant: #93e9f6;
-  --theme-syntax-operator: #56b6c2;
-  --theme-syntax-punctuation: #ededed;
-  --theme-syntax-variable: #ededed;
-  --background: var(--theme-bg, #1c1c1c);
-  --foreground: var(--theme-text, #ededed);
-  --card: var(--theme-panel, #232323);
-  --card-foreground: var(--theme-text, #ededed);
-  --popover: var(--theme-panel-elevated, #282828);
-  --popover-foreground: var(--theme-text, #ededed);
-  --primary: var(--theme-primary, #fab283);
-  --primary-foreground: #171311;
-  --secondary: var(--theme-panel, #232323);
-  --secondary-foreground: var(--theme-text, #ededed);
-  --muted: var(--theme-panel, #232323);
-  --muted-foreground: var(--theme-text-muted, #a0a0a0);
-  --accent: var(--theme-panel-elevated, #282828);
-  --accent-foreground: var(--theme-text, #ededed);
-  --destructive: var(--theme-error, #fc533a);
-  --border: var(--theme-border, #282828);
-  --input: var(--theme-panel, #232323);
-  --ring: var(--theme-interactive, #034cff);
-  --chart-1: var(--theme-primary, #fab283);
-  --chart-2: var(--theme-info, #edb2f1);
-  --chart-3: var(--theme-warning, #fcd53a);
-  --chart-4: var(--theme-success, #12c905);
-  --chart-5: var(--theme-interactive, #034cff);
-  --radius: 0.625rem;
-  --sidebar: var(--theme-panel, #232323);
-  --sidebar-foreground: var(--theme-text, #ededed);
-  --sidebar-primary: var(--theme-primary, #fab283);
-  --sidebar-primary-foreground: #171311;
-  --sidebar-accent: var(--theme-panel-elevated, #282828);
-  --sidebar-accent-foreground: var(--theme-text, #ededed);
-  --sidebar-border: var(--theme-border, #282828);
-  --sidebar-ring: var(--theme-interactive, #034cff);
 }
 
 @layer base {

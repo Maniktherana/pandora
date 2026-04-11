@@ -54,7 +54,7 @@ export function StagedChangesSection({
           <Button
             variant="ghost"
             size="sm"
-            className="group sticky w-full justify-start gap-1 rounded-none border-0 bg-[#151515] bg-clip-border py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-[#151515] aria-expanded:text-[var(--theme-text-muted)]"
+            className="group sticky w-full justify-start gap-1 rounded-none border-0 bg-[var(--theme-bg)] bg-clip-border py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-[var(--theme-bg)] aria-expanded:text-[var(--theme-text-muted)]"
             style={{
               top: stickyTop,
               zIndex: stickyZIndex,

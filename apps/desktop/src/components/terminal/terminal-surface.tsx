@@ -2,7 +2,6 @@ import { Effect } from "effect";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
-import { terminalTheme } from "@/lib/terminal/terminal-theme";
 
 export interface TerminalSurfaceProps {
   sessionID: string;
@@ -88,7 +87,7 @@ export default function TerminalSurface({
   return (
     <div
       className="relative h-full w-full overflow-hidden"
-      style={{ background: terminalTheme.background ?? "#0a0a0a" }}
+      style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
     >
       <div
         ref={containerRef}

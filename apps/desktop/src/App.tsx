@@ -19,7 +19,9 @@ import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-pr
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useBootstrapDesktop, useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
 import { useSettingsStore, getFontFamily, getMonoFont, getTerminalFont } from "@/state/settings-store";
-import { applyTheme, themes } from "@/lib/theme";
+import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
+import { applyTheme, defaultTheme, themes } from "@/lib/theme";
+import { loader } from "@monaco-editor/react";
 import { Effect } from "effect";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
@@ -48,10 +50,13 @@ export default function App() {
   useBootstrapDesktop();
   useNativeTerminalOverlay(settingsOpen ? "opaque" : isResizingPanels ? "semi-transparent" : null);
 
-  // Apply stored theme and fonts on mount and when they change
+  // Document CSS theme + Monaco editor theme when the workspace theme changes
   useEffect(() => {
-    const theme = themes.find((t) => t.id === selectedThemeId);
-    if (theme) applyTheme(theme);
+    const workspaceTheme = themes.find((t) => t.id === selectedThemeId) ?? defaultTheme;
+    applyTheme(workspaceTheme);
+    void loader.init().then((monaco) => {
+      registerPandoraMonacoTheme(monaco, workspaceTheme);
+    });
   }, [selectedThemeId]);
 
   useEffect(() => {
@@ -252,7 +257,9 @@ export default function App() {
         </div>
       )}
 
-      <div className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen ? "bg-transparent" : "bg-[#151515]"}`}>
+      <div
+        className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen ? "bg-transparent" : "bg-[var(--theme-bg)]"}`}
+      >
         {settingsOpen ? (
           <ErrorBoundary name="settings">
             <SettingsPanel

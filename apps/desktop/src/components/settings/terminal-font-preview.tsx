@@ -4,7 +4,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useRuntimeState } from "@/hooks/use-desktop-view";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import DotGridLoader from "@/components/dot-grid-loader";
-import { terminalTheme } from "@/lib/terminal/terminal-theme";
 import {
   SETTINGS_PREVIEW_NAME,
   SETTINGS_PREVIEW_SESSION_DEF_ID_PREFIX,
@@ -283,7 +282,7 @@ export default function TerminalFontPreview({
     return (
       <div
         className={`flex ${SETTINGS_PREVIEW_HEIGHT_CLASS} w-full items-center justify-center rounded-lg border border-[var(--theme-border)] text-xs text-[var(--theme-text-faint)]`}
-        style={{ background: terminalTheme.background ?? "#0a0a0a" }}
+        style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
       >
         Terminal preview unavailable
       </div>
@@ -294,7 +293,7 @@ export default function TerminalFontPreview({
     return (
       <div
         className={`flex ${SETTINGS_PREVIEW_HEIGHT_CLASS} w-full items-center justify-center rounded-lg border border-[var(--theme-border)]`}
-        style={{ background: terminalTheme.background ?? "#0a0a0a" }}
+        style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
       >
         <DotGridLoader variant="default" gridSize={5} sizeClassName="h-6 w-6" className="opacity-60" />
       </div>

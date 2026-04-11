@@ -95,7 +95,7 @@ export default function SettingsPanel({
       </div>
 
       {/* Main Content — centered */}
-      <div className="flex-1 overflow-y-auto bg-[#151515]">
+      <div className="flex-1 overflow-y-auto bg-[var(--theme-bg)]">
         <div className="h-10 shrink-0" data-tauri-drag-region />
         <div className="mx-auto w-full max-w-2xl px-8 pb-16">
           {activeTab === "appearance" && (

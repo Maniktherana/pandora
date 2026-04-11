@@ -55,25 +55,19 @@ export function scmPathLineStatsBulk(
   });
 }
 
-export const SCM_TONE_HEX = {
-  added: "#D0FDC6",
-  modified: "#F9E38D",
-  deleted: "#D9432A",
-} as const;
-
 export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
   if (dimmed || tone === "ignored") return "text-[var(--theme-text-faint)]";
   switch (tone) {
     case "added":
-      return "text-[#D0FDC6]";
+      return "text-[var(--theme-scm-added)]";
     case "modified":
-      return "text-[#F9E38D]";
+      return "text-[var(--theme-scm-modified)]";
     case "deleted":
-      return "text-[#D9432A]";
+      return "text-[var(--theme-scm-deleted)]";
     case "renamed":
-      return "text-[var(--theme-interactive)]";
+      return "text-[var(--theme-scm-renamed)]";
     case "conflict":
-      return "text-[var(--theme-info)]";
+      return "text-[var(--theme-scm-conflict)]";
     default:
       return "text-[var(--theme-text-subtle)]";
   }
