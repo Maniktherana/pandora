@@ -302,96 +302,93 @@ export default function App() {
             />
 
             <div className="flex-1 min-h-0 flex flex-col">
-              {(
-                <TabDragProvider>
-                  <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
-                    <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
-                      <div
-                        ref={workspaceFileTreeSplitRef}
-                        className="h-full min-h-0 min-w-0 w-full"
-                      >
-                        <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-                          <ResizablePanel defaultSize={72} minSize={45}>
-                            <div
-                              className="h-full min-h-0 min-w-0"
-                              data-workspace-drop-root="true"
-                              data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
-                              onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
-                            >
-                              <ErrorBoundary name="workspace">
-                                <div className="relative h-full min-h-0">
-                                  <WorkspaceView />
-                                </div>
-                              </ErrorBoundary>
-                            </div>
-                          </ResizablePanel>
-                          <TerminalResizeHandle
-                            direction="horizontal"
-                            onDragging={setIsResizingPanels}
-                            className={fileTreeOpen && selectedWsStatus === "ready" ? "z-20" : "hidden"}
-                          />
-                          <ResizablePanel
-                            ref={fileTreePanelRef}
-                            collapsible
-                            collapsedSize={0}
-                            defaultSize={
-                              fileTreeOpen && selectedWsStatus === "ready"
-                                ? resolveFileTreePanelPercent()
-                                : 0
-                            }
-                            minSize={12}
-                            maxSize={55}
-                            className="min-h-0 min-w-0"
+              <TabDragProvider>
+                <div
+                  ref={workspaceFileTreeSplitRef}
+                  className="h-full min-h-0 min-w-0 w-full"
+                >
+                  <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                    <ResizablePanel defaultSize={72} minSize={45} className="min-h-0 min-w-0">
+                      <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
+                        <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
+                          <div
+                            className="h-full min-h-0 min-w-0"
+                            data-workspace-drop-root="true"
+                            data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
+                            onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
                           >
-                            <div
-                              className="h-full min-h-0 min-w-0"
-                              onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                            <ErrorBoundary name="workspace">
+                              <div className="relative h-full min-h-0">
+                                <WorkspaceView />
+                              </div>
+                            </ErrorBoundary>
+                          </div>
+                        </ResizablePanel>
+                        {selectedWs?.status === "ready" && (
+                          <>
+                            <TerminalResizeHandle
+                              direction="vertical"
+                              onDragging={setIsResizingPanels}
+                              className={bottomPanelOpen ? "z-20" : "hidden"}
+                            />
+                            <ResizablePanel
+                              ref={bottomPanelRef}
+                              collapsible
+                              collapsedSize={0}
+                              defaultSize={bottomPanelOpen ? 28 : 0}
+                              minSize={12}
+                              maxSize={55}
+                              className="min-h-0"
                             >
-                              <ErrorBoundary name="file-tree">
-                                {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (
-                                  <RightSidebar
-                                    key={selectedWs.id}
-                                    workspaceRoot={selectedWs.worktreePath}
-                                    workspaceId={selectedWs.id}
-                                    workspaceName={selectedWs.name}
-                                    projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
-                                    mode={rightSidebarMode}
-                                  />
+                              <ErrorBoundary name="bottom-panel">
+                                {bottomPanelOpen ? (
+                                  <BottomPanel onCollapse={() => setBottomPanelOpen(false)} />
                                 ) : null}
                               </ErrorBoundary>
-                            </div>
-                          </ResizablePanel>
-                        </ResizablePanelGroup>
+                            </ResizablePanel>
+                          </>
+                        )}
+                      </ResizablePanelGroup>
+                    </ResizablePanel>
+                    <TerminalResizeHandle
+                      direction="horizontal"
+                      onDragging={setIsResizingPanels}
+                      className={fileTreeOpen && selectedWsStatus === "ready" ? "z-20" : "hidden"}
+                    />
+                    <ResizablePanel
+                      ref={fileTreePanelRef}
+                      collapsible
+                      collapsedSize={0}
+                      defaultSize={
+                        fileTreeOpen && selectedWsStatus === "ready"
+                          ? resolveFileTreePanelPercent()
+                          : 0
+                      }
+                      minSize={12}
+                      maxSize={55}
+                      className="min-h-0 min-w-0"
+                    >
+                      <div
+                        className="h-full min-h-0 min-w-0"
+                        onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                      >
+                        <ErrorBoundary name="file-tree">
+                          {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (
+                            <RightSidebar
+                              key={selectedWs.id}
+                              workspaceRoot={selectedWs.worktreePath}
+                              workspaceId={selectedWs.id}
+                              workspaceName={selectedWs.name}
+                              projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
+                              mode={rightSidebarMode}
+                            />
+                          ) : null}
+                        </ErrorBoundary>
                       </div>
                     </ResizablePanel>
-
-              {selectedWs?.status === "ready" && (
-                <>
-                  <TerminalResizeHandle
-                    direction="vertical"
-                    onDragging={setIsResizingPanels}
-                    className={bottomPanelOpen ? "z-20" : "hidden"}
-                  />
-                  <ResizablePanel
-                    ref={bottomPanelRef}
-                    collapsible
-                    collapsedSize={0}
-                    defaultSize={bottomPanelOpen ? 28 : 0}
-                    minSize={12}
-                    maxSize={55}
-                    className="min-h-0"
-                  >
-                    <ErrorBoundary name="bottom-panel">
-                      {bottomPanelOpen ? (
-                        <BottomPanel onCollapse={() => setBottomPanelOpen(false)} />
-                      ) : null}
-                    </ErrorBoundary>
-                  </ResizablePanel>
-                </>
-              )}
                   </ResizablePanelGroup>
-                </TabDragProvider>
-              )}
+                </div>
+              </TabDragProvider>
             </div>
           </>
         )}

@@ -22,15 +22,6 @@ export function BottomPanelHeader({
 }: BottomPanelHeaderProps) {
   return (
     <div className="relative z-20 flex h-8 shrink-0 items-stretch border-b border-[var(--theme-border)] bg-[var(--theme-bg)]">
-      <button
-        type="button"
-        title="Collapse bottom panel"
-        onClick={onCollapse}
-        className="flex h-full w-8 shrink-0 items-center justify-center text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-
       <TabsList
         variant="underline"
         className="relative z-10 h-full rounded-none p-0 data-[variant=underline]:gap-0"
@@ -75,6 +66,15 @@ export function BottomPanelHeader({
           <SplitSquareHorizontal className="h-3.5 w-3.5" />
         </button>
       ) : null}
+      
+       <button
+        type="button"
+        title="Collapse bottom panel"
+        onClick={onCollapse}
+        className="flex h-full w-8 shrink-0 items-center justify-center text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
