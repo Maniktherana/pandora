@@ -1,5 +1,13 @@
 #import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import "ghostty.h"
+
+typedef struct {
+    double x;
+    double y;
+    double width;
+    double height;
+} PandoraTerminalOcclusionRect;
 
 // Rust: native_shortcuts.rs — 0 = Ghostty, 1 = emitted app-shortcut, 2 = super (Cmd+Q quit chain)
 uint8_t pandora_try_emit_app_shortcut(unsigned int keycode, BOOL cmd, BOOL shift, BOOL ctrl, BOOL alt);
@@ -71,6 +79,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 @property(nonatomic, assign) NSPoint selectionAutoscrollPoint;
 /// When YES, hit testing fails so clicks/scroll reach the WKWebView (e.g. open selects/popovers).
 @property(nonatomic, assign) BOOL pandoraBlocksMouseForWebOverlay;
+@property(nonatomic, copy, nullable) NSArray<NSValue *> *pandoraWebOverlayOcclusionRects;
+@property(nonatomic, strong, nullable) CAShapeLayer *pandoraWebOverlayMaskLayer;
+@property(nonatomic, weak, nullable) NSView *pandoraForwardedMouseTarget;
 @end
 
 @implementation PandoraTerminalNativeView
@@ -111,6 +122,155 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     [self pandoraSyncBackingToSurface];
 }
 
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    [self pandoraApplyWebOverlayOcclusionMask];
+}
+
+- (BOOL)pandoraPointIsInWebOverlayOcclusion:(NSPoint)point {
+    for (NSValue *value in self.pandoraWebOverlayOcclusionRects) {
+        if (NSPointInRect(point, value.rectValue)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (nullable NSCursor *)pandoraResizeCursorForOcclusionPoint:(NSPoint)point {
+    for (NSValue *value in self.pandoraWebOverlayOcclusionRects) {
+        NSRect rect = value.rectValue;
+        if (!NSPointInRect(point, rect)) {
+            continue;
+        }
+
+        if (rect.size.height > rect.size.width * 3.0) {
+            return [NSCursor resizeLeftRightCursor];
+        }
+        if (rect.size.width > rect.size.height * 3.0) {
+            return [NSCursor resizeUpDownCursor];
+        }
+    }
+
+    return nil;
+}
+
+- (nullable NSView *)pandoraHitTestViewBelowForOcclusionPoint:(NSPoint)point {
+    NSView *superview = self.superview;
+    if (superview == nil) {
+        return nil;
+    }
+
+    NSPoint superPoint = [self convertPoint:point toView:superview];
+    BOOL passedSelf = NO;
+    for (NSView *candidate in superview.subviews.reverseObjectEnumerator) {
+        if (candidate == self) {
+            passedSelf = YES;
+            continue;
+        }
+        if (!passedSelf) {
+            continue;
+        }
+        if ([candidate isKindOfClass:PandoraTerminalNativeView.class]) {
+            continue;
+        }
+        if (candidate.hidden || candidate.alphaValue <= 0.0) {
+            continue;
+        }
+
+        NSPoint candidatePoint = [candidate convertPoint:superPoint fromView:superview];
+        NSView *hit = [candidate hitTest:candidatePoint];
+        if (hit != nil) {
+            return hit;
+        }
+    }
+
+    return nil;
+}
+
+- (BOOL)pandoraForwardMouseEventIfOccluded:(NSEvent *)event
+                                  selector:(SEL)selector
+                           beginsSequence:(BOOL)beginsSequence
+                             endsSequence:(BOOL)endsSequence {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    BOOL pointOccluded = [self pandoraPointIsInWebOverlayOcclusion:point];
+    NSCursor *resizeCursor = pointOccluded ? [self pandoraResizeCursorForOcclusionPoint:point] : nil;
+    if (resizeCursor != nil) {
+        [resizeCursor set];
+    }
+
+    NSView *target = self.pandoraForwardedMouseTarget;
+    if (beginsSequence || target == nil) {
+        if (!pointOccluded) {
+            if (endsSequence) {
+                self.pandoraForwardedMouseTarget = nil;
+            }
+            return NO;
+        }
+        target = [self pandoraHitTestViewBelowForOcclusionPoint:point];
+        if (beginsSequence) {
+            self.pandoraForwardedMouseTarget = target;
+        }
+    }
+
+    if (target == nil || ![target respondsToSelector:selector]) {
+        if (endsSequence) {
+            self.pandoraForwardedMouseTarget = nil;
+        }
+        return pointOccluded;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    [target performSelector:selector withObject:event];
+#pragma clang diagnostic pop
+
+    if (endsSequence) {
+        self.pandoraForwardedMouseTarget = nil;
+    }
+    return YES;
+}
+
+- (void)cursorUpdate:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    NSCursor *resizeCursor = [self pandoraResizeCursorForOcclusionPoint:point];
+    if (resizeCursor != nil) {
+        [resizeCursor set];
+        return;
+    }
+    [super cursorUpdate:event];
+}
+
+- (void)pandoraApplyWebOverlayOcclusionMask {
+    if (self.layer == nil) {
+        return;
+    }
+
+    if (self.pandoraWebOverlayOcclusionRects.count == 0) {
+        self.layer.mask = nil;
+        self.pandoraWebOverlayMaskLayer = nil;
+        return;
+    }
+
+    CGFloat scale = self.window != nil ? self.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor;
+    if (scale <= 0.0 || scale != scale) {
+        scale = 1.0;
+    }
+
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathAddRect(path, NULL, NSRectToCGRect(self.bounds));
+    for (NSValue *value in self.pandoraWebOverlayOcclusionRects) {
+        CGPathAddRect(path, NULL, NSRectToCGRect(value.rectValue));
+    }
+    CAShapeLayer *mask = [CAShapeLayer layer];
+    mask.frame = self.bounds;
+    mask.contentsScale = scale;
+    mask.fillRule = kCAFillRuleEvenOdd;
+    mask.path = path;
+    self.layer.mask = mask;
+    self.pandoraWebOverlayMaskLayer = mask;
+    CGPathRelease(path);
+}
+
 - (BOOL)acceptsFirstResponder {
     if (self.pandoraBlocksMouseForWebOverlay) {
         return NO;
@@ -121,6 +281,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 - (NSView *)hitTest:(NSPoint)point {
     if (self.pandoraBlocksMouseForWebOverlay) {
         return nil;
+    }
+    if ([self pandoraPointIsInWebOverlayOcclusion:point]) {
+        return self;
     }
     return [super hitTest:point];
 }
@@ -408,6 +571,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)mouseDown:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(mouseDown:) beginsSequence:YES endsSequence:NO]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -422,6 +588,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)mouseUp:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(mouseUp:) beginsSequence:NO endsSequence:YES]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -432,6 +601,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)rightMouseDown:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(rightMouseDown:) beginsSequence:YES endsSequence:NO]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -446,6 +618,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)rightMouseUp:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(rightMouseUp:) beginsSequence:NO endsSequence:YES]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -456,6 +631,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)mouseMoved:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(mouseMoved:) beginsSequence:NO endsSequence:NO]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -464,6 +642,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)mouseDragged:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(mouseDragged:) beginsSequence:NO endsSequence:NO]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -473,6 +654,9 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (void)scrollWheel:(NSEvent *)event {
+    if ([self pandoraForwardMouseEventIfOccluded:event selector:@selector(scrollWheel:) beginsSequence:NO endsSequence:NO]) {
+        return;
+    }
     if (self.surface == NULL) {
         return;
     }
@@ -522,4 +706,28 @@ void pandora_terminal_view_set_blocks_mouse_for_web_overlay(void *view_ptr, bool
             (void)[window makeFirstResponder:nil];
         }
     }
+}
+
+void pandora_terminal_view_set_web_occlusion_rects(
+    void *view_ptr,
+    const PandoraTerminalOcclusionRect *rects,
+    uintptr_t count
+) {
+    PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
+    if (count == 0 || rects == NULL) {
+        view.pandoraWebOverlayOcclusionRects = @[];
+        [view pandoraApplyWebOverlayOcclusionMask];
+        return;
+    }
+
+    NSMutableArray<NSValue *> *values = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+    for (uintptr_t i = 0; i < count; i++) {
+        PandoraTerminalOcclusionRect rect = rects[i];
+        if (rect.width <= 0.0 || rect.height <= 0.0) {
+            continue;
+        }
+        [values addObject:[NSValue valueWithRect:NSMakeRect(rect.x, rect.y, rect.width, rect.height)]];
+    }
+    view.pandoraWebOverlayOcclusionRects = values;
+    [view pandoraApplyWebOverlayOcclusionMask];
 }

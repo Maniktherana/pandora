@@ -162,6 +162,7 @@ fn main() {
             terminal_commands::terminal_surface_focus,
             terminal_commands::terminal_surfaces_begin_web_overlay,
             terminal_commands::terminal_surfaces_end_web_overlay,
+            terminal_commands::terminal_surfaces_set_web_occlusion_rects,
             terminal_commands::native_window_scale_factor,
             // Project commands
             commands::list_projects,

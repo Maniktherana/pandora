@@ -265,3 +265,20 @@ pub fn terminal_surfaces_end_web_overlay(
         .map_err(|e| e.to_string())?;
     rx.recv().map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub fn terminal_surfaces_set_web_occlusion_rects(
+    window: WebviewWindow,
+    registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    rects: Vec<SurfaceRect>,
+) -> Result<(), String> {
+    let registry = registry.inner().clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    window
+        .run_on_main_thread(move || {
+            registry.set_web_occlusion_rects(rects);
+            let _ = tx.send(Ok(()));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())?
+}

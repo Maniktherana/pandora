@@ -33,17 +33,19 @@ export function panelResizeHandleClasses(
     enabled ? "" : "hidden",
     direction === "horizontal"
       ? [
-          // Keep the interactive area aligned with the visible divider.
-          "h-full w-px cursor-col-resize",
-          "bg-[var(--theme-border)] transition-colors",
-          "data-[resize-handle-state=hover]:bg-[var(--theme-interactive)]",
-          "data-[resize-handle-state=drag]:bg-[var(--theme-border)]",
+          // Wider hit target with a 1px visible divider centered inside it.
+          "h-full w-3 -mx-[5.5px] cursor-col-resize",
+          "before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2",
+          "before:bg-[var(--theme-border)] before:transition-colors",
+          "data-[resize-handle-state=hover]:before:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=drag]:before:bg-[var(--theme-border)]",
         ]
       : [
-          "h-px w-full cursor-row-resize",
-          "bg-[var(--theme-border)] transition-colors",
-          "data-[resize-handle-state=hover]:bg-[var(--theme-interactive)]",
-          "data-[resize-handle-state=drag]:bg-[var(--theme-border)]",
+          "h-3 w-full -my-[5.5px] cursor-row-resize",
+          "before:absolute before:inset-x-0 before:top-1/2 before:h-px before:-translate-y-1/2",
+          "before:bg-[var(--theme-border)] before:transition-colors",
+          "data-[resize-handle-state=hover]:before:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=drag]:before:bg-[var(--theme-border)]",
         ],
   );
 }

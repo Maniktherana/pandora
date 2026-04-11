@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { cn } from "@/lib/shared/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -14,7 +14,6 @@ function DropdownMenu({
 }: MenuPrimitive.Root.Props) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const open = openProp ?? uncontrolledOpen;
-  useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
   const handleOpenChange = React.useCallback<NonNullable<MenuPrimitive.Root.Props["onOpenChange"]>>(
     (nextOpen, details) => {
@@ -53,6 +52,8 @@ function DropdownMenuContent({
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+  const occlusionRef = useNativeTerminalOcclusion(true);
+
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
@@ -64,6 +65,7 @@ function DropdownMenuContent({
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
+          ref={occlusionRef}
           className={cn(
             "z-50 max-h-(--available-height) w-(--anchor-width) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95",
             className,

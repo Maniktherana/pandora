@@ -3,7 +3,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import * as React from "react";
 import { cn } from "@/lib/shared/utils";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 
 export const PopoverCreateHandle: typeof PopoverPrimitive.createHandle =
   PopoverPrimitive.createHandle;
@@ -21,7 +21,6 @@ export function Popover<Payload = unknown>(
     defaultOpen ?? false,
   );
   const open = openProp ?? uncontrolledOpen;
-  useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
   const handleOpenChange = React.useCallback<
     NonNullable<PopoverPrimitive.Root.Props<Payload>["onOpenChange"]>
@@ -80,6 +79,8 @@ export function PopoverPopup({
   tooltipStyle?: boolean;
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
 }): React.ReactElement {
+  const occlusionRef = useNativeTerminalOcclusion(true);
+
   return (
     <PopoverPrimitive.Portal {...portalProps}>
       <PopoverPrimitive.Positioner
@@ -99,6 +100,7 @@ export function PopoverPopup({
             className,
           )}
           data-slot="popover-popup"
+          ref={occlusionRef}
           {...props}
         >
           <PopoverPrimitive.Viewport

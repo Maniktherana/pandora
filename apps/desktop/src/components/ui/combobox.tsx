@@ -6,7 +6,7 @@ import * as React from "react";
 import { cn } from "@/lib/shared/utils";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 
 export const ComboboxContext: React.Context<{
   chipsRef: React.RefObject<Element | null> | null;
@@ -33,7 +33,6 @@ export function Combobox<Value, Multiple extends boolean | undefined = false>(
     defaultOpen ?? false,
   );
   const popupOpen = openProp ?? uncontrolledOpen;
-  useNativeTerminalOverlay(popupOpen ? "semi-transparent" : null);
 
   const handleOpenChange = React.useCallback<
     NonNullable<ComboboxPrimitive.Root.Props<Value, Multiple>["onOpenChange"]>
@@ -201,6 +200,7 @@ export function ComboboxPopup({
 }): React.ReactElement {
   const { chipsRef } = React.useContext(ComboboxContext);
   const anchor = anchorProp ?? chipsRef;
+  const occlusionRef = useNativeTerminalOcclusion(true);
 
   return (
     <ComboboxPrimitive.Portal {...portalProps}>
@@ -218,6 +218,7 @@ export function ComboboxPopup({
             "relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg border bg-popover not-dark:bg-clip-padding shadow-lg/5 transition-[scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             className,
           )}
+          ref={occlusionRef}
         >
           <ComboboxPrimitive.Popup
             className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"

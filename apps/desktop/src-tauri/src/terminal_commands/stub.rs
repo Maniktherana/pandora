@@ -81,3 +81,12 @@ pub fn terminal_surfaces_end_web_overlay(
 ) -> Result<(), String> {
     Ok(())
 }
+
+#[tauri::command]
+pub fn terminal_surfaces_set_web_occlusion_rects(
+    _window: WebviewWindow,
+    _registry: tauri::State<'_, Arc<SurfaceRegistry>>,
+    _rects: Vec<SurfaceRect>,
+) -> Result<(), String> {
+    Ok(())
+}

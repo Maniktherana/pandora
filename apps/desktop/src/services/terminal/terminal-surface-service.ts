@@ -63,6 +63,10 @@ export interface TerminalSurfaceServiceApi {
   readonly endWebOverlay: (
     mode: NativeTerminalOverlayMode,
   ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly setWebOcclusionRect: (
+    id: string,
+    rect: SurfaceRect | null,
+  ) => Effect.Effect<void, NativeSurfaceError>;
 }
 
 export class TerminalSurfaceService extends Context.Tag("pandora/TerminalSurfaceService")<
@@ -123,6 +127,8 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       opaque: 0,
       "semi-transparent": 0,
     } satisfies Record<NativeTerminalOverlayMode, number>;
+    const webOcclusionRects = new Map<string, SurfaceRect>();
+    let webOcclusionQueue: Promise<void> = Promise.resolve();
     let needsSyncAfterOverlay = false;
 
     const getNativeSupport = () => {
@@ -359,6 +365,15 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       for (const surfaceId of entries.keys()) {
         scheduleSync(surfaceId);
       }
+    };
+
+    const syncWebOcclusionRects = async () => {
+      const rects = Array.from(webOcclusionRects.values());
+      const queued = webOcclusionQueue.then(() =>
+        invoke("terminal_surfaces_set_web_occlusion_rects", { rects }),
+      );
+      webOcclusionQueue = queued.then(() => undefined, () => undefined);
+      await queued;
     };
 
     const replaceObserver = (entry: ManagedSurfaceEntry, nextAnchor: HTMLElement | null) => {
@@ -598,6 +613,18 @@ export const TerminalSurfaceServiceLive = Layer.effect(
             }
           },
           catch: (cause) => nativeSurfaceError(cause, "web-overlay"),
+        }),
+      setWebOcclusionRect: (id, rect) =>
+        Effect.tryPromise({
+          try: async () => {
+            if (rect) {
+              webOcclusionRects.set(id, rect);
+            } else {
+              webOcclusionRects.delete(id);
+            }
+            await syncWebOcclusionRects();
+          },
+          catch: (cause) => nativeSurfaceError(cause, "web-occlusion"),
         }),
     } satisfies TerminalSurfaceServiceApi;
   }),

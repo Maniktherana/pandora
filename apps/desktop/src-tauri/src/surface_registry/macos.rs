@@ -30,6 +30,11 @@ unsafe extern "C" {
     fn pandora_terminal_view_set_session_id(view: *mut c_void, session_id: *const std::ffi::c_char);
     fn pandora_terminal_view_focus(view: *mut c_void) -> bool;
     fn pandora_terminal_view_set_blocks_mouse_for_web_overlay(view: *mut c_void, blocks: bool);
+    fn pandora_terminal_view_set_web_occlusion_rects(
+        view: *mut c_void,
+        rects: *const NativeOcclusionRect,
+        count: usize,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +49,15 @@ pub struct SurfaceRect {
     pub width: f64,
     pub height: f64,
     pub scale_factor: f64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct NativeOcclusionRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +248,9 @@ pub struct SurfaceRegistry {
     /// Refcounts per overlay mode so overlapping drag/resize/menu interactions can resolve
     /// to the strongest active visual treatment.
     web_overlay_state: Mutex<WebOverlayState>,
+    /// Viewport-space web rectangles that should visually and interactively punch through
+    /// any terminal surface they overlap.
+    web_occlusion_rects: Mutex<Vec<SurfaceRect>>,
 }
 
 // Safety: All mutable state is behind Mutex; raw pointers are only
@@ -260,6 +277,7 @@ impl SurfaceRegistry {
             output_routes: Mutex::new(HashMap::new()),
             window_ptr: Mutex::new(None),
             web_overlay_state: Mutex::new(WebOverlayState::default()),
+            web_occlusion_rects: Mutex::new(Vec::new()),
         }
     }
 
@@ -307,6 +325,52 @@ impl SurfaceRegistry {
 
             let block_mouse = overlay_mode == Some(WebOverlayMode::SemiTransparent);
             pandora_terminal_view_set_blocks_mouse_for_web_overlay(view.cast(), block_mouse);
+        }
+    }
+
+    fn local_occlusion_rects(
+        surface_rect: &SurfaceRect,
+        web_rects: &[SurfaceRect],
+    ) -> Vec<NativeOcclusionRect> {
+        web_rects
+            .iter()
+            .filter_map(|rect| {
+                let left = surface_rect.x.max(rect.x);
+                let top = surface_rect.y.max(rect.y);
+                let right = (surface_rect.x + surface_rect.width).min(rect.x + rect.width);
+                let bottom = (surface_rect.y + surface_rect.height).min(rect.y + rect.height);
+                if right <= left || bottom <= top {
+                    return None;
+                }
+
+                let width = right - left;
+                let height = bottom - top;
+                let local_x = left - surface_rect.x;
+                let local_y_top = top - surface_rect.y;
+                let local_y = surface_rect.height - local_y_top - height;
+
+                Some(NativeOcclusionRect {
+                    x: local_x,
+                    y: local_y,
+                    width,
+                    height,
+                })
+            })
+            .collect()
+    }
+
+    fn apply_view_occlusion(
+        view: *mut c_void,
+        surface_rect: &SurfaceRect,
+        web_rects: &[SurfaceRect],
+    ) {
+        let local_rects = Self::local_occlusion_rects(surface_rect, web_rects);
+        unsafe {
+            pandora_terminal_view_set_web_occlusion_rects(
+                view,
+                local_rects.as_ptr(),
+                local_rects.len(),
+            );
         }
     }
 
@@ -545,6 +609,7 @@ impl SurfaceRegistry {
             .ok_or_else(|| "create_surface must run on the main thread".to_string())?;
 
         let overlay_mode = self.effective_web_overlay_mode();
+        let occlusion_rects = self.web_occlusion_rects.lock().unwrap().clone();
 
         // Create the native terminal NSView subclass that can receive key/mouse events.
         let ns_view_raw =
@@ -654,6 +719,11 @@ impl SurfaceRegistry {
                     s.overlay_exempt,
                     overlay_mode,
                 );
+                Self::apply_view_occlusion(
+                    Retained::as_ptr(&s.ns_view) as *mut c_void,
+                    &s.rect,
+                    &occlusion_rects,
+                );
             }
         }
 
@@ -700,6 +770,7 @@ impl SurfaceRegistry {
         rect.scale_factor = unsafe { ns_effective_backing_scale(window_ptr) };
 
         let overlay_mode = self.effective_web_overlay_mode();
+        let occlusion_rects = self.web_occlusion_rects.lock().unwrap().clone();
         let (
             ghostty_surface,
             ns_view_ptr,
@@ -769,6 +840,7 @@ impl SurfaceRegistry {
             let _: () = objc2::msg_send![ns_view, setFrame: new_frame];
         }
         Self::apply_view_overlay(ns_view, visible, overlay_exempt, overlay_mode);
+        Self::apply_view_occlusion(ns_view_ptr, &rect, &occlusion_rects);
 
         // Update ghostty surface size (in pixels)
         let width_px = (rect.width * rect.scale_factor) as u32;
@@ -889,6 +961,32 @@ impl SurfaceRegistry {
         };
         for (view, visible, overlay_exempt) in views {
             Self::apply_view_overlay(view, visible, overlay_exempt, next_mode);
+        }
+    }
+
+    /// Apply web overlay occlusion rectangles, in web viewport coordinates, to every terminal.
+    pub fn set_web_occlusion_rects(&self, rects: Vec<SurfaceRect>) {
+        {
+            let mut guard = self.web_occlusion_rects.lock().unwrap();
+            *guard = rects.clone();
+        }
+
+        let views = {
+            let inner = self.inner.lock().unwrap();
+            inner
+                .surfaces
+                .values()
+                .map(|surface| {
+                    (
+                        Retained::as_ptr(&surface.ns_view) as *mut c_void,
+                        surface.rect.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (view, surface_rect) in views {
+            Self::apply_view_occlusion(view, &surface_rect, &rects);
         }
     }
 

@@ -8,12 +8,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { PanelResizeHandle } from "react-resizable-panels";
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import ReviewViewer from "@/components/editor/review-viewer";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
+import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
@@ -24,7 +24,6 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
 import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import type { SessionState } from "@/lib/shared/types";
-import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { RotateCcw, Trash2 } from "lucide-react";
 import DotGridLoader from "@/components/dot-grid-loader";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
@@ -359,10 +358,8 @@ function LayoutRenderer({
       {node.children.map((child, i) => (
         <div key={child.id} className="contents">
           {i > 0 && (
-            <PanelResizeHandle
-              className={panelResizeHandleClasses(
-                direction === "horizontal" ? "horizontal" : "vertical",
-              )}
+            <TerminalResizeHandle
+              direction={direction === "horizontal" ? "horizontal" : "vertical"}
               onDragging={setLocalResizing}
             />
           )}

@@ -8,16 +8,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { PanelResizeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import TerminalSurface from "@/components/terminal/terminal-surface";
+import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { panelResizeHandleClasses } from "@/lib/shared/utils";
 import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import DotGridLoader from "@/components/dot-grid-loader";
@@ -156,10 +155,7 @@ function ResizableTerminalGroup({ children }: { children: ReactNode }) {
       {childArray.map((child, index) => (
         <div key={index} className="contents">
           {index > 0 && (
-            <PanelResizeHandle
-              className={panelResizeHandleClasses("horizontal")}
-              onDragging={setIsResizing}
-            />
+            <TerminalResizeHandle direction="horizontal" onDragging={setIsResizing} />
           )}
           {child}
         </div>

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/shared/utils";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 
 export function Select<Value, Multiple extends boolean | undefined = false>(
   props: SelectPrimitive.Root.Props<Value, Multiple>,
@@ -26,7 +26,6 @@ export function Select<Value, Multiple extends boolean | undefined = false>(
     defaultOpen ?? false,
   );
   const open = openProp ?? uncontrolledOpen;
-  useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
   const handleOpenChange = React.useCallback<
     NonNullable<SelectPrimitive.Root.Props<Value, Multiple>["onOpenChange"]>
@@ -157,6 +156,8 @@ export function SelectPopup({
   alignItemWithTrigger?: SelectPrimitive.Positioner.Props["alignItemWithTrigger"];
   anchor?: SelectPrimitive.Positioner.Props["anchor"];
 }): React.ReactElement {
+  const occlusionRef = useNativeTerminalOcclusion(true);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Positioner
@@ -172,6 +173,7 @@ export function SelectPopup({
         <SelectPrimitive.Popup
           className="origin-(--transform-origin) text-foreground outline-none"
           data-slot="select-popup"
+          ref={occlusionRef}
           {...props}
         >
           <SelectPrimitive.ScrollUpArrow

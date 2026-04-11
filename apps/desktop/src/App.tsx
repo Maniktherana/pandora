@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { PanelResizeHandle, ImperativePanelHandle } from "react-resizable-panels";
+import { ImperativePanelHandle } from "react-resizable-panels";
 import LeftSidebar from "@/components/layout/left-sidebar/left-sidebar";
 import BottomPanel from "@/components/layout/bottom-panel";
 import RightSidebar from "@/components/layout/right-sidebar/right-sidebar";
 import { TabDragProvider } from "@/components/dnd/tab-drag-provider";
+import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/layout/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
 import AppHeader from "@/components/layout/app-header";
 import SettingsPanel from "@/components/settings/settings-panel";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
-import { cn } from "@/lib/shared/utils";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
@@ -34,8 +35,16 @@ export default function App() {
   const fileTreePanelRef = useRef<ImperativePanelHandle>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const workspaceFileTreeSplitRef = useRef<HTMLDivElement>(null);
+  const sidebarResizeHandleRef = useRef<HTMLDivElement>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const sidebarResizeWidthRef = useRef<number | null>(null);
+  const [sidebarResizeHovered, setSidebarResizeHovered] = useState(false);
+  const [sidebarResizeDragging, setSidebarResizeDragging] = useState(false);
+  const setSidebarResizeOcclusionElement = useNativeTerminalOcclusion(
+    sidebarResizeHovered || sidebarResizeDragging,
+    4,
+    { exitHoldMs: 0 },
+  );
   const selectedThemeId = useSettingsStore((state) => state.selectedThemeId);
   const uiFontFamily = useSettingsStore((state) => state.uiFontFamily);
   const uiFontCustom = useSettingsStore((state) => state.uiFontCustom);
@@ -195,6 +204,10 @@ export default function App() {
     }
   }, [bottomPanelOpen, selectedWsStatus]);
 
+  useEffect(() => {
+    setSidebarResizeOcclusionElement(sidebarResizeHandleRef.current);
+  }, [setSidebarResizeOcclusionElement]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {sidebarVisible && !settingsOpen && (
@@ -205,13 +218,17 @@ export default function App() {
             onOpenSettings={handleOpenSettings}
           />
           <div
+            ref={sidebarResizeHandleRef}
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize sidebar"
+            onPointerEnter={() => setSidebarResizeHovered(true)}
+            onPointerLeave={() => setSidebarResizeHovered(false)}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
               event.preventDefault();
               setIsResizingPanels(true);
+              setSidebarResizeDragging(true);
 
               const startX = event.clientX;
               const startWidth = sidebarWidth;
@@ -245,14 +262,15 @@ export default function App() {
                   sidebarResizeWidthRef.current = null;
                 }
                 setIsResizingPanels(false);
+                setSidebarResizeDragging(false);
               };
 
               window.addEventListener("pointermove", onPointerMove);
               window.addEventListener("pointerup", onPointerUp);
             }}
-            className="group absolute inset-y-0 right-0 z-20 w-px cursor-col-resize bg-transparent"
+            className="group absolute inset-y-0 -right-1.5 z-20 w-3 cursor-col-resize bg-transparent"
           >
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-[var(--theme-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-[var(--theme-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
           </div>
         </div>
       )}
@@ -307,14 +325,10 @@ export default function App() {
                               </ErrorBoundary>
                             </div>
                           </ResizablePanel>
-                          <PanelResizeHandle
+                          <TerminalResizeHandle
+                            direction="horizontal"
                             onDragging={setIsResizingPanels}
-                            className={cn(
-                              "z-20 w-px min-w-px max-w-px shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
-                              fileTreeOpen && selectedWsStatus === "ready"
-                                ? "cursor-col-resize"
-                                : "hidden",
-                            )}
+                            className={fileTreeOpen && selectedWsStatus === "ready" ? "z-20" : "hidden"}
                           />
                           <ResizablePanel
                             ref={fileTreePanelRef}
@@ -353,12 +367,10 @@ export default function App() {
 
               {selectedWs?.status === "ready" && (
                 <>
-                  <PanelResizeHandle
+                  <TerminalResizeHandle
+                    direction="vertical"
                     onDragging={setIsResizingPanels}
-                    className={cn(
-                      "z-20 h-px min-h-px max-h-px w-full shrink-0 bg-[var(--theme-border)] transition-colors hover:bg-[var(--theme-interactive)]",
-                      bottomPanelOpen ? "cursor-row-resize" : "hidden",
-                    )}
+                    className={bottomPanelOpen ? "z-20" : "hidden"}
                   />
                   <ResizablePanel
                     ref={bottomPanelRef}

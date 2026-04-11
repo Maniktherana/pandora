@@ -3,7 +3,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import * as React from "react";
 import { cn } from "@/lib/shared/utils";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 
 export const TooltipCreateHandle: typeof TooltipPrimitive.createHandle =
   TooltipPrimitive.createHandle;
@@ -24,7 +24,6 @@ export function Tooltip<Payload = unknown>(
     defaultOpen ?? false,
   );
   const open = openProp ?? uncontrolledOpen;
-  useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
   const handleOpenChange = React.useCallback<
     NonNullable<TooltipPrimitive.Root.Props<Payload>["onOpenChange"]>
@@ -69,6 +68,8 @@ export function TooltipPopup({
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
   portalProps?: TooltipPrimitive.Portal.Props;
 }): React.ReactElement {
+  const occlusionRef = useNativeTerminalOcclusion(true);
+
   return (
     <TooltipPrimitive.Portal {...portalProps}>
       <TooltipPrimitive.Positioner
@@ -85,6 +86,7 @@ export function TooltipPopup({
             className,
           )}
           data-slot="tooltip-popup"
+          ref={occlusionRef}
           {...props}
         >
           <TooltipPrimitive.Viewport
