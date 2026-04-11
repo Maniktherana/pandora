@@ -29,6 +29,7 @@ unsafe extern "C" {
     fn pandora_terminal_view_set_surface(view: *mut c_void, surface: ghostty_surface_t);
     fn pandora_terminal_view_set_session_id(view: *mut c_void, session_id: *const std::ffi::c_char);
     fn pandora_terminal_view_focus(view: *mut c_void) -> bool;
+    fn pandora_terminal_view_set_blocks_mouse_for_web_overlay(view: *mut c_void, blocks: bool);
 }
 
 // ---------------------------------------------------------------------------
@@ -120,10 +121,12 @@ struct WebOverlayState {
 
 impl WebOverlayState {
     fn effective_mode(&self) -> Option<WebOverlayMode> {
-        if self.opaque > 0 {
-            Some(WebOverlayMode::Opaque)
-        } else if self.semi_transparent > 0 {
+        // Prefer semi-transparent when any popover/select is open, even if a page-level
+        // opaque overlay (e.g. settings) is active — so overlay-exempt previews still dim.
+        if self.semi_transparent > 0 {
             Some(WebOverlayMode::SemiTransparent)
+        } else if self.opaque > 0 {
+            Some(WebOverlayMode::Opaque)
         } else {
             None
         }
@@ -274,12 +277,16 @@ impl SurfaceRegistry {
             if !visible {
                 let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
                 let _: () = objc2::msg_send![view, setHidden: true];
+                pandora_terminal_view_set_blocks_mouse_for_web_overlay(view.cast(), false);
                 return;
             }
 
-            if overlay_exempt {
+            // Exempt surfaces (e.g. settings terminal font preview) stay visible during an
+            // opaque web overlay, but still respect semi-transparent dimming for popovers.
+            if overlay_exempt && overlay_mode == Some(WebOverlayMode::Opaque) {
                 let _: () = objc2::msg_send![view, setHidden: false];
                 let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
+                pandora_terminal_view_set_blocks_mouse_for_web_overlay(view.cast(), false);
                 return;
             }
 
@@ -297,6 +304,9 @@ impl SurfaceRegistry {
                     let _: () = objc2::msg_send![view, setAlphaValue: 1.0_f64];
                 }
             }
+
+            let block_mouse = overlay_mode == Some(WebOverlayMode::SemiTransparent);
+            pandora_terminal_view_set_blocks_mouse_for_web_overlay(view.cast(), block_mouse);
         }
     }
 

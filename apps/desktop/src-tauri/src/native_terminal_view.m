@@ -69,6 +69,8 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 @property(nonatomic, assign) double selectionAutoscrollDeltaY;
 @property(nonatomic, assign) ghostty_input_mods_e selectionAutoscrollMods;
 @property(nonatomic, assign) NSPoint selectionAutoscrollPoint;
+/// When YES, hit testing fails so clicks/scroll reach the WKWebView (e.g. open selects/popovers).
+@property(nonatomic, assign) BOOL pandoraBlocksMouseForWebOverlay;
 @end
 
 @implementation PandoraTerminalNativeView
@@ -110,14 +112,30 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
 }
 
 - (BOOL)acceptsFirstResponder {
+    if (self.pandoraBlocksMouseForWebOverlay) {
+        return NO;
+    }
     return YES;
 }
 
+- (NSView *)hitTest:(NSPoint)point {
+    if (self.pandoraBlocksMouseForWebOverlay) {
+        return nil;
+    }
+    return [super hitTest:point];
+}
+
 - (BOOL)acceptsFirstMouse:(NSEvent *)event {
+    if (self.pandoraBlocksMouseForWebOverlay) {
+        return NO;
+    }
     return YES;
 }
 
 - (BOOL)canBecomeKeyView {
+    if (self.pandoraBlocksMouseForWebOverlay) {
+        return NO;
+    }
     return YES;
 }
 
@@ -493,4 +511,15 @@ bool pandora_terminal_view_focus(void *view_ptr) {
         return false;
     }
     return [window makeFirstResponder:view];
+}
+
+void pandora_terminal_view_set_blocks_mouse_for_web_overlay(void *view_ptr, bool blocks) {
+    PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
+    view.pandoraBlocksMouseForWebOverlay = blocks ? YES : NO;
+    if (blocks) {
+        NSWindow *window = view.window;
+        if (window != nil && window.firstResponder == view) {
+            (void)[window makeFirstResponder:nil];
+        }
+    }
 }
