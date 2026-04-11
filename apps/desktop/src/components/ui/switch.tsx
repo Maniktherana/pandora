@@ -1,40 +1,30 @@
-import * as React from "react";
-import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
+"use client";
 
+import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
+import type React from "react";
 import { cn } from "@/lib/shared/utils";
 
-function Switch({
+export function Switch({
   className,
   ...props
-}: SwitchPrimitive.Root.Props) {
+}: SwitchPrimitive.Root.Props): React.ReactElement {
   return (
     <SwitchPrimitive.Root
-      data-slot="switch"
       className={cn(
-        "group/switch peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent shadow-sm transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-interactive)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--theme-panel)] disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:bg-[var(--theme-interactive)] data-[unchecked]:bg-[var(--theme-border)]",
+        "inline-flex h-[calc(var(--thumb-size)+2px)] w-[calc(var(--thumb-size)*2-2px)] shrink-0 items-center rounded-full p-px outline-none transition-[background-color,box-shadow] duration-200 [--thumb-size:--spacing(5)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-disabled:cursor-not-allowed data-checked:bg-primary data-unchecked:bg-input data-disabled:opacity-64 sm:[--thumb-size:--spacing(4)]",
         className,
       )}
+      data-slot="switch"
       {...props}
     >
-      <SwitchThumb />
+      <SwitchPrimitive.Thumb
+        className={cn(
+          "pointer-events-none block aspect-square h-full origin-left in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:not-data-disabled:scale-x-110 in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:rounded-[var(--thumb-size)/calc(var(--thumb-size)*1.1)] rounded-(--thumb-size) bg-background shadow-sm/5 will-change-transform [transition:translate_.15s,border-radius_.15s,scale_.1s_.1s,transform-origin_.15s] data-checked:origin-[var(--thumb-size)_50%] data-checked:translate-x-[calc(var(--thumb-size)-4px)]",
+        )}
+        data-slot="switch-thumb"
+      />
     </SwitchPrimitive.Root>
   );
 }
 
-function SwitchThumb({
-  className,
-  ...props
-}: SwitchPrimitive.Thumb.Props) {
-  return (
-    <SwitchPrimitive.Thumb
-      data-slot="switch-thumb"
-      className={cn(
-        "pointer-events-none block size-4 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out data-[checked]:translate-x-4 data-[unchecked]:translate-x-0.5",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export { Switch, SwitchThumb };
+export { SwitchPrimitive };

@@ -95,7 +95,7 @@ export function CollapsibleFileTree() {
   };
 
   return (
-    <Card className="mx-auto w-full max-w-[16rem] gap-2" size="sm">
+    <Card className="mx-auto w-full max-w-[16rem] gap-2">
       <CardHeader>
         <Tabs defaultValue="explorer">
           <TabsList className="w-full">

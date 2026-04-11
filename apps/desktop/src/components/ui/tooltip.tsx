@@ -1,23 +1,34 @@
-import * as React from "react";
+"use client";
+
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
+import * as React from "react";
 import { cn } from "@/lib/shared/utils";
+import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 
-function TooltipProvider({ ...props }: TooltipPrimitive.Provider.Props) {
-  return <TooltipPrimitive.Provider data-slot="tooltip-provider" {...props} />;
-}
+export const TooltipCreateHandle: typeof TooltipPrimitive.createHandle =
+  TooltipPrimitive.createHandle;
 
-function Tooltip({
-  defaultOpen,
-  onOpenChange,
-  open: openProp,
-  ...props
-}: TooltipPrimitive.Root.Props) {
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+export const TooltipProvider: typeof TooltipPrimitive.Provider =
+  TooltipPrimitive.Provider;
+
+export function Tooltip<Payload = unknown>(
+  props: TooltipPrimitive.Root.Props<Payload>,
+): React.ReactElement {
+  const {
+    defaultOpen,
+    onOpenChange,
+    open: openProp,
+    ...rest
+  } = props;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
+    defaultOpen ?? false,
+  );
   const open = openProp ?? uncontrolledOpen;
   useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
-  const handleOpenChange = React.useCallback<NonNullable<TooltipPrimitive.Root.Props["onOpenChange"]>>(
+  const handleOpenChange = React.useCallback<
+    NonNullable<TooltipPrimitive.Root.Props<Payload>["onOpenChange"]>
+  >(
     (nextOpen, details) => {
       if (openProp === undefined) {
         setUncontrolledOpen(nextOpen);
@@ -29,47 +40,63 @@ function Tooltip({
 
   return (
     <TooltipPrimitive.Root
-      data-slot="tooltip"
+      {...rest}
       open={open}
       onOpenChange={handleOpenChange}
-      {...props}
     />
   );
 }
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
+export function TooltipTrigger(
+  props: TooltipPrimitive.Trigger.Props,
+): React.ReactElement {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
-function TooltipContent({
+export function TooltipPopup({
   className,
   align = "center",
-  alignOffset = 0,
+  sideOffset = 4,
   side = "top",
-  sideOffset = 8,
+  anchor,
+  children,
+  portalProps,
   ...props
-}: TooltipPrimitive.Popup.Props &
-  Pick<TooltipPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+}: TooltipPrimitive.Popup.Props & {
+  align?: TooltipPrimitive.Positioner.Props["align"];
+  side?: TooltipPrimitive.Positioner.Props["side"];
+  sideOffset?: TooltipPrimitive.Positioner.Props["sideOffset"];
+  anchor?: TooltipPrimitive.Positioner.Props["anchor"];
+  portalProps?: TooltipPrimitive.Portal.Props;
+}): React.ReactElement {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal {...portalProps}>
       <TooltipPrimitive.Positioner
-        className="z-50 outline-none"
         align={align}
-        alignOffset={alignOffset}
+        anchor={anchor}
+        className="z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+        data-slot="tooltip-positioner"
         side={side}
         sideOffset={sideOffset}
       >
         <TooltipPrimitive.Popup
-          data-slot="tooltip-content"
           className={cn(
-            "z-50 max-w-xs origin-(--transform-origin) rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10 transition data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md border bg-popover not-dark:bg-clip-padding text-popover-foreground text-xs shadow-md/5 transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             className,
           )}
+          data-slot="tooltip-popup"
           {...props}
-        />
+        >
+          <TooltipPrimitive.Viewport
+            className="relative size-full overflow-clip px-(--viewport-inline-padding) py-1 [--viewport-inline-padding:--spacing(2)] data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:truncate **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity"
+            data-slot="tooltip-viewport"
+          >
+            {children}
+          </TooltipPrimitive.Viewport>
+        </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>
   );
 }
 
-export { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent };
+export { TooltipPrimitive, TooltipPopup as TooltipContent };

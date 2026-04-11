@@ -318,9 +318,9 @@ export default function AppHeader({
             <HugeiconsIcon icon={LayoutAlignBottomIcon} strokeWidth={1.25} className="size-5" />
           </Button>
           <ToggleGroup
-            type="single"
-            value={fileTreeOpen ? rightSidebarMode : ""}
-            onValueChange={(value) => {
+            value={fileTreeOpen ? [rightSidebarMode] : []}
+            onValueChange={(values) => {
+              const value = values[0];
               if (value === "files" || value === "changes") {
                 onSelectRightSidebarMode(value);
               }

@@ -200,9 +200,11 @@ export default function DiffViewer({
             </span>
           )}
           <ToggleGroup
-            type="single"
-            value={diffStyle}
-            onValueChange={(value) => {
+            value={
+              diffStyle === "split" || diffStyle === "unified" ? [diffStyle] : []
+            }
+            onValueChange={(values) => {
+              const value = values[0];
               if (typeof value !== "string" || controlledDiffStyle) return;
               setSideBySidePersist(value === "split");
             }}

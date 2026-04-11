@@ -376,9 +376,9 @@ export default function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewe
 
         <div className="ml-auto flex flex-wrap items-center gap-1">
           <ToggleGroup
-            type="single"
-            value={diffLayout}
-            onValueChange={(value) => {
+            value={[diffLayout]}
+            onValueChange={(values) => {
+              const value = values[0];
               if (typeof value !== "string") return;
               const next = value === "unified" ? "unified" : "split";
               setDiffLayout(next);

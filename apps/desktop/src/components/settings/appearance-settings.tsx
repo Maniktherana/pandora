@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
   SelectContent,
-  SelectList,
   SelectItem,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -141,11 +140,9 @@ function FontSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectList>
-            {options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-            ))}
-          </SelectList>
+          {options.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+          ))}
         </SelectContent>
       </Select>
       {isCustom && onCustomChange && (

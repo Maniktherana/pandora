@@ -32,8 +32,8 @@ export function BottomPanelHeader({
       </button>
 
       <TabsList
-        variant="line"
-        className="relative z-10 h-full rounded-none p-0 data-[variant=line]:gap-0"
+        variant="underline"
+        className="relative z-10 h-full rounded-none p-0 data-[variant=underline]:gap-0"
       >
         {(["terminal", "ports"] as const).map((id) => (
           <TabsTrigger
