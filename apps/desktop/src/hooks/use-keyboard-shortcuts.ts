@@ -167,6 +167,7 @@ export default function useKeyboardShortcuts({
           case "ArrowUp":
             if (e.altKey) {
               e.preventDefault();
+              e.stopPropagation();
               if (!shouldHandleWorkspaceShortcut(-1)) break;
               switchWorkspaceRelative(-1);
               break;
@@ -179,6 +180,7 @@ export default function useKeyboardShortcuts({
           case "ArrowDown":
             if (e.altKey) {
               e.preventDefault();
+              e.stopPropagation();
               if (!shouldHandleWorkspaceShortcut(1)) break;
               switchWorkspaceRelative(1);
               break;
@@ -236,9 +238,9 @@ export default function useKeyboardShortcuts({
     onToggleSidebar,
     resolveFontZoomTarget,
     selectedWorkspaceID,
-    switchWorkspaceRelative,
     hasSelectedWorkspace,
     shouldHandleWorkspaceShortcut,
+    switchWorkspaceRelative,
   ]);
 
   useEffect(() => {
