@@ -514,6 +514,25 @@ fn run_git(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn run_git_without_optional_locks(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Git command failed".into()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 /// Max bytes returned for `scm_git_diff` (avoids huge binary / generated blobs in the UI).
 pub const SCM_DIFF_MAX_BYTES: usize = 512 * 1024;
 
@@ -1072,7 +1091,7 @@ pub fn git_status(worktree_path: &str) -> Result<Vec<ScmStatusEntry>, String> {
     // Always enumerate files inside untracked dirs. Without this, `status.showUntrackedFiles=normal`
     // (a common default / user setting) yields a single `?? folder/` line — the Changes UI would show
     // one row per folder instead of per file.
-    let out = run_git(&[
+    let out = run_git_without_optional_locks(&[
         "-C",
         worktree_path,
         "-c",

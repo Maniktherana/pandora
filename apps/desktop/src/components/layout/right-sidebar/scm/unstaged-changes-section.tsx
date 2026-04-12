@@ -10,14 +10,13 @@ import { cn } from "@/lib/shared/utils";
 import {
   decorationForScmEntry,
   scmToneTextClass,
-  scmStage,
   statusTone,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "./scm-status-badge";
 import {
   SCM_SECTION_STICKY_ROW_HEIGHT_PX,
   type DiscardEntryFn,
-  type RunScmActionFn,
+  type SelectScmEntryFn,
   type ScmStatusEntry,
 } from "./scm.types";
 
@@ -28,10 +27,12 @@ type UnstagedChangesSectionProps = {
   busy: boolean;
   stickyTop: number;
   stickyZIndex: number;
-  workspaceRoot: string;
+  selectedPaths: Set<string>;
   onOpenFile: (path: string) => void;
+  onOpenReview: () => void;
+  onSelectEntry: SelectScmEntryFn;
   onDiscard: DiscardEntryFn;
-  run: RunScmActionFn;
+  onStage: (entry: ScmStatusEntry) => void;
   onDiscardAll: () => void;
   onStageAll: () => void;
 };
@@ -43,14 +44,19 @@ export function UnstagedChangesSection({
   busy,
   stickyTop,
   stickyZIndex,
-  workspaceRoot,
+  selectedPaths,
   onOpenFile,
+  onOpenReview,
+  onSelectEntry,
   onDiscard,
-  run,
+  onStage,
   onDiscardAll,
   onStageAll,
 }: UnstagedChangesSectionProps) {
   if (unstagedList.length === 0) return null;
+  const visiblePaths = unstagedList.map((entry) => entry.path);
+  const stageLabel = "Stage all changes";
+  const discardLabel = "Discard all files";
 
   return (
     <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
@@ -58,6 +64,7 @@ export function UnstagedChangesSection({
         nativeButton={false}
         render={
           <Button
+            render={<div />}
             variant="ghost"
             size="sm"
             className="group sticky w-full justify-start gap-1 rounded-none border-0 bg-[var(--theme-bg)] bg-clip-border py-1 pl-2 pr-1 font-normal text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:bg-[var(--theme-bg)] aria-expanded:text-[var(--theme-text-muted)]"
@@ -70,7 +77,11 @@ export function UnstagedChangesSection({
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
             <span className="text-[11px] font-medium uppercase tracking-wide">Changes</span>
-            <span className="ml-auto flex w-14 items-center justify-end gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
+            <span
+              className="ml-auto flex w-14 items-center justify-end gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
               <Tooltip>
                 <TooltipTrigger
                   render={<Button type="button" variant="ghost" size="icon-xs" disabled={busy} />}
@@ -85,7 +96,7 @@ export function UnstagedChangesSection({
                     className="size-3.5"
                   />
                 </TooltipTrigger>
-                <TooltipContent>Discard all files</TooltipContent>
+                <TooltipContent>{discardLabel}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger
@@ -97,7 +108,7 @@ export function UnstagedChangesSection({
                 >
                   <HugeiconsIcon icon={PlusSignIcon} strokeWidth={1.5} className="size-3.5" />
                 </TooltipTrigger>
-                <TooltipContent>Stage all changes</TooltipContent>
+                <TooltipContent>{stageLabel}</TooltipContent>
               </Tooltip>
             </span>
             <span className="flex items-center gap-1">
@@ -117,6 +128,7 @@ export function UnstagedChangesSection({
             {unstagedList.map((entry) => {
               const tone = statusTone(entry);
               const decoration = decorationForScmEntry(entry);
+              const selected = selectedPaths.has(entry.path);
               const pathParts = entry.path.split("/");
               const fileName = pathParts[pathParts.length - 1] ?? entry.path;
               const directoryPath = pathParts.length > 1 ? pathParts.slice(0, -1).join("/") : "";
@@ -125,12 +137,26 @@ export function UnstagedChangesSection({
                   <div
                     role="button"
                     tabIndex={0}
-                    className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1 hover:bg-[var(--theme-panel-hover)]"
-                    onClick={() => onOpenFile(entry.path)}
+                    aria-selected={selected}
+                    className={cn(
+                      "flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1 hover:bg-[var(--theme-panel-hover)]",
+                      selected &&
+                        "bg-[var(--theme-panel-hover)] outline outline-1 outline-[var(--theme-border)]",
+                    )}
+                    onClick={(event) => {
+                      const selectionHandled = onSelectEntry(entry.path, visiblePaths, {
+                        metaKey: event.metaKey,
+                        ctrlKey: event.ctrlKey,
+                        shiftKey: event.shiftKey,
+                      });
+                      if (!selectionHandled) {
+                        onOpenReview();
+                      }
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        onOpenFile(entry.path);
+                        onOpenReview();
                       }
                     }}
                   >
@@ -143,7 +169,11 @@ export function UnstagedChangesSection({
                         {directoryPath || "."}
                       </span>
                     </div>
-                    <div className="mr-1 hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                    <div
+                      className="mr-1 hidden shrink-0 items-center gap-0.5 group-hover:flex"
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
                       <Tooltip>
                         <TooltipTrigger
                           render={
@@ -197,7 +227,7 @@ export function UnstagedChangesSection({
                           }
                           onClick={(event) => {
                             event.stopPropagation();
-                            void run(() => scmStage(workspaceRoot, [entry.path]));
+                            onStage(entry);
                           }}
                         >
                           <HugeiconsIcon

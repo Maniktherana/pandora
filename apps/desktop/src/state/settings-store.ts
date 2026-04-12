@@ -2,9 +2,25 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type BranchPrefixMode = "github-username" | "custom" | "none";
-export type FontOption = "system-default" | "segoe-ui" | "sf-pro" | "helvetica" | "inter" | "custom";
-export type MonoFontOption = "jetbrains-mono" | "fira-code" | "inconsolata" | "source-code-pro" | "custom";
-export type TerminalFontOption = "jetbrains-nerd" | "fira-code-nerd" | "menlo" | "monaco" | "custom";
+export type FontOption =
+  | "system-default"
+  | "segoe-ui"
+  | "sf-pro"
+  | "helvetica"
+  | "inter"
+  | "custom";
+export type MonoFontOption =
+  | "jetbrains-mono"
+  | "fira-code"
+  | "inconsolata"
+  | "source-code-pro"
+  | "custom";
+export type TerminalFontOption =
+  | "jetbrains-nerd"
+  | "fira-code-nerd"
+  | "menlo"
+  | "monaco"
+  | "custom";
 
 export interface SettingsStore {
   // Appearance
@@ -56,25 +72,25 @@ const FONT_FAMILY_MAP: Record<FontOption, string> = {
   "system-default": "system-ui, -apple-system, sans-serif",
   "segoe-ui": "Segoe UI, system-ui, sans-serif",
   "sf-pro": "SF Pro Display, system-ui, sans-serif",
-  "helvetica": "Helvetica Neue, sans-serif",
-  "inter": "Inter, sans-serif",
-  "custom": "inherit",
+  helvetica: "Helvetica Neue, sans-serif",
+  inter: "Inter, sans-serif",
+  custom: "inherit",
 };
 
 const MONO_FONT_MAP: Record<MonoFontOption, string> = {
   "jetbrains-mono": "JetBrains Mono, monospace",
   "fira-code": "Fira Code, monospace",
-  "inconsolata": "Inconsolata, monospace",
+  inconsolata: "Inconsolata, monospace",
   "source-code-pro": "Source Code Pro, monospace",
-  "custom": "inherit",
+  custom: "inherit",
 };
 
 const TERMINAL_FONT_MAP: Record<TerminalFontOption, string> = {
   "jetbrains-nerd": "JetBrains Mono, Nerd Font, monospace",
   "fira-code-nerd": "Fira Code, Nerd Font, monospace",
-  "menlo": "Menlo, Monaco, monospace",
-  "monaco": "Monaco, monospace",
-  "custom": "inherit",
+  menlo: "Menlo, Monaco, monospace",
+  monaco: "Monaco, monospace",
+  custom: "inherit",
 };
 
 export function getFontFamily(font: FontOption, custom: string): string {
@@ -114,10 +130,8 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ monoFontFamily: fontFamily, monoFontCustom: custom }),
       setTerminalFont: (fontFamily: TerminalFontOption, custom: string = "") =>
         set({ terminalFontFamily: fontFamily, terminalFontCustom: custom }),
-      setEditorFontSize: (size: number) =>
-        set({ editorFontSize: clampFontSize(size) }),
-      setTerminalFontSize: (size: number) =>
-        set({ terminalFontSize: clampFontSize(size) }),
+      setEditorFontSize: (size: number) => set({ editorFontSize: clampFontSize(size) }),
+      setTerminalFontSize: (size: number) => set({ terminalFontSize: clampFontSize(size) }),
       increaseEditorFontSize: () =>
         set((state) => ({ editorFontSize: clampFontSize(state.editorFontSize + 1) })),
       decreaseEditorFontSize: () =>
@@ -126,16 +140,16 @@ export const useSettingsStore = create<SettingsStore>()(
         set((state) => ({ terminalFontSize: clampFontSize(state.terminalFontSize + 1) })),
       decreaseTerminalFontSize: () =>
         set((state) => ({ terminalFontSize: clampFontSize(state.terminalFontSize - 1) })),
-      setArchiveDeletesWorktree: (value: boolean) =>
-        set({ archiveDeletesWorktree: value }),
+      setArchiveDeletesWorktree: (value: boolean) => set({ archiveDeletesWorktree: value }),
       setBranchPrefixMode: (mode: BranchPrefixMode, custom: string = "") =>
         set({ branchPrefixMode: mode, branchPrefixCustom: custom }),
-      setDeleteLocalBranchOnArchive: (value: boolean) =>
-        set({ deleteLocalBranchOnArchive: value }),
+      setDeleteLocalBranchOnArchive: (value: boolean) => set({ deleteLocalBranchOnArchive: value }),
       setArchiveOnMerge: (value: boolean) => set({ archiveOnMerge: value }),
     }),
     {
       name: STORAGE_KEY,
+      version: 1,
+      migrate: (persisted) => persisted as SettingsStore,
     },
   ),
 );

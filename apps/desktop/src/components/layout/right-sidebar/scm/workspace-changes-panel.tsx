@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { GitPullRequest } from "lucide-react";
-import { open } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { useRuntimeState, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
@@ -13,13 +14,15 @@ import {
   scmCommit,
   scmDiscardTracked,
   scmDiscardUntracked,
-  scmStageAll,
+  scmStage,
   scmUnstage,
-  scmUnstageAll,
+  optimisticallyStageAllScmEntries,
+  optimisticallyStageScmEntries,
+  optimisticallyUnstageAllScmEntries,
+  optimisticallyUnstageScmEntries,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
-import type { ScmStatusEntry } from "./scm.types";
+import type { ScmSelectionModifiers, ScmStatusEntry } from "./scm.types";
 import {
-  archiveWorkspace as archiveWorkspaceCmd,
   composePrInstruction,
   findAgentTerminal,
   gatherPrContext,
@@ -28,10 +31,8 @@ import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
-import { useScmStatusQuery } from "./scm-queries";
-import {
-  SCM_SECTION_STICKY_Z_INDEX_BASE,
-} from "./scm.types";
+import { scmStatusQueryKey, useScmStatusQuery } from "./scm-queries";
+import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "./scm.types";
 import DotGridLoader from "@/components/dot-grid-loader";
 
 type WorkspaceChangesPanelProps = {
@@ -60,8 +61,13 @@ export default function WorkspaceChangesPanel({
   const [changesOpen, setChangesOpen] = useState(true);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSending, setPrSending] = useState(false);
+  const [optimisticEntries, setOptimisticEntries] = useState<ScmStatusEntry[] | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const optimisticRevisionRef = useRef(0);
 
+  const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
@@ -75,7 +81,7 @@ export default function WorkspaceChangesPanel({
     error: entriesError,
     refetch: refetchEntries,
   } = useScmStatusQuery(workspaceRoot);
-  const entries = entriesData ?? null;
+  const entries = optimisticEntries ?? entriesData ?? null;
 
   useEffect(() => {
     if (entriesError) {
@@ -85,25 +91,132 @@ export default function WorkspaceChangesPanel({
     setLoadError(null);
   }, [entriesError]);
 
+  useEffect(() => {
+    setOptimisticEntries(null);
+    setSelectedPaths([]);
+    setLastSelectedPath(null);
+  }, [workspaceRoot]);
+
+  useEffect(() => {
+    if (!entriesData) return;
+    const existingPaths = new Set(entriesData.map((entry) => entry.path));
+    setSelectedPaths((current) => current.filter((path) => existingPaths.has(path)));
+    setLastSelectedPath((current) => (current && existingPaths.has(current) ? current : null));
+  }, [entriesData]);
+
   const stagedList = useMemo(() => (entries ?? []).filter(hasStaged), [entries]);
   const unstagedList = useMemo(() => (entries ?? []).filter(hasUnstaged), [entries]);
+  const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
+  const selectedStagedPaths = useMemo(
+    () => stagedList.filter((entry) => selectedPathSet.has(entry.path)).map((entry) => entry.path),
+    [selectedPathSet, stagedList],
+  );
+  const selectedUnstagedPaths = useMemo(
+    () =>
+      unstagedList.filter((entry) => selectedPathSet.has(entry.path)).map((entry) => entry.path),
+    [selectedPathSet, unstagedList],
+  );
   const canCommit = stagedList.length > 0 && commitMessage.trim().length > 0 && !busy;
 
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true);
+  const run = async (
+    fn: () => Promise<void>,
+    options?: { optimisticStatusUpdate?: (current: ScmStatusEntry[]) => ScmStatusEntry[] },
+  ) => {
+    const optimisticStatusUpdate = options?.optimisticStatusUpdate;
+    const statusQueryKey = scmStatusQueryKey(workspaceRoot);
+    const previousQueryEntries = queryClient.getQueryData<ScmStatusEntry[]>(statusQueryKey);
+    const previousOptimisticEntries = optimisticEntries;
+    const optimisticRevision = optimisticStatusUpdate ? optimisticRevisionRef.current + 1 : 0;
+    if (optimisticStatusUpdate) {
+      optimisticRevisionRef.current = optimisticRevision;
+      const baseEntries = optimisticEntries ?? entriesData ?? previousQueryEntries ?? [];
+      const nextEntries = optimisticStatusUpdate(baseEntries);
+      flushSync(() => {
+        setLoadError(null);
+        setBusy(true);
+        setOptimisticEntries(nextEntries);
+      });
+      void queryClient.cancelQueries({ queryKey: statusQueryKey });
+      queryClient.setQueryData<ScmStatusEntry[]>(statusQueryKey, nextEntries);
+    } else {
+      setBusy(true);
+    }
     try {
       await fn();
-      await refetchEntries();
+      if (optimisticStatusUpdate) {
+        void refetchEntries().finally(() => {
+          if (optimisticRevisionRef.current === optimisticRevision) {
+            setOptimisticEntries(null);
+          }
+        });
+        void queryClient.invalidateQueries({ queryKey: ["scm-line-stats", workspaceRoot] });
+        void queryClient.invalidateQueries({
+          queryKey: ["scm-path-line-stats-bulk", workspaceRoot],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
+      } else {
+        await refetchEntries();
+      }
     } catch (error) {
+      if (optimisticStatusUpdate) {
+        if (optimisticRevisionRef.current === optimisticRevision) {
+          setOptimisticEntries(previousOptimisticEntries);
+        }
+        if (previousQueryEntries) {
+          queryClient.setQueryData(statusQueryKey, previousQueryEntries);
+        }
+      }
       setLoadError(String(error));
+      void refetchEntries();
     } finally {
       setBusy(false);
     }
   };
 
+  const selectEntry = useCallback(
+    (path: string, visiblePaths: string[], modifiers: ScmSelectionModifiers) => {
+      const isRangeSelect = modifiers.shiftKey;
+      const isToggleSelect = modifiers.metaKey || modifiers.ctrlKey;
+      if (!isRangeSelect && !isToggleSelect) {
+        setSelectedPaths([path]);
+        setLastSelectedPath(path);
+        return false;
+      }
+
+      setSelectedPaths((current) => {
+        if (isRangeSelect) {
+          const anchor =
+            lastSelectedPath && visiblePaths.includes(lastSelectedPath) ? lastSelectedPath : path;
+          const anchorIndex = visiblePaths.indexOf(anchor);
+          const pathIndex = visiblePaths.indexOf(path);
+          const start = Math.min(anchorIndex, pathIndex);
+          const end = Math.max(anchorIndex, pathIndex);
+          const range = visiblePaths.slice(start, end + 1);
+          if (isToggleSelect) {
+            return Array.from(new Set([...current, ...range]));
+          }
+          return range;
+        }
+
+        if (current.includes(path)) {
+          return current.filter((selectedPath) => selectedPath !== path);
+        }
+        return [...current, path];
+      });
+      setLastSelectedPath(path);
+      return true;
+    },
+    [lastSelectedPath],
+  );
+
   const onOpenReview = () => {
     layoutCommands.addReviewTab();
   };
+
+  const clearSelection = useCallback(() => {
+    setSelectedPaths([]);
+    setLastSelectedPath(null);
+  }, []);
 
   const onDiscard = (entry: ScmStatusEntry) => {
     if (entry.untracked) {
@@ -119,7 +232,10 @@ export default function WorkspaceChangesPanel({
   };
 
   const onUnstage = (path: string) => {
-    void run(() => scmUnstage(workspaceRoot, [path]));
+    const paths = selectedStagedPaths.includes(path) ? selectedStagedPaths : [path];
+    void run(() => scmUnstage(workspaceRoot, paths), {
+      optimisticStatusUpdate: (current) => optimisticallyUnstageScmEntries(current, paths),
+    });
   };
 
   const onCommit = () =>
@@ -130,22 +246,39 @@ export default function WorkspaceChangesPanel({
 
   const onUnstageAll = () => {
     if (!stagedList.length) return;
-    void run(() => scmUnstageAll(workspaceRoot));
+    const paths = stagedList.map((entry) => entry.path);
+    clearSelection();
+    void run(() => scmUnstage(workspaceRoot, paths), {
+      optimisticStatusUpdate: optimisticallyUnstageAllScmEntries,
+    });
   };
 
   const onStageAll = () => {
     if (!unstagedList.length) return;
-    void run(() => scmStageAll(workspaceRoot));
+    const paths = unstagedList.map((entry) => entry.path);
+    clearSelection();
+    void run(() => scmStage(workspaceRoot, paths), {
+      optimisticStatusUpdate: optimisticallyStageAllScmEntries,
+    });
   };
 
   const onDiscardAll = () => {
     if (!unstagedList.length) return;
-    if (!window.confirm(`Discard all ${unstagedList.length} unstaged files?`)) return;
+    const entriesToDiscard = unstagedList;
+    if (!window.confirm(`Discard ${entriesToDiscard.length} unstaged files?`)) return;
+    clearSelection();
     void run(async () => {
-      for (const entry of unstagedList) {
+      for (const entry of entriesToDiscard) {
         if (entry.untracked) await scmDiscardUntracked(workspaceRoot, entry.path);
         else await scmDiscardTracked(workspaceRoot, entry.path);
       }
+    });
+  };
+
+  const onStage = (entry: ScmStatusEntry) => {
+    const paths = selectedUnstagedPaths.includes(entry.path) ? selectedUnstagedPaths : [entry.path];
+    void run(() => scmStage(workspaceRoot, paths), {
+      optimisticStatusUpdate: (current) => optimisticallyStageScmEntries(current, paths),
     });
   };
 
@@ -210,7 +343,12 @@ export default function WorkspaceChangesPanel({
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4">
         <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
-          <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+          <DotGridLoader
+            variant="default"
+            gridSize={5}
+            sizeClassName="h-8 w-8"
+            className="opacity-90"
+          />
         </div>
       </div>
     );
@@ -219,7 +357,9 @@ export default function WorkspaceChangesPanel({
   return (
     <div className="flex h-full min-h-0 select-none flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
-        <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">{workspaceLabel}</span>
+        <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">
+          {workspaceLabel}
+        </span>
         <div className="flex shrink-0 items-center gap-0.5">
           <Button
             type="button"
@@ -311,6 +451,11 @@ export default function WorkspaceChangesPanel({
         data-scm-sidebar="true"
         className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
         style={{ overscrollBehavior: "none" }}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) {
+            clearSelection();
+          }
+        }}
       >
         {entries === null && (
           <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading changes…</div>
@@ -327,7 +472,10 @@ export default function WorkspaceChangesPanel({
             busy={busy}
             stickyTop={0}
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
+            selectedPaths={selectedPathSet}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
+            onOpenReview={onOpenReview}
+            onSelectEntry={selectEntry}
             onUnstage={onUnstage}
             onUnstageAll={onUnstageAll}
           />
@@ -341,10 +489,12 @@ export default function WorkspaceChangesPanel({
             busy={busy}
             stickyTop={0}
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
-            workspaceRoot={workspaceRoot}
+            selectedPaths={selectedPathSet}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
+            onOpenReview={onOpenReview}
+            onSelectEntry={selectEntry}
             onDiscard={onDiscard}
-            run={(fn) => void run(fn)}
+            onStage={onStage}
             onDiscardAll={onDiscardAll}
             onStageAll={onStageAll}
           />

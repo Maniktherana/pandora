@@ -19,7 +19,12 @@ import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useBootstrapDesktop, useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
-import { useSettingsStore, getFontFamily, getMonoFont, getTerminalFont } from "@/state/settings-store";
+import {
+  useSettingsStore,
+  getFontFamily,
+  getMonoFont,
+  getTerminalFont,
+} from "@/state/settings-store";
 import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
 import { applyTheme, defaultTheme, themes } from "@/lib/theme";
 import { loader } from "@monaco-editor/react";
@@ -69,11 +74,23 @@ export default function App() {
   }, [selectedThemeId]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--theme-font-sans", getFontFamily(uiFontFamily, uiFontCustom));
-    document.documentElement.style.setProperty("--theme-font-mono", getMonoFont(monoFontFamily, monoFontCustom));
-    document.documentElement.style.setProperty("--theme-font-terminal", getTerminalFont(terminalFontFamily, terminalFontCustom));
+    document.documentElement.style.setProperty(
+      "--theme-font-sans",
+      getFontFamily(uiFontFamily, uiFontCustom),
+    );
+    document.documentElement.style.setProperty(
+      "--theme-font-mono",
+      getMonoFont(monoFontFamily, monoFontCustom),
+    );
+    document.documentElement.style.setProperty(
+      "--theme-font-terminal",
+      getTerminalFont(terminalFontFamily, terminalFontCustom),
+    );
     document.documentElement.style.setProperty("--theme-font-editor-size", `${editorFontSize}px`);
-    document.documentElement.style.setProperty("--theme-font-terminal-size", `${terminalFontSize}px`);
+    document.documentElement.style.setProperty(
+      "--theme-font-terminal-size",
+      `${terminalFontSize}px`,
+    );
   }, [
     editorFontSize,
     monoFontFamily,
@@ -94,9 +111,7 @@ export default function App() {
     void runtime.runPromise(
       Effect.flatMap(TerminalSurfaceService, (service) =>
         service.setAllSurfaceFontSizes(terminalFontSize),
-      ).pipe(
-        Effect.catchAll(() => Effect.void),
-      ),
+      ).pipe(Effect.catchAll(() => Effect.void)),
     );
   }, [runtime, terminalFontSize]);
 
@@ -182,6 +197,13 @@ export default function App() {
     const pct = (sidebarWidth / groupWidth) * 100;
     return Math.min(55, Math.max(12, pct));
   }, [sidebarWidth, sidebarVisible]);
+  const hasReadyWorkspace = selectedWsStatus === "ready";
+  const fileTreePanelVisible = fileTreeOpen && hasReadyWorkspace;
+  const bottomPanelVisible = bottomPanelOpen && hasReadyWorkspace;
+  const fileTreePanelDefaultSize = fileTreePanelVisible ? resolveFileTreePanelPercent() : 0;
+  const workspacePanelDefaultSize = 100 - fileTreePanelDefaultSize;
+  const bottomPanelDefaultSize = bottomPanelVisible ? 28 : 0;
+  const workspaceViewDefaultSize = 100 - bottomPanelDefaultSize;
 
   useLayoutEffect(() => {
     const p = fileTreePanelRef.current;
@@ -303,19 +325,32 @@ export default function App() {
 
             <div className="flex-1 min-h-0 flex flex-col">
               <TabDragProvider>
-                <div
-                  ref={workspaceFileTreeSplitRef}
-                  className="h-full min-h-0 min-w-0 w-full"
-                >
+                <div ref={workspaceFileTreeSplitRef} className="h-full min-h-0 min-w-0 w-full">
                   <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-                    <ResizablePanel defaultSize={72} minSize={45} className="min-h-0 min-w-0">
+                    <ResizablePanel
+                      id="workspace-main"
+                      order={1}
+                      defaultSize={workspacePanelDefaultSize}
+                      minSize={45}
+                      className="min-h-0 min-w-0"
+                    >
                       <ResizablePanelGroup direction="vertical" className="h-full min-h-0">
-                        <ResizablePanel defaultSize={72} minSize={35} className="min-h-0">
+                        <ResizablePanel
+                          id="workspace-view"
+                          order={1}
+                          defaultSize={workspaceViewDefaultSize}
+                          minSize={35}
+                          className="min-h-0"
+                        >
                           <div
                             className="h-full min-h-0 min-w-0"
                             data-workspace-drop-root="true"
-                            data-workspace-id={selectedWsStatus === "ready" ? selectedWsId ?? undefined : undefined}
-                            onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                            data-workspace-id={
+                              selectedWsStatus === "ready" ? (selectedWsId ?? undefined) : undefined
+                            }
+                            onPointerDownCapture={() =>
+                              workspaceCommands.setLayoutTargetRuntimeId(null)
+                            }
                           >
                             <ErrorBoundary name="workspace">
                               <div className="relative h-full min-h-0">
@@ -332,10 +367,12 @@ export default function App() {
                               className={bottomPanelOpen ? "z-20" : "hidden"}
                             />
                             <ResizablePanel
+                              id="bottom-terminal"
+                              order={2}
                               ref={bottomPanelRef}
                               collapsible
                               collapsedSize={0}
-                              defaultSize={bottomPanelOpen ? 28 : 0}
+                              defaultSize={bottomPanelDefaultSize}
                               minSize={12}
                               maxSize={55}
                               className="min-h-0"
@@ -356,21 +393,21 @@ export default function App() {
                       className={fileTreeOpen && selectedWsStatus === "ready" ? "z-20" : "hidden"}
                     />
                     <ResizablePanel
+                      id="file-tree"
+                      order={2}
                       ref={fileTreePanelRef}
                       collapsible
                       collapsedSize={0}
-                      defaultSize={
-                        fileTreeOpen && selectedWsStatus === "ready"
-                          ? resolveFileTreePanelPercent()
-                          : 0
-                      }
+                      defaultSize={fileTreePanelDefaultSize}
                       minSize={12}
                       maxSize={55}
                       className="min-h-0 min-w-0"
                     >
                       <div
                         className="h-full min-h-0 min-w-0"
-                        onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                        onPointerDownCapture={() =>
+                          workspaceCommands.setLayoutTargetRuntimeId(null)
+                        }
                       >
                         <ErrorBoundary name="file-tree">
                           {fileTreeOpen && selectedWsStatus === "ready" && selectedWs ? (

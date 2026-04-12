@@ -1,5 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { scmLineStats, scmPathLineStatsBulk, scmStatus, sortScmEntriesByTreeOrder } from "./scm.utils";
+import {
+  scmLineStats,
+  scmPathLineStatsBulk,
+  scmStatus,
+  sortScmEntriesByTreeOrder,
+} from "./scm.utils";
 import { SCM_CHANGES_REFRESH_INTERVAL_MS } from "./scm.types";
 
 type ScmQueryOptions = {
@@ -9,9 +14,13 @@ type ScmQueryOptions = {
 const SCM_STALE_TIME_MS = 5_000;
 const SCM_GC_TIME_MS = 300_000;
 
+export function scmStatusQueryKey(workspaceRoot: string) {
+  return ["scm-status", workspaceRoot] as const;
+}
+
 export function useScmStatusQuery(workspaceRoot: string, options?: ScmQueryOptions) {
   return useQuery({
-    queryKey: ["scm-status", workspaceRoot],
+    queryKey: scmStatusQueryKey(workspaceRoot),
     queryFn: () => scmStatus(workspaceRoot).then(sortScmEntriesByTreeOrder),
     enabled: Boolean(workspaceRoot) && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
@@ -43,10 +52,7 @@ export function useScmPathLineStatsBulkQuery(
   return useQuery({
     queryKey: ["scm-path-line-stats-bulk", worktreePath, staged, relativePaths, untrackedPaths],
     queryFn: () => scmPathLineStatsBulk(worktreePath, relativePaths, staged, untrackedPaths),
-    enabled:
-      Boolean(worktreePath) &&
-      relativePaths.length > 0 &&
-      (options?.enabled ?? true),
+    enabled: Boolean(worktreePath) && relativePaths.length > 0 && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,
     staleTime: SCM_STALE_TIME_MS,

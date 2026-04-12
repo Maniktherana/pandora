@@ -41,5 +41,16 @@ export type TreeScmDecoration = {
 
 export type ScmGitBlobSource = "head" | "index";
 
-export type RunScmActionFn = (fn: () => Promise<void>) => void;
+export type ScmSelectionModifiers = {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+};
+
+export type SelectScmEntryFn = (
+  path: string,
+  visiblePaths: string[],
+  modifiers: ScmSelectionModifiers,
+) => boolean;
+
 export type DiscardEntryFn = (entry: ScmStatusEntry) => void;

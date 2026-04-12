@@ -150,6 +150,76 @@ export function sortScmEntriesByTreeOrder(entries: ScmStatusEntry[]): ScmStatusE
   return [...entries].sort((a, b) => compareScmPathsByTreeOrder(a.path, b.path));
 }
 
+function stagedKindAfterStage(entry: ScmStatusEntry): string {
+  if (entry.stagedKind) return entry.stagedKind;
+  if (entry.untracked || entry.worktreeKind === "?") return "A";
+  return entry.worktreeKind ?? "M";
+}
+
+function worktreeKindAfterUnstage(entry: ScmStatusEntry): string {
+  if (entry.stagedKind === "A") return "?";
+  return entry.worktreeKind ?? entry.stagedKind ?? "M";
+}
+
+export function optimisticallyStageScmEntries(
+  entries: ScmStatusEntry[],
+  paths: string[],
+): ScmStatusEntry[] {
+  if (paths.length === 0) return entries;
+  const pathSet = new Set(paths);
+  return sortScmEntriesByTreeOrder(
+    entries.map((entry) => {
+      if (!pathSet.has(entry.path) || (!entry.untracked && !entry.worktreeKind)) {
+        return entry;
+      }
+      return {
+        ...entry,
+        origPath: entry.origPath,
+        stagedKind: stagedKindAfterStage(entry),
+        worktreeKind: null,
+        untracked: false,
+      };
+    }),
+  );
+}
+
+export function optimisticallyUnstageScmEntries(
+  entries: ScmStatusEntry[],
+  paths: string[],
+): ScmStatusEntry[] {
+  if (paths.length === 0) return entries;
+  const pathSet = new Set(paths);
+  return sortScmEntriesByTreeOrder(
+    entries.map((entry) => {
+      if (!pathSet.has(entry.path) || !entry.stagedKind) {
+        return entry;
+      }
+      const worktreeKind = worktreeKindAfterUnstage(entry);
+      return {
+        ...entry,
+        origPath: entry.stagedKind === "R" ? null : entry.origPath,
+        stagedKind: null,
+        worktreeKind,
+        untracked: worktreeKind === "?",
+      };
+    }),
+  );
+}
+
+export function optimisticallyStageAllScmEntries(entries: ScmStatusEntry[]): ScmStatusEntry[] {
+  return optimisticallyStageScmEntries(
+    entries,
+    entries.filter((entry) => entry.untracked || entry.worktreeKind).map((entry) => entry.path),
+  );
+}
+
+export function optimisticallyUnstageAllScmEntries(entries: ScmStatusEntry[]): ScmStatusEntry[] {
+  return optimisticallyUnstageScmEntries(
+    entries,
+    entries.filter((entry) => entry.stagedKind).map((entry) => entry.path),
+  );
+}
+
 export function scmStage(worktreePath: string, paths: string[]): Promise<void> {
   return invoke("scm_stage", { worktreePath, paths });
 }
