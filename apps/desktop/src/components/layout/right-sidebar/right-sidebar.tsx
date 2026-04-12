@@ -163,6 +163,8 @@ export default function RightSidebar({
     relPath: string;
     kind: TreeRowKind | "root";
   } | null>(null);
+  const contextMenuActionRef = useRef(contextMenu);
+  contextMenuActionRef.current = contextMenu;
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
   const [selectedTreeKind, setSelectedTreeKind] = useState<TreeRowKind | null>(null);
@@ -260,13 +262,6 @@ export default function RightSidebar({
 
   const shouldSuppressClick = useCallback(
     () => performance.now() < suppressClickUntilRef.current,
-    [],
-  );
-
-  const onOpenContextMenu = useCallback(
-    (_clientX: number, _clientY: number, relPath: string, kind: TreeRowKind) => {
-      setContextMenu({ relPath, kind });
-    },
     [],
   );
 
@@ -499,7 +494,8 @@ export default function RightSidebar({
       if (event.key === "c" && event.metaKey && !event.shiftKey) {
         event.preventDefault();
         setCopiedPath(path);
-        void navigator.clipboard.writeText(path);
+        const abs = joinAbsolutePath(workspaceRoot, path);
+        void invoke("write_clipboard_file_paths", { paths: [abs] }).catch(console.error);
         return;
       }
 
@@ -973,17 +969,27 @@ export default function RightSidebar({
   }, [workspaceId]);
 
   const handleRenameEntry = useCallback(() => {
-    if (!contextMenu || contextMenu.kind === "root") return;
-    const sourceRelPath = contextMenu.relPath;
-    const currentName = sourceRelPath.split("/").pop() ?? sourceRelPath;
+    const cm = contextMenuActionRef.current;
+    if (!cm || cm.kind === "root") return;
+    const sourceRelPath = cm.relPath;
+    const parts = sourceRelPath.split("/");
+    if (parts.length > 1) {
+      let acc = parts[0];
+      setPathExpanded(acc, true);
+      for (let i = 1; i < parts.length - 1; i++) {
+        acc = `${acc}/${parts[i]}`;
+        setPathExpanded(acc, true);
+      }
+    }
+    const currentName = parts[parts.length - 1] ?? sourceRelPath;
     setPendingRename({
-      kind: contextMenu.kind,
+      kind: cm.kind,
       relPath: sourceRelPath,
       parentRelPath: getParentRelPath(sourceRelPath),
       currentName,
     });
     setContextMenu(null);
-  }, [contextMenu]);
+  }, [setPathExpanded]);
 
   const handleConfirmRename = useCallback(
     (sourceRelPath: string, nextNameRaw: string) => {
@@ -1025,39 +1031,55 @@ export default function RightSidebar({
     [closeContextMenu],
   );
 
-  const handleTreeContextMenuCapture = useCallback((event: MouseEvent) => {
+  const handleTreeContextMenuCapture = useCallback((event: React.MouseEvent) => {
     const hit = (event.target as Element).closest?.("[data-tree-row-path]");
     if (!hit) {
       setContextMenu({ relPath: "", kind: "root" });
+      return;
     }
+    const relPath = hit.dataset.treeRowPath ?? "";
+    const rawKind = hit.dataset.treeRowKind;
+    const kind: TreeRowKind =
+      rawKind === "directory" ? "directory" : rawKind === "file" ? "file" : "file";
+    if (!relPath) {
+      setContextMenu({ relPath: "", kind: "root" });
+      return;
+    }
+    setContextMenu({ relPath, kind });
   }, []);
 
   const handleContextMenuCopyRelativePath = useCallback(() => {
-    if (!contextMenu || contextMenu.kind === "root") return;
-    void navigator.clipboard.writeText(contextMenu.relPath);
+    const cm = contextMenuActionRef.current;
+    if (!cm || cm.kind === "root") return;
+    void navigator.clipboard.writeText(cm.relPath);
     closeContextMenu();
-  }, [closeContextMenu, contextMenu]);
+  }, [closeContextMenu]);
 
   const handleContextMenuCopyPath = useCallback(() => {
-    if (!contextMenu || contextMenu.kind === "root") return;
-    void navigator.clipboard.writeText(joinAbsolutePath(workspaceRoot, contextMenu.relPath));
+    const cm = contextMenuActionRef.current;
+    if (!cm || cm.kind === "root") return;
+    void navigator.clipboard.writeText(joinAbsolutePath(workspaceRoot, cm.relPath));
     closeContextMenu();
-  }, [closeContextMenu, contextMenu, workspaceRoot]);
+  }, [closeContextMenu, workspaceRoot]);
 
   const handleContextMenuCopy = useCallback(() => {
-    if (!contextMenu || contextMenu.kind === "root") return;
-    setCopiedPath(contextMenu.relPath);
+    const cm = contextMenuActionRef.current;
+    if (!cm || cm.kind === "root") return;
+    setCopiedPath(cm.relPath);
+    const abs = joinAbsolutePath(workspaceRoot, cm.relPath);
+    void invoke("write_clipboard_file_paths", { paths: [abs] }).catch(console.error);
     closeContextMenu();
-  }, [closeContextMenu, contextMenu]);
+  }, [closeContextMenu, workspaceRoot]);
 
   const handleContextMenuPaste = useCallback(() => {
-    if (!contextMenu) return;
+    const cm = contextMenuActionRef.current;
+    if (!cm) return;
     const destDir =
-      contextMenu.kind === "directory"
-        ? contextMenu.relPath
-        : contextMenu.kind === "root"
+      cm.kind === "directory"
+        ? cm.relPath
+        : cm.kind === "root"
           ? ""
-          : getParentRelPath(contextMenu.relPath);
+          : getParentRelPath(cm.relPath);
     void invoke<string[]>("read_clipboard_file_paths")
       .then((clipPaths) => {
         if (clipPaths.length > 0) {
@@ -1077,18 +1099,19 @@ export default function RightSidebar({
       })
       .catch(console.error);
     closeContextMenu();
-  }, [closeContextMenu, contextMenu, copiedPath, refreshTree, workspaceRoot]);
+  }, [closeContextMenu, copiedPath, refreshTree, workspaceRoot]);
 
   const handleContextMenuDelete = useCallback(() => {
-    if (!contextMenu || contextMenu.kind === "root") return;
+    const cm = contextMenuActionRef.current;
+    if (!cm || cm.kind === "root") return;
     void invoke("delete_workspace_entry", {
       workspaceRoot,
-      relativePath: contextMenu.relPath,
+      relativePath: cm.relPath,
     })
       .then(refreshTree)
       .catch(console.error);
     closeContextMenu();
-  }, [closeContextMenu, contextMenu, refreshTree, workspaceRoot]);
+  }, [closeContextMenu, refreshTree, workspaceRoot]);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-[var(--theme-bg)] select-none">
@@ -1167,7 +1190,6 @@ export default function RightSidebar({
                       isExpanded={isPathExpanded(entry.name)}
                       isPathExpanded={isPathExpanded}
                       setPathExpanded={setPathExpanded}
-                      onOpenContextMenu={onOpenContextMenu}
                       activePath={activePath}
                       highlightedLeafDirectory={highlightedLeafDirectory}
                       targetDirectory={targetDirectory}
@@ -1190,8 +1212,6 @@ export default function RightSidebar({
                       icon={<FileTypeIcon path={entry.name} kind="file" />}
                       label={entry.name}
                       decoration={resolveDecoration(entry.name, false, entry.isIgnored)}
-                      fileRelPath={entry.name}
-                      onOpenContextMenu={onOpenContextMenu}
                       active={activePath === entry.name}
                       onOpen={() => void openFile(workspaceId, workspaceRoot, entry.name)}
                       onPointerDown={onRowPointerDown}

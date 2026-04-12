@@ -1207,6 +1207,55 @@ return theFiles as text"#,
     }
 }
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn pandora_set_pasteboard_files(paths: *const *const std::ffi::c_char, count: usize);
+}
+
+/// Puts file URL(s) on the general pasteboard (Finder-style) **and** UTF-8 plain text
+/// with absolute POSIX paths so apps that only read `NSPasteboardTypeString` (many agent UIs)
+/// still receive full paths. Runs on the AppKit main thread.
+#[tauri::command]
+pub fn write_clipboard_file_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("No paths provided".to_string());
+    }
+    for p in &paths {
+        if !Path::new(p).exists() {
+            return Err(format!("Path does not exist: {p}"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::{c_char, CString};
+        use std::sync::mpsc;
+
+        let cstrings: Vec<CString> = paths
+            .into_iter()
+            .map(|p| CString::new(p).map_err(|_| "Path contains an interior NUL byte".to_string()))
+            .collect::<Result<_, _>>()?;
+
+        let (tx, rx) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let ptrs: Vec<*const c_char> = cstrings.iter().map(|c| c.as_ptr()).collect();
+            unsafe {
+                pandora_set_pasteboard_files(ptrs.as_ptr(), ptrs.len());
+            }
+            let _ = tx.send(());
+        })
+        .map_err(|e| e.to_string())?;
+
+        rx.recv().map_err(|e| format!("Clipboard main-thread channel: {e}"))?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 // ─── Reload all data (convenience for frontend) ───
 
 #[derive(serde::Serialize)]

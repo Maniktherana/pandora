@@ -4,7 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
-import { cn, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
+import { cn, getParentRelPath, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import DotGridLoader from "@/components/dot-grid-loader";
@@ -58,12 +58,6 @@ type DirectoryNodeProps = {
   isExpanded: boolean;
   isPathExpanded: (relPath: string) => boolean;
   setPathExpanded: (relPath: string, expanded: boolean) => void;
-  onOpenContextMenu?: (
-    clientX: number,
-    clientY: number,
-    relPath: string,
-    kind: "file" | "directory",
-  ) => void;
   activePath: string | null;
   highlightedLeafDirectory: string | null;
   targetDirectory: string | null;
@@ -92,7 +86,6 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   isExpanded,
   isPathExpanded,
   setPathExpanded,
-  onOpenContextMenu,
   activePath,
   highlightedLeafDirectory,
   targetDirectory,
@@ -120,17 +113,22 @@ export const DirectoryNode = React.memo(function DirectoryNode({
     setOpen(isExpanded);
   }, [isExpanded]);
 
+  const keepPanelOpenForRename = Boolean(
+    pendingRename && getParentRelPath(pendingRename.relPath) === relPath,
+  );
+  const collapsibleOpen = open || keepPanelOpenForRename;
+
   const childrenQuery = useWorkspaceDirectoryQuery({
     workspaceId,
     workspaceRoot,
     relativePath: relPath,
-    enabled: open,
+    enabled: collapsibleOpen,
   });
   const children = childrenQuery.data ?? null;
   const loadError = childrenQuery.error ? String(childrenQuery.error) : null;
 
   useEffect(() => {
-    if (!open) {
+    if (!collapsibleOpen) {
       setIsStickyActive(false);
       return;
     }
@@ -154,12 +152,15 @@ export const DirectoryNode = React.memo(function DirectoryNode({
       scroller.removeEventListener("scroll", updateStickyState);
       window.removeEventListener("resize", updateStickyState);
     };
-  }, [depth, open]);
+  }, [depth, collapsibleOpen]);
 
   return (
     <Collapsible
-      open={open}
+      open={collapsibleOpen}
       onOpenChange={(next) => {
+        if (keepPanelOpenForRename && !next) {
+          return;
+        }
         setOpen(next);
         setPathExpanded(relPath, next);
       }}
@@ -175,7 +176,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               "group relative w-full justify-start gap-2 rounded-md py-0 pr-2 pl-0 text-left text-xs font-normal transition-none",
               {
                 "sticky bg-[var(--theme-bg)] aria-expanded:bg-[var(--theme-bg)] dark:aria-expanded:bg-[var(--theme-bg)]":
-                  open,
+                  collapsibleOpen,
                 "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]":
                   !isStickyActive,
               },
@@ -194,7 +195,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               height: TREE_ROW_HEIGHT_PX,
               minHeight: TREE_ROW_HEIGHT_PX,
               paddingLeft: rowPaddingLeft,
-              ...(open
+              ...(collapsibleOpen
                 ? {
                     top: depth * DIRECTORY_STICKY_ROW_OFFSET_PX - STICKY_TOP_COMPENSATION_PX,
                     zIndex: DIRECTORY_STICKY_Z_INDEX_BASE - depth,
@@ -212,14 +213,12 @@ export const DirectoryNode = React.memo(function DirectoryNode({
             }
             onClickCapture={onRowClickCapture}
             onContextMenu={(event) => {
-              if (!onOpenContextMenu) return;
               event.preventDefault();
-              onOpenContextMenu(event.clientX, event.clientY, relPath, "directory");
             }}
           >
             <ChevronRight className="size-4 shrink-0 group-data-[panel-open]:rotate-90" />
             {showDirectoryIcon ? (
-              <FileTypeIcon path={relPath} kind="directory" expanded={open} />
+              <FileTypeIcon path={relPath} kind="directory" expanded={collapsibleOpen} />
             ) : null}
             <span className="truncate">{name}</span>
             {decoration.badge ? (
@@ -244,6 +243,17 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               onCancel={onCancelCreate}
             />
           )}
+          {pendingRename && getParentRelPath(pendingRename.relPath) === relPath && (
+            <TreeRenameInput
+              key={`rename-${pendingRename.relPath}`}
+              kind={pendingRename.kind}
+              depth={depth + 1}
+              initialName={pendingRename.currentName}
+              sourceRelPath={pendingRename.relPath}
+              onConfirm={onConfirmRename}
+              onCancel={onCancelRename}
+            />
+          )}
           {loadError && (
             <div
               className="px-2 py-1 text-[11px] text-[var(--theme-error)]"
@@ -255,7 +265,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               {loadError}
             </div>
           )}
-          {open && children === null && childrenQuery.isFetching && !loadError && (
+          {collapsibleOpen && children === null && childrenQuery.isFetching && !loadError && (
             <div
               className="flex items-center justify-center py-3"
               style={{
@@ -275,17 +285,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
             (() => {
               const childRelPath = joinRel(relPath, entry.name);
               if (pendingRename?.relPath === childRelPath) {
-                return (
-                  <TreeRenameInput
-                    key={childRelPath}
-                    kind={entry.isDirectory ? "directory" : "file"}
-                    depth={depth + 1}
-                    initialName={pendingRename.currentName}
-                    sourceRelPath={pendingRename.relPath}
-                    onConfirm={onConfirmRename}
-                    onCancel={onCancelRename}
-                  />
-                );
+                return null;
               }
               return entry.isDirectory ? (
                 <DirectoryNode
@@ -301,7 +301,6 @@ export const DirectoryNode = React.memo(function DirectoryNode({
                   isExpanded={isPathExpanded(childRelPath)}
                   isPathExpanded={isPathExpanded}
                   setPathExpanded={setPathExpanded}
-                  onOpenContextMenu={onOpenContextMenu}
                   activePath={activePath}
                   highlightedLeafDirectory={highlightedLeafDirectory}
                   targetDirectory={targetDirectory}
@@ -324,8 +323,6 @@ export const DirectoryNode = React.memo(function DirectoryNode({
                   icon={<FileTypeIcon path={childRelPath} kind="file" />}
                   label={entry.name}
                   decoration={resolveDecoration(childRelPath, false, entry.isIgnored)}
-                  fileRelPath={childRelPath}
-                  onOpenContextMenu={onOpenContextMenu}
                   active={activePath === childRelPath}
                   onOpen={() => void openFile(workspaceId, workspaceRoot, childRelPath)}
                   onPointerDown={onRowPointerDown}

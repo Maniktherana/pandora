@@ -17,7 +17,11 @@ export function TreeCreateInput({ kind, parentRelPath, depth, onConfirm, onCance
   const committedRef = useRef(false);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const el = inputRef.current;
+    if (!el) return;
+    queueMicrotask(() => {
+      el.focus();
+    });
   }, []);
 
   const commit = (value: string) => {
@@ -35,7 +39,7 @@ export function TreeCreateInput({ kind, parentRelPath, depth, onConfirm, onCance
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      commit(inputRef.current?.value ?? "");
+      commit(event.currentTarget.value);
       return;
     }
     if (event.key === "Escape") {
@@ -45,7 +49,8 @@ export function TreeCreateInput({ kind, parentRelPath, depth, onConfirm, onCance
   };
 
   const handleBlur = () => {
-    const value = inputRef.current?.value?.trim();
+    if (committedRef.current) return;
+    const value = inputRef.current?.value.trim() ?? "";
     if (value) {
       commit(value);
     } else {
@@ -65,8 +70,14 @@ export function TreeCreateInput({ kind, parentRelPath, depth, onConfirm, onCance
       />
       <Input
         ref={inputRef}
+        unstyled
+        nativeInput
         type="text"
-        className="h-5 min-w-0 flex-1 rounded-sm border-[var(--theme-interactive)] bg-transparent px-1 py-0 text-xs text-[var(--theme-text)] focus-visible:ring-0"
+        autoCorrect="off"
+        autoCapitalize="off"
+        autoComplete="off"
+        spellCheck={false}
+        className="h-5 min-h-0 flex-1 rounded-sm border border-[var(--theme-interactive)] px-1.5 text-xs leading-5 text-[var(--theme-text)] focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/40"
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
       />

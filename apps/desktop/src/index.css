@@ -10,6 +10,11 @@
 
 /* Do not set a solid body background here: unlayered rules beat @layer base and would
    paint opaque #0a0a0a over the transparent Tauri window (sidebar stays black). */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 body {
   color: var(--color-foreground);
   margin: 0;
@@ -20,7 +25,32 @@ body {
     "Segoe UI",
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
   user-select: none;
+}
+
+/* Opt in to selection only where users expect real text (desktop shell default is none above). */
+input,
+textarea,
+select,
+[contenteditable="true"],
+[contenteditable="plaintext-only"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Monaco renders lines in nested divs; WebKit inherits `none` from html/body without this. */
+.monaco-editor,
+.monaco-editor * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Pierre diff body: class is set on the scroll region in `diff-viewer.tsx` (below the chrome). */
+.pandora-diff-selectable,
+.pandora-diff-selectable * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Custom scrollbar */

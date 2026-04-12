@@ -2,6 +2,16 @@ fn main() {
     tauri_build::build();
 
     let target = std::env::var("TARGET").unwrap_or_default();
+    if target.ends_with("-apple-darwin") {
+        println!("cargo:rerun-if-changed=src/pandora_clipboard.m");
+        cc::Build::new()
+            .file("src/pandora_clipboard.m")
+            .flag("-fobjc-arc")
+            .compile("pandora_clipboard");
+        println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=AppKit");
+    }
+
     if target.as_str() != "aarch64-apple-darwin" {
         return;
     }

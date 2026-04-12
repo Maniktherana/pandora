@@ -14,8 +14,6 @@ type FileTreeRowProps = {
   onOpen?: () => void;
   onPointerDown?: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
   onClickCapture?: (event: React.MouseEvent) => void;
-  fileRelPath?: string;
-  onOpenContextMenu?: (clientX: number, clientY: number, relPath: string, kind: TreeRowKind) => void;
   active?: boolean;
   rowKind: TreeRowKind;
   rowRelPath: string;
@@ -34,8 +32,6 @@ export const FileTreeRow = React.memo(function FileTreeRow({
   onOpen,
   onPointerDown,
   onClickCapture,
-  fileRelPath,
-  onOpenContextMenu,
   active,
   rowKind,
   rowRelPath,
@@ -91,8 +87,6 @@ export const FileTreeRow = React.memo(function FileTreeRow({
         onClick={onOpen}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!fileRelPath || !onOpenContextMenu) return;
-          onOpenContextMenu(event.clientX, event.clientY, fileRelPath, rowKind);
         }}
       >
         {content}

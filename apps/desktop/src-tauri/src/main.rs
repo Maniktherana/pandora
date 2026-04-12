@@ -222,6 +222,7 @@ fn main() {
             commands::delete_workspace_entry,
             commands::copy_within_workspace,
             commands::read_clipboard_file_paths,
+            commands::write_clipboard_file_paths,
         ])
         .setup(|app| {
             let _ = agent_cli::ensure_agent_cli_integration();

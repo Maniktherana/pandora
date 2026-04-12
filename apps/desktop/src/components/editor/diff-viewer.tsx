@@ -283,7 +283,7 @@ export default function DiffViewer({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="pandora-diff-selectable min-h-0 flex-1 overflow-auto">
         {displayError && (
           <div className="flex items-start gap-2 p-3 text-sm text-[var(--theme-error)]">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
