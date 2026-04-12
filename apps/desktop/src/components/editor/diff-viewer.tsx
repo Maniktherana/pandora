@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileDiff as PierreFileDiff } from "@pierre/diffs/react";
 import { parseDiffFromFile } from "@pierre/diffs";
-import type { FileDiffOptions } from "@pierre/diffs";
+import type { FileDiffMetadata, FileDiffOptions, VirtualFileMetrics } from "@pierre/diffs";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import {
@@ -11,7 +11,13 @@ import {
   getLargeDiffOptions,
   getPierreSurfaceStyle,
 } from "@/components/editor/pierre-pandora";
-import { diffContentsQueryKey, fetchDiffContents } from "@/components/editor/diff-data";
+import {
+  DIFF_CONTENTS_GC_TIME_MS,
+  DIFF_CONTENTS_STALE_TIME_MS,
+  diffContentsQueryKey,
+  fetchDiffContents,
+  type DiffContentsData,
+} from "@/components/editor/diff-data";
 import { defaultTheme } from "@/lib/theme";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +25,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
+
+type ParsedDiffCacheValue = {
+  diffMetadata: FileDiffMetadata | null;
+  parseError: string | null;
+};
+
+const parsedDiffCache = new WeakMap<DiffContentsData, Map<string, ParsedDiffCacheValue>>();
 
 function loadSideBySide(): boolean {
   if (typeof window === "undefined") return true;
@@ -51,6 +64,7 @@ export default function DiffViewer({
   diffStyle: controlledDiffStyle,
   wrapLines: controlledWrapLines,
   reloadKey = 0,
+  metrics,
   onStatsChange,
 }: {
   workspaceRoot: string;
@@ -63,6 +77,7 @@ export default function DiffViewer({
   diffStyle?: PierreDiffStyle;
   wrapLines?: boolean;
   reloadKey?: number;
+  metrics?: VirtualFileMetrics;
   onStatsChange?: (stats: DiffViewerStats) => void;
 }) {
   const staged = source === "staged";
@@ -91,8 +106,8 @@ export default function DiffViewer({
     queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source),
     queryFn: () => fetchDiffContents(workspaceRoot, relativePath, source),
     enabled: isActive,
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
+    staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+    gcTime: DIFF_CONTENTS_GC_TIME_MS,
   });
 
   useEffect(() => {
@@ -111,12 +126,19 @@ export default function DiffViewer({
   const wrapLines = controlledWrapLines ?? storedWrapLines;
   const isLarge = Math.max(original.length, modified.length) > 500_000;
 
-  const parsed = useMemo(() => {
-    if (loading || error || original === modified) {
+  const parsed = useMemo((): ParsedDiffCacheValue => {
+    const data = diffQuery.data;
+    if (loading || error || data == null || original === modified) {
       return { diffMetadata: null, parseError: null as string | null };
     }
+
+    const cachedByPath = parsedDiffCache.get(data);
+    const cached = cachedByPath?.get(relativePath);
+    if (cached) return cached;
+
+    let next: ParsedDiffCacheValue;
     try {
-      return {
+      next = {
         diffMetadata: parseDiffFromFile(
           createPierreFile(relativePath, original),
           createPierreFile(relativePath, modified),
@@ -124,9 +146,16 @@ export default function DiffViewer({
         parseError: null as string | null,
       };
     } catch (parseError) {
-      return { diffMetadata: null, parseError: String(parseError) };
+      next = { diffMetadata: null, parseError: String(parseError) };
     }
-  }, [error, loading, modified, original, relativePath]);
+
+    if (cachedByPath) {
+      cachedByPath.set(relativePath, next);
+    } else {
+      parsedDiffCache.set(data, new Map([[relativePath, next]]));
+    }
+    return next;
+  }, [diffQuery.data, error, loading, modified, original, relativePath]);
 
   const diffMetadata = parsed.diffMetadata;
   const displayError = error ?? parsed.parseError;
@@ -273,6 +302,7 @@ export default function DiffViewer({
           <PierreFileDiff
             fileDiff={diffMetadata}
             options={options}
+            metrics={metrics}
             className="block h-full min-h-full w-full"
           />
         )}

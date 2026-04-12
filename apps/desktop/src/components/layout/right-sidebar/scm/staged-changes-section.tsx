@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ChevronRight } from "lucide-react";
-import { FilePlusIcon, MinusSignIcon } from "@hugeicons/core-free-icons";
+import { MinusSignIcon } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -13,11 +13,7 @@ import {
   statusTone,
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "./scm-status-badge";
-import {
-  SCM_SECTION_STICKY_ROW_HEIGHT_PX,
-  type OpenDiffFn,
-  type ScmStatusEntry,
-} from "./scm.types";
+import { SCM_SECTION_STICKY_ROW_HEIGHT_PX, type ScmStatusEntry } from "./scm.types";
 
 type StagedChangesSectionProps = {
   stagedList: ScmStatusEntry[];
@@ -26,9 +22,8 @@ type StagedChangesSectionProps = {
   busy: boolean;
   stickyTop: number;
   stickyZIndex: number;
-  onOpenDiff: OpenDiffFn;
+  onOpenFile: (path: string) => void;
   onUnstage: (path: string) => void;
-  onViewAll: () => void;
   onUnstageAll: () => void;
 };
 
@@ -39,9 +34,8 @@ export function StagedChangesSection({
   busy,
   stickyTop,
   stickyZIndex,
-  onOpenDiff,
+  onOpenFile,
   onUnstage,
-  onViewAll,
   onUnstageAll,
 }: StagedChangesSectionProps) {
   if (stagedList.length === 0) return null;
@@ -64,19 +58,7 @@ export function StagedChangesSection({
           >
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
             <span className="text-[11px] font-medium uppercase tracking-wide">Staged</span>
-            <span className="ml-auto flex w-14 items-center justify-end gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
-              <Tooltip>
-                <TooltipTrigger
-                  render={<Button type="button" variant="ghost" size="icon-xs" disabled={busy} />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onViewAll();
-                  }}
-                >
-                  <HugeiconsIcon icon={FilePlusIcon} strokeWidth={1.5} className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>View all changes</TooltipContent>
-              </Tooltip>
+            <span className="ml-auto flex w-8 items-center justify-end gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
               <Tooltip>
                 <TooltipTrigger
                   render={<Button type="button" variant="ghost" size="icon-xs" disabled={busy} />}
@@ -91,7 +73,10 @@ export function StagedChangesSection({
               </Tooltip>
             </span>
             <span className="flex items-center gap-1">
-            <Badge variant={"outline"} className="p-1.5 font-mono text-xs text-[var(--theme-text-subtle)]">
+              <Badge
+                variant={"outline"}
+                className="p-1.5 font-mono text-xs text-[var(--theme-text-subtle)]"
+              >
                 {stagedList.length}
               </Badge>
             </span>
@@ -113,19 +98,17 @@ export function StagedChangesSection({
                     role="button"
                     tabIndex={0}
                     className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1 hover:bg-[var(--theme-panel-hover)]"
-                    onClick={() => onOpenDiff(entry.path, "staged")}
+                    onClick={() => onOpenFile(entry.path)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        onOpenDiff(entry.path, "staged");
+                        onOpenFile(entry.path);
                       }
                     }}
                   >
                     <FileTypeIcon path={entry.path} kind="file" className="shrink-0" />
                     <div className="min-w-0 flex flex-1 items-center gap-1">
-                      <span
-                        className={cn("shrink-0 text-[12px]", scmToneTextClass(tone))}
-                      >
+                      <span className={cn("shrink-0 text-[12px]", scmToneTextClass(tone))}>
                         {fileName}
                       </span>
                       <span className="truncate text-[11px] text-[var(--theme-text-faint)]">
@@ -136,22 +119,16 @@ export function StagedChangesSection({
                       <Tooltip>
                         <TooltipTrigger
                           render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
-                              disabled={busy}
-                            />
+                            <Button type="button" variant="ghost" size="icon-xs" disabled={busy} />
                           }
                           onClick={(event) => {
                             event.stopPropagation();
-                            onOpenDiff(entry.path, "staged");
+                            onOpenFile(entry.path);
                           }}
                         >
-                          <HugeiconsIcon icon={FilePlusIcon} strokeWidth={1.5} className="size-3.5" />
+                          <FileTypeIcon path={entry.path} kind="file" className="size-3.5" />
                         </TooltipTrigger>
-                        <TooltipContent>View changes</TooltipContent>
+                        <TooltipContent>Open file</TooltipContent>
                       </Tooltip>
                       <Tooltip>
                         <TooltipTrigger
@@ -169,13 +146,21 @@ export function StagedChangesSection({
                             onUnstage(entry.path);
                           }}
                         >
-                          <HugeiconsIcon icon={MinusSignIcon} strokeWidth={1.5} className="size-3.5" />
+                          <HugeiconsIcon
+                            icon={MinusSignIcon}
+                            strokeWidth={1.5}
+                            className="size-3.5"
+                          />
                         </TooltipTrigger>
                         <TooltipContent>Unstage changes</TooltipContent>
                       </Tooltip>
                     </div>
                     {decoration.badge ? (
-                      <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="shrink-0" />
+                      <ScmStatusBadge
+                        text={decoration.badge}
+                        tone={decoration.tone}
+                        className="shrink-0"
+                      />
                     ) : null}
                   </div>
                 </li>

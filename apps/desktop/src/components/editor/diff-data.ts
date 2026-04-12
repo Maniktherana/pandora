@@ -9,6 +9,9 @@ export type DiffContentsData = {
   modified: string;
 };
 
+export const DIFF_CONTENTS_STALE_TIME_MS = 2 * 60_000;
+export const DIFF_CONTENTS_GC_TIME_MS = 30 * 60_000;
+
 export function diffContentsQueryKey(
   workspaceRoot: string,
   relativePath: string,

@@ -9,7 +9,6 @@ import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import type { DiffSource } from "@/lib/shared/types";
 import {
   scmCommit,
   scmDiscardTracked,
@@ -102,10 +101,6 @@ export default function WorkspaceChangesPanel({
     }
   };
 
-  const onOpenDiff = (path: string, source: DiffSource) => {
-    layoutCommands.addDiffTabForPath(path, source);
-  };
-
   const onOpenReview = () => {
     layoutCommands.addReviewTab();
   };
@@ -132,14 +127,6 @@ export default function WorkspaceChangesPanel({
       await scmCommit(workspaceRoot, commitMessage);
       setCommitMessage("");
     });
-
-  const onViewAllStaged = () => {
-    for (const entry of stagedList) onOpenDiff(entry.path, "staged");
-  };
-
-  const onViewAllUnstaged = () => {
-    for (const entry of unstagedList) onOpenDiff(entry.path, "working");
-  };
 
   const onUnstageAll = () => {
     if (!stagedList.length) return;
@@ -340,9 +327,8 @@ export default function WorkspaceChangesPanel({
             busy={busy}
             stickyTop={0}
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
-            onOpenDiff={onOpenDiff}
+            onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
             onUnstage={onUnstage}
-            onViewAll={onViewAllStaged}
             onUnstageAll={onUnstageAll}
           />
         ) : null}
@@ -356,11 +342,9 @@ export default function WorkspaceChangesPanel({
             stickyTop={0}
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
             workspaceRoot={workspaceRoot}
-            onOpenDiff={onOpenDiff}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
             onDiscard={onDiscard}
             run={(fn) => void run(fn)}
-            onViewAll={onViewAllUnstaged}
             onDiscardAll={onDiscardAll}
             onStageAll={onStageAll}
           />

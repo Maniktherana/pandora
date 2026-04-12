@@ -14,7 +14,6 @@ import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useRuntimeState, useUiPreferencesView } from "@/hooks/use-desktop-view";
-import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { cn, getParentRelPath, joinAbsolutePath } from "@/lib/shared/utils";
 import { decorationForScmEntry } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type {
@@ -194,7 +193,6 @@ export default function RightSidebar({
   dragSessionRef.current = dragSession;
 
   const { openFile } = useEditorActions();
-  const layoutCommands = useLayoutActions();
   const { startDrag } = useTabDrag();
   const queryClient = useQueryClient();
   const activePath = useRuntimeState(workspaceId, selectActiveEditorPath);
@@ -1034,12 +1032,6 @@ export default function RightSidebar({
     }
   }, []);
 
-  const handleContextMenuOpenDiffStaged = useCallback(() => {
-    if (!contextMenu || contextMenu.kind !== "file") return;
-    layoutCommands.addDiffTabForPath(contextMenu.relPath, "staged");
-    closeContextMenu();
-  }, [closeContextMenu, contextMenu, layoutCommands]);
-
   const handleContextMenuCopyRelativePath = useCallback(() => {
     if (!contextMenu || contextMenu.kind === "root") return;
     void navigator.clipboard.writeText(contextMenu.relPath);
@@ -1218,11 +1210,6 @@ export default function RightSidebar({
 
             {contextMenu ? (
               <ContextMenuContent side="right" align="start" className="min-w-[200px]">
-                {contextMenu.kind === "file" ? (
-                  <ContextMenuItem onClick={handleContextMenuOpenDiffStaged}>
-                    Open diff (staged)
-                  </ContextMenuItem>
-                ) : null}
                 {contextMenu.kind !== "root" ? (
                   <>
                     <ContextMenuItem onClick={handleContextMenuCopyRelativePath}>

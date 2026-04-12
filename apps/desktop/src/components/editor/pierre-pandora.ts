@@ -1,9 +1,15 @@
 import type { CSSProperties } from "react";
-import { registerCustomTheme, type FileContents, type FileDiffOptions } from "@pierre/diffs";
+import {
+  registerCustomTheme,
+  type FileContents,
+  type FileDiffOptions,
+  type VirtualFileMetrics,
+} from "@pierre/diffs";
 import { toPierreVariables } from "@/lib/theme";
 import { defaultTheme } from "@/lib/theme";
 
 const PANDORA_PIERRE_THEME = "pandora-theme";
+const REVIEW_DIFF_LINE_HEIGHT = defaultTheme.codeEditor.typography.lineHeight;
 const syntax = defaultTheme.codeEditor.syntax;
 const codeSurface = defaultTheme.codeEditor.surface;
 
@@ -74,6 +80,14 @@ registerPandoraPierreTheme();
 
 export const pierreSurfaceStyle = toPierreVariables(defaultTheme.codeEditor);
 
+export const REVIEW_DIFF_METRICS: VirtualFileMetrics = {
+  hunkLineCount: 50,
+  lineHeight: REVIEW_DIFF_LINE_HEIGHT,
+  diffHeaderHeight: 0,
+  hunkSeparatorHeight: 32,
+  fileGap: 8,
+};
+
 const pierreUnsafeCSS = `
 [data-diff] [data-column-number],
 [data-file] [data-column-number] {
@@ -129,8 +143,17 @@ export function createPierreFile(name: string, contents: string): FileContents {
   return {
     name,
     contents,
-    cacheKey: `${name}:${contents.length}:${contents.slice(0, 128)}`,
+    cacheKey: `${name}:${contents.length}:${hashString(contents)}`,
   };
+}
+
+function hashString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export function getLargeDiffOptions(diffStyle: PierreDiffStyle): Partial<FileDiffOptions<unknown>> {
