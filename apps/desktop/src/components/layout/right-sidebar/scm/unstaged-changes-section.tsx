@@ -29,7 +29,7 @@ type UnstagedChangesSectionProps = {
   stickyZIndex: number;
   selectedPaths: Set<string>;
   onOpenFile: (path: string) => void;
-  onOpenReview: () => void;
+  onOpenReviewPath: (path: string) => void;
   onSelectEntry: SelectScmEntryFn;
   onDiscard: DiscardEntryFn;
   onStage: (entry: ScmStatusEntry) => void;
@@ -46,7 +46,7 @@ export function UnstagedChangesSection({
   stickyZIndex,
   selectedPaths,
   onOpenFile,
-  onOpenReview,
+  onOpenReviewPath,
   onSelectEntry,
   onDiscard,
   onStage,
@@ -150,13 +150,13 @@ export function UnstagedChangesSection({
                         shiftKey: event.shiftKey,
                       });
                       if (!selectionHandled) {
-                        onOpenReview();
+                        onOpenReviewPath(entry.path);
                       }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        onOpenReview();
+                        onOpenReviewPath(entry.path);
                       }
                     }}
                   >

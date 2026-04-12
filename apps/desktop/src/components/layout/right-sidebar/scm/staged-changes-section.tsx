@@ -28,7 +28,7 @@ type StagedChangesSectionProps = {
   stickyZIndex: number;
   selectedPaths: Set<string>;
   onOpenFile: (path: string) => void;
-  onOpenReview: () => void;
+  onOpenReviewPath: (path: string) => void;
   onSelectEntry: SelectScmEntryFn;
   onUnstage: (path: string) => void;
   onUnstageAll: () => void;
@@ -43,7 +43,7 @@ export function StagedChangesSection({
   stickyZIndex,
   selectedPaths,
   onOpenFile,
-  onOpenReview,
+  onOpenReviewPath,
   onSelectEntry,
   onUnstage,
   onUnstageAll,
@@ -128,13 +128,13 @@ export function StagedChangesSection({
                         shiftKey: event.shiftKey,
                       });
                       if (!selectionHandled) {
-                        onOpenReview();
+                        onOpenReviewPath(entry.path);
                       }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        onOpenReview();
+                        onOpenReviewPath(entry.path);
                       }
                     }}
                   >

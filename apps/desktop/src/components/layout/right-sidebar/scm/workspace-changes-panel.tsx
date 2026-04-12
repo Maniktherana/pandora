@@ -34,6 +34,8 @@ import { UnstagedChangesSection } from "./unstaged-changes-section";
 import { scmStatusQueryKey, useScmStatusQuery } from "./scm-queries";
 import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "./scm.types";
 import DotGridLoader from "@/components/dot-grid-loader";
+import type { DiffSource } from "@/lib/shared/types";
+import { requestReviewNavigation } from "@/state/review-navigation-store";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -212,6 +214,14 @@ export default function WorkspaceChangesPanel({
   const onOpenReview = () => {
     layoutCommands.addReviewTab();
   };
+
+  const onOpenReviewPath = useCallback(
+    (path: string, source: DiffSource) => {
+      requestReviewNavigation(workspaceId, path, source);
+      layoutCommands.addReviewTab();
+    },
+    [layoutCommands, workspaceId],
+  );
 
   const clearSelection = useCallback(() => {
     setSelectedPaths([]);
@@ -474,7 +484,7 @@ export default function WorkspaceChangesPanel({
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
             selectedPaths={selectedPathSet}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
-            onOpenReview={onOpenReview}
+            onOpenReviewPath={(path) => onOpenReviewPath(path, "staged")}
             onSelectEntry={selectEntry}
             onUnstage={onUnstage}
             onUnstageAll={onUnstageAll}
@@ -491,7 +501,7 @@ export default function WorkspaceChangesPanel({
             stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
             selectedPaths={selectedPathSet}
             onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
-            onOpenReview={onOpenReview}
+            onOpenReviewPath={(path) => onOpenReviewPath(path, "working")}
             onSelectEntry={selectEntry}
             onDiscard={onDiscard}
             onStage={onStage}

@@ -61,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
+import { useReviewNavigationStore } from "@/state/review-navigation-store";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
@@ -161,6 +162,10 @@ function estimateDiffBodyHeight(stats: ScmLineStats | undefined): number {
     MIN_ESTIMATED_DIFF_BODY_HEIGHT,
     MAX_ESTIMATED_DIFF_BODY_HEIGHT,
   );
+}
+
+function reviewTargetAttr(path: string): string {
+  return encodeURIComponent(path);
 }
 
 function isNearScrollRoot(node: HTMLElement, root: HTMLElement | null, margin: number): boolean {
@@ -305,6 +310,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
 
   return (
     <section
+      data-review-path={reviewTargetAttr(entry.path)}
       className={cn(
         "group/review-card bg-[var(--theme-code-surface-base)]",
         !isFirst && "border-t border-[var(--theme-code-surface-separator)]",
@@ -401,6 +407,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
 });
 
 function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
+  const viewerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
@@ -413,6 +420,10 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
+  const reviewNavigationRequest = useReviewNavigationStore(
+    (state) => state.requestByWorkspaceId[workspaceId] ?? null,
+  );
+  const clearReviewNavigation = useReviewNavigationStore((state) => state.clearReviewNavigation);
 
   useEffect(() => {
     if (!workspace || workspace.status !== "ready") {
@@ -503,6 +514,80 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       return next;
     });
   }, [filteredEntries]);
+
+  useEffect(() => {
+    if (!reviewNavigationRequest) return;
+
+    const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
+    setMode((current) => (current === requestedMode ? current : requestedMode));
+    setOpenByPath((current) =>
+      current[reviewNavigationRequest.path]
+        ? current
+        : { ...current, [reviewNavigationRequest.path]: true },
+    );
+
+    void queryClient.prefetchQuery({
+      queryKey: diffContentsQueryKey(
+        workspaceRoot,
+        reviewNavigationRequest.path,
+        reviewNavigationRequest.source,
+      ),
+      queryFn: () =>
+        fetchDiffContents(
+          workspaceRoot,
+          reviewNavigationRequest.path,
+          reviewNavigationRequest.source,
+        ),
+      staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+    });
+  }, [queryClient, reviewNavigationRequest, workspaceRoot]);
+
+  useEffect(() => {
+    if (!reviewNavigationRequest || entriesData == null) return;
+
+    const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
+    if (mode !== requestedMode) return;
+
+    if (!filteredEntries.some((entry) => entry.path === reviewNavigationRequest.path)) {
+      clearReviewNavigation(workspaceId, reviewNavigationRequest.nonce);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId = 0;
+    let attempts = 0;
+
+    const scrollToTarget = () => {
+      if (cancelled) return;
+      const selector = `[data-review-path="${reviewTargetAttr(reviewNavigationRequest.path)}"]`;
+      const target = viewerRef.current?.querySelector<HTMLElement>(selector) ?? null;
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+        clearReviewNavigation(workspaceId, reviewNavigationRequest.nonce);
+        return;
+      }
+      if (attempts >= 8) {
+        clearReviewNavigation(workspaceId, reviewNavigationRequest.nonce);
+        return;
+      }
+      attempts += 1;
+      frameId = window.requestAnimationFrame(scrollToTarget);
+    };
+
+    frameId = window.requestAnimationFrame(scrollToTarget);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [
+    clearReviewNavigation,
+    entriesData,
+    filteredEntries,
+    mode,
+    reviewNavigationRequest,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!activeSource || prefetchPathKey.length === 0) return;
@@ -630,7 +715,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       poolOptions={pierreWorkerPoolOptions}
       highlighterOptions={pierreHighlighterOptions}
     >
-      <div className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
+      <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
         <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
           <DropdownMenu>
             <DropdownMenuTrigger
