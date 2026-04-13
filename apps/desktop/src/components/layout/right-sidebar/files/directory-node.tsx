@@ -232,7 +232,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
           </Button>
         }
       />
-      <CollapsibleContent>
+      <CollapsibleContent className="overflow-visible transition-none duration-0">
         <div className="flex flex-col">
           {pendingCreate && pendingCreate.parentRelPath === relPath && (
             <TreeCreateInput
