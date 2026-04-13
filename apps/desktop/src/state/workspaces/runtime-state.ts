@@ -7,6 +7,10 @@ import type {
 } from "@/lib/shared/types";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import {
+  createProjectTerminalPanelState,
+  reconcileProjectTerminalPanelState,
+} from "./project-terminal-panel-state";
+import {
   addTerminalTabToNode,
   createLeaf,
   findLeaf,
@@ -15,42 +19,6 @@ import {
   removeTerminalSlotFromTree,
 } from "@/components/layout/workspace/layout-tree";
 import { defaultTerminalDisplay } from "@/lib/terminal/terminal-identity";
-import {
-  addTerminalGroup,
-  createEmptyTerminalPanel,
-  removeTerminalFromPanel,
-  terminalPanelContainsSlot,
-} from "@/lib/terminal/bottom-terminal-panel";
-
-function createProjectTerminalPanelState(): WorkspaceRuntimeState["terminalPanel"] {
-  return createEmptyTerminalPanel();
-}
-
-function reconcileProjectTerminalPanelState(
-  panel: WorkspaceRuntimeState["terminalPanel"],
-  slotIds: Iterable<string>,
-): WorkspaceRuntimeState["terminalPanel"] {
-  const liveSlotIds = new Set(slotIds);
-  let terminalPanel = panel ?? createEmptyTerminalPanel();
-
-  for (const slotId of liveSlotIds) {
-    if (!terminalPanelContainsSlot(terminalPanel, slotId)) {
-      terminalPanel = addTerminalGroup(terminalPanel, slotId, {
-        activate: terminalPanel.groups.length === 0,
-      });
-    }
-  }
-
-  for (const group of terminalPanel.groups) {
-    for (const child of group.children) {
-      if (!liveSlotIds.has(child)) {
-        terminalPanel = removeTerminalFromPanel(terminalPanel, child);
-      }
-    }
-  }
-
-  return terminalPanel;
-}
 
 export function sanitizeWorkspaceTerminalLayout(
   root: LayoutNode | null,

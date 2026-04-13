@@ -19,11 +19,23 @@ export function createProjectTerminalPanelState(): TerminalPanelState {
   return createEmptyTerminalPanel();
 }
 
+function getEarliestGroupSlotOrder(
+  group: TerminalPanelState["groups"][number],
+  slotOrder: Map<string, number>,
+): number {
+  let earliestOrder = Number.POSITIVE_INFINITY;
+  for (const child of group.children) {
+    earliestOrder = Math.min(earliestOrder, slotOrder.get(child) ?? Number.POSITIVE_INFINITY);
+  }
+  return earliestOrder;
+}
+
 export function reconcileProjectTerminalPanelState(
   panel: TerminalPanelState | null | undefined,
   slotIds: Iterable<string>,
 ): TerminalPanelState {
-  const liveSlotIds = new Set(slotIds);
+  const slotIdArray = Array.from(slotIds);
+  const liveSlotIds = new Set(slotIdArray);
   let terminalPanel = panel ?? createEmptyTerminalPanel();
 
   for (const slotId of liveSlotIds) {
@@ -42,7 +54,19 @@ export function reconcileProjectTerminalPanelState(
     }
   }
 
-  return terminalPanel;
+  const slotOrder = new Map(slotIdArray.map((slotId, index) => [slotId, index]));
+  const activeGroupId = terminalPanel.groups[terminalPanel.activeGroupIndex]?.id ?? null;
+  const groups = [...terminalPanel.groups].sort((left, right) => {
+    return getEarliestGroupSlotOrder(left, slotOrder) - getEarliestGroupSlotOrder(right, slotOrder);
+  });
+  const activeGroupIndex =
+    activeGroupId == null ? 0 : Math.max(0, groups.findIndex((group) => group.id === activeGroupId));
+
+  return {
+    ...terminalPanel,
+    groups,
+    activeGroupIndex,
+  };
 }
 
 function updateProjectTerminalPanel(
