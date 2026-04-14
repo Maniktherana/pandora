@@ -1,5 +1,6 @@
 import { message } from "@tauri-apps/plugin-dialog";
 import { useEditorStore } from "@/state/editor-store";
+import { getMonacoModelContent } from "@/components/editor/monaco-pandora";
 
 const LABEL_SAVE = "Save";
 const LABEL_DISCARD = "Don't Save";
@@ -47,7 +48,9 @@ export async function tryCloseEditorTab(params: {
   if (choice === "cancel") return;
 
   if (choice === "save") {
-    const ok = await editor.saveFile(workspaceId, workspaceRoot, relativePath);
+    // Read from Monaco model directly — the debounced store buffer may be stale.
+    const content = getMonacoModelContent(relativePath);
+    const ok = await editor.saveFile(workspaceId, workspaceRoot, relativePath, content);
     if (!ok) return;
   }
 

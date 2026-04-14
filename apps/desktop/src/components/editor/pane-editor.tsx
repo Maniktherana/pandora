@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { invoke } from "@tauri-apps/api/core";
@@ -70,6 +70,16 @@ export default function PaneEditor({
     }),
     [resolvedFont, editorFontSize],
   );
+
+  // Defer editor mount so workspace/tab switches paint instantly, editor initializes after.
+  const [editorReady, setEditorReady] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEditorReady(true));
+    return () => {
+      cancelAnimationFrame(id);
+      setEditorReady(false);
+    };
+  }, []);
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -269,18 +279,22 @@ export default function PaneEditor({
         pointerEvents: isVisible ? "auto" : "none",
       }}
     >
-      <Editor
-        height="100%"
-        path={relativePath}
-        language={language}
-        defaultValue={initialContent}
-        theme={MONACO_THEME_ID}
-        loading={editorLoading}
-        beforeMount={pandoraMonacoBeforeMount}
-        onMount={handleMount}
-        options={editorOptions}
-        keepCurrentModel
-      />
+      {editorReady ? (
+        <Editor
+          height="100%"
+          path={relativePath}
+          language={language}
+          defaultValue={initialContent}
+          theme={MONACO_THEME_ID}
+          loading={editorLoading}
+          beforeMount={pandoraMonacoBeforeMount}
+          onMount={handleMount}
+          options={editorOptions}
+          keepCurrentModel
+        />
+      ) : (
+        editorLoading
+      )}
     </div>
   );
 }

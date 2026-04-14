@@ -256,7 +256,7 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
   return {
     base: theme.mode === "dark" ? "vs-dark" : "vs",
     inherit: true,
-    semanticHighlighting: true,
+    semanticHighlighting: false,
     rules: [
       {
         token: "",
