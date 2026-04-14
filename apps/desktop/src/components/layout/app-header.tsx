@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -88,7 +88,7 @@ interface AppHeaderProps {
   onSelectRightSidebarMode: (mode: LeftPanelMode) => void;
 }
 
-export default function AppHeader({
+export default memo(function AppHeader({
   booting,
   sidebarVisible,
   selectedWorkspace,
@@ -351,4 +351,4 @@ export default function AppHeader({
       )}
     </div>
   );
-}
+});

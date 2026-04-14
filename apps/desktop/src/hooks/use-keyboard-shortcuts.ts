@@ -141,18 +141,8 @@ export default function useKeyboardShortcuts({
 
       if (e.metaKey) {
         switch (e.key) {
-          case "[":
-            if (e.shiftKey) {
-              e.preventDefault();
-              cycleTab(-1);
-            }
-            break;
-          case "]":
-            if (e.shiftKey) {
-              e.preventDefault();
-              cycleTab(1);
-            }
-            break;
+          // Cmd+Shift+[ / ] are handled by Tauri menu accelerators → app-shortcut event.
+          // Do NOT also handle them here or cycleTab fires twice.
           case "ArrowLeft":
             if (navigationArea === "sidebar") {
               e.preventDefault();
@@ -212,10 +202,8 @@ export default function useKeyboardShortcuts({
         }
       }
 
-      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "`") {
-        e.preventDefault();
-        onToggleBottomPanel();
-      }
+      // Ctrl+` is handled by Tauri menu accelerator → app-shortcut event.
+      // Do NOT also handle it here or toggleBottomPanel fires twice.
     };
 
     document.addEventListener("keydown", handler, true);

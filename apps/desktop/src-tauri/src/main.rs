@@ -29,6 +29,7 @@ use tauri::Manager;
 const MENU_CLOSE_TAB_ID: &str = "pandora.close-tab";
 const MENU_PREVIOUS_TAB_ID: &str = "pandora.previous-tab";
 const MENU_NEXT_TAB_ID: &str = "pandora.next-tab";
+const MENU_TOGGLE_TERMINAL_ID: &str = "pandora.toggle-terminal";
 const MENU_PREVIOUS_WORKSPACE_ID: &str = "pandora.previous-workspace";
 const MENU_NEXT_WORKSPACE_ID: &str = "pandora.next-workspace";
 const MENU_SETTINGS_ID: &str = "pandora.settings";
@@ -46,6 +47,13 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
         Some("Cmd+Shift+["),
     )?;
     let next_tab = MenuItem::with_id(app, MENU_NEXT_TAB_ID, "Next Tab", true, Some("Cmd+Shift+]"))?;
+    let toggle_terminal = MenuItem::with_id(
+        app,
+        MENU_TOGGLE_TERMINAL_ID,
+        "Toggle Terminal",
+        true,
+        Some("Ctrl+`"),
+    )?;
     let previous_workspace = MenuItem::with_id(
         app,
         MENU_PREVIOUS_WORKSPACE_ID,
@@ -103,6 +111,9 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
                 &[
                     &previous_tab,
                     &next_tab,
+                    &PredefinedMenuItem::separator(app)?,
+                    &toggle_terminal,
+                    &PredefinedMenuItem::separator(app)?,
                     &previous_workspace,
                     &next_workspace,
                     &PredefinedMenuItem::separator(app)?,
@@ -136,6 +147,9 @@ fn main() {
             }
             MENU_NEXT_TAB_ID => {
                 let _ = app.emit("app-shortcut", "next-tab");
+            }
+            MENU_TOGGLE_TERMINAL_ID => {
+                let _ = app.emit("app-shortcut", "toggle-bottom-terminal");
             }
             MENU_PREVIOUS_WORKSPACE_ID => {
                 let _ = app.emit("app-shortcut", "previous-workspace");

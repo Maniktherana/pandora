@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LayoutAlignLeftIcon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -23,7 +24,7 @@ function SidebarBootLoader() {
   );
 }
 
-export default function LeftSidebar({ booting, onCollapse, onOpenSettings }: LeftSidebarProps) {
+export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings }: LeftSidebarProps) {
   const projects = useDesktopView((view) => view.projects);
   const workspaceCommands = useWorkspaceActions();
 
@@ -100,4 +101,4 @@ export default function LeftSidebar({ booting, onCollapse, onOpenSettings }: Lef
       </div>
     </div>
   );
-}
+});

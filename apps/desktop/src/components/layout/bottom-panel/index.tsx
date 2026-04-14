@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
@@ -14,7 +14,7 @@ type BottomPanelProps = {
   onCollapse: () => void;
 };
 
-export default function BottomPanel({ onCollapse }: BottomPanelProps) {
+export default memo(function BottomPanel({ onCollapse }: BottomPanelProps) {
   const [tab, setTab] = useState<BottomTab>("terminal");
   const project = useDesktopView((view) => view.selectedProject);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
@@ -98,4 +98,4 @@ export default function BottomPanel({ onCollapse }: BottomPanelProps) {
       </TabsContent>
     </Tabs>
   );
-}
+});

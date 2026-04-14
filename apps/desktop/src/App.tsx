@@ -354,31 +354,23 @@ export default function App() {
                     </ResizablePanelGroup>
                   </div>
 
-                  {hasReadyWorkspace && selectedWs && (
+                  {fileTreePanelVisible && selectedWs && (
                     <div
-                      className="relative h-full shrink-0 overflow-hidden"
-                      style={{
-                        width: fileTreePanelVisible ? sidebarWidth : 0,
-                      }}
+                      className="relative h-full shrink-0"
+                      style={{ width: sidebarWidth }}
                       onPointerDownCapture={() =>
                         workspaceCommands.setLayoutTargetRuntimeId(null)
                       }
                     >
-                      <div
-                        className="h-full"
-                        style={{ width: sidebarWidth }}
-                      >
-                        <ErrorBoundary name="file-tree">
-                          <RightSidebar
-                            key={selectedWs.id}
-                            workspaceRoot={selectedWs.worktreePath}
-                            workspaceId={selectedWs.id}
-                            workspaceName={selectedWs.name}
-                            projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
-                            mode={rightSidebarMode}
-                          />
-                        </ErrorBoundary>
-                      </div>
+                      <ErrorBoundary name="file-tree">
+                        <RightSidebar
+                          workspaceRoot={selectedWs.worktreePath}
+                          workspaceId={selectedWs.id}
+                          workspaceName={selectedWs.name}
+                          projectDisplayName={selectedProject?.displayName ?? selectedWs.name}
+                          mode={rightSidebarMode}
+                        />
+                      </ErrorBoundary>
                     </div>
                   )}
                 </div>

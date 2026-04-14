@@ -1,4 +1,5 @@
 import {
+  memo,
   startTransition,
   type MouseEvent,
   useCallback,
@@ -146,7 +147,7 @@ function selectActiveEditorPath(runtime: WorkspaceRuntimeState | null): string |
   return tab.path;
 }
 
-export default function RightSidebar({
+export default memo(function RightSidebar({
   workspaceRoot,
   workspaceId,
   workspaceName,
@@ -193,6 +194,18 @@ export default function RightSidebar({
   leftModeRef.current = mode;
   pendingPointerDragRef.current = pendingPointerDrag;
   dragSessionRef.current = dragSession;
+
+  // Reset workspace-dependent state when workspace changes (avoids needing key={workspaceId})
+  useEffect(() => {
+    setSelectedTreePath(null);
+    setSelectedTreeKind(null);
+    setContextMenu(null);
+    setPendingCreate(null);
+    setPendingRename(null);
+    setDragSession(null);
+    setPendingPointerDrag(null);
+    expansionLoadedRef.current = false;
+  }, [workspaceId]);
 
   const { openFile } = useEditorActions();
   const { startDrag } = useTabDrag();
@@ -1263,4 +1276,4 @@ export default function RightSidebar({
       )}
     </div>
   );
-}
+});

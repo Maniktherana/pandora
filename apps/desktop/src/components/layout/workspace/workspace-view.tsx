@@ -1,8 +1,8 @@
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
-  memo,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -626,7 +626,7 @@ function WorkspaceRuntimeLoading() {
   );
 }
 
-export default function WorkspaceView() {
+export default memo(function WorkspaceView() {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
   const runtime = useRuntimeState(selectedWorkspaceID ?? "");
@@ -666,4 +666,4 @@ export default function WorkspaceView() {
       />
     </div>
   );
-}
+});
