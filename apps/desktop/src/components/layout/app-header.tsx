@@ -323,6 +323,8 @@ export default function AppHeader({
               const value = values[0];
               if (value === "files" || value === "changes") {
                 onSelectRightSidebarMode(value);
+              } else if (values.length === 0) {
+                onSelectRightSidebarMode(rightSidebarMode);
               }
             }}
             className="border-transparent bg-transparent"
