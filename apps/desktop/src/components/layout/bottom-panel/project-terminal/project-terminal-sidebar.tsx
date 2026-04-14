@@ -138,7 +138,7 @@ export default function ProjectTerminalSidebar({
 
   if (!panel || panel.groups.length === 0) {
     return (
-      <div className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-[var(--theme-border)] bg-[var(--theme-bg)]">
+      <div className="flex h-full min-h-0 w-[140px] shrink-0 flex-col border-l border-r border-[var(--theme-border)] bg-[var(--theme-bg)]">
         <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-[var(--theme-text-muted)]">
           <div className="flex flex-col items-center">
             <DotGridLoader
@@ -156,7 +156,7 @@ export default function ProjectTerminalSidebar({
   return (
     <div
       data-bottom-terminal-sidebar="true"
-      className="flex h-full min-h-0 w-[188px] shrink-0 flex-col border-l border-[var(--theme-border)] bg-[var(--theme-bg)]"
+      className="flex h-full min-h-0 w-[140px] shrink-0 flex-col border-l border-r border-[var(--theme-border)] bg-[var(--theme-bg)]"
       onPointerMove={handlePointerMove}
       onPointerLeave={() => {
         pendingDragRef.current = null;

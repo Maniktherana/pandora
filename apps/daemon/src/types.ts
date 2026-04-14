@@ -76,6 +76,7 @@ export interface SessionInstance {
   startedAt: string | null;
   lastOutputAt: string | null;
   foregroundProcess: string | null;
+  ptyForegroundProcess: string | null;
   agentActivity: AgentActivityState | null;
 }
 

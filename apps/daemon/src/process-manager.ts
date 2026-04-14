@@ -52,6 +52,7 @@ type WorkerControlMessage =
 type WorkerRuntimeMessage =
   | { type: "spawned"; pid: number | null }
   | { type: "output"; data: Buffer | Uint8Array }
+  | { type: "foregroundProcess"; name: string }
   | { type: "exited"; exitCode: number | null; signal: number | string | null };
 
 function defaultPandoraHome() {
@@ -368,6 +369,7 @@ export class ProcessManager {
       session.instance.pid = null;
       session.instance.exitCode = null;
       session.instance.foregroundProcess = null;
+      session.instance.ptyForegroundProcess = null;
     }
     this.sessions.clear();
   }
@@ -440,6 +442,7 @@ export class ProcessManager {
 
     session.instance.status = "stopped";
     session.instance.foregroundProcess = null;
+    session.instance.ptyForegroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
     this.sendToWorker(session, { type: "kill", signal: "SIGTERM" });
     this.clearStopTimer(session);
@@ -456,6 +459,7 @@ export class ProcessManager {
 
     session.instance.status = "restarting";
     session.instance.foregroundProcess = null;
+    session.instance.ptyForegroundProcess = null;
     session.instance.agentActivity = null;
     this.onSessionStateChanged(this.sessionState(session));
     this.onOutput(session.instance.id, Buffer.from("\u001bc", "utf8"));
@@ -479,6 +483,7 @@ export class ProcessManager {
     this.sendToWorker(session, { type: "kill", signal: "SIGSTOP" });
     session.instance.status = "paused";
     session.instance.foregroundProcess = null;
+    session.instance.ptyForegroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
   }
 
@@ -528,6 +533,7 @@ export class ProcessManager {
         startedAt: null,
         lastOutputAt: null,
         foregroundProcess: null,
+        ptyForegroundProcess: null,
         agentActivity: null,
       },
       worker: null,
@@ -641,6 +647,7 @@ export class ProcessManager {
     session.instance.exitCode = null;
     session.instance.pid = null;
     session.instance.foregroundProcess = null;
+    session.instance.ptyForegroundProcess = null;
     session.instance.agentActivity = null;
     this.onSessionStateChanged(this.sessionState(session));
 
@@ -684,6 +691,14 @@ export class ProcessManager {
         this.onOutput(session.instance.id, chunk);
         break;
       }
+      case "foregroundProcess": {
+        const name = message.name || null;
+        if (session.instance.ptyForegroundProcess !== name) {
+          session.instance.ptyForegroundProcess = name;
+          this.onSessionStateChanged(this.sessionState(session));
+        }
+        break;
+      }
       case "exited":
         this.finalizeWorkerExit(session, message.exitCode, message.signal);
         break;
@@ -718,6 +733,7 @@ export class ProcessManager {
     session.instance.pid = null;
     session.instance.exitCode = exitCode;
     session.instance.foregroundProcess = null;
+    session.instance.ptyForegroundProcess = null;
     session.instance.agentActivity = null;
 
     logger.info(

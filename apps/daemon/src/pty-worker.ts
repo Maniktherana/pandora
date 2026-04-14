@@ -24,6 +24,7 @@ let paused = false;
 let outputBuffer: Buffer[] = [];
 let outputBufferBytes = 0;
 let batchTimer: NodeJS.Timeout | null = null;
+let lastFgProcess: string | null = null;
 
 const OUTPUT_BUFFER_MAX = 256 * 1024;
 const BATCH_INTERVAL_MS = 4;
@@ -87,6 +88,15 @@ function queueOutput(buf: Buffer): void {
   }
 }
 
+function checkForegroundProcess(): void {
+  if (!ptyProcess) return;
+  const current = ptyProcess.process;
+  if (current !== lastFgProcess) {
+    lastFgProcess = current;
+    send({ type: "foregroundProcess", name: current });
+  }
+}
+
 function flushOutput(): void {
   if (paused || outputBuffer.length === 0) {
     return;
@@ -100,6 +110,7 @@ function flushOutput(): void {
   outputBuffer = [];
   outputBufferBytes = 0;
   send({ type: "output", data: merged });
+  checkForegroundProcess();
 }
 
 function spawnPTY(

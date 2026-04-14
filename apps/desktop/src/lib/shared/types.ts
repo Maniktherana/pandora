@@ -33,16 +33,7 @@ export interface AgentActivityState {
   toolName: string | null;
 }
 
-export type TerminalDisplayKind =
-  | "terminal"
-  | "claude-code"
-  | "codex"
-  | "opencode"
-  | "pi-agent"
-  | "gemini"
-  | "cursor-agent"
-  | "github-copilot"
-  | "amp-code";
+export type TerminalDisplayKind = "terminal" | "process";
 
 export interface TerminalDisplayState {
   kind: TerminalDisplayKind;
@@ -77,6 +68,7 @@ export interface SessionState {
   startedAt: string | null;
   lastOutputAt: string | null;
   foregroundProcess: string | null;
+  ptyForegroundProcess: string | null;
   agentActivity: AgentActivityState | null;
   capabilities: ActionCapabilities;
 }

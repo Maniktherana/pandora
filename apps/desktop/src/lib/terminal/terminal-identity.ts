@@ -1,7 +1,6 @@
 import type {
   SessionState,
   SlotState,
-  TerminalDisplayKind,
   TerminalDisplayState,
 } from "@/lib/shared/types";
 
@@ -10,37 +9,30 @@ const TERMINAL_LABEL = "Terminal";
 const AUTO_TERMINAL_NAME = /^(?:local\s+terminal|terminal(?:\s+\d+)?)$/i;
 const AUTO_SHELL_NAME = /^(zsh|bash|fish|sh|pwsh|powershell|shell)$/i;
 
-type Detector = {
-  kind: TerminalDisplayKind;
-  label: string;
-  pattern: RegExp;
-};
-
-const DETECTORS: Detector[] = [
-  { kind: "claude-code", label: "Claude Code", pattern: /\bclaude(?:\s+code)?\b/i },
-  { kind: "codex", label: "Codex", pattern: /\bcodex\b/i },
-  { kind: "opencode", label: "OpenCode", pattern: /\bopencode\b/i },
-  { kind: "pi-agent", label: "Pi Agent", pattern: /\bpi(?:[\s-]+agent)?\b/i },
-  { kind: "gemini", label: "Gemini CLI", pattern: /\bgemini(?:\s+cli)?\b/i },
-  { kind: "cursor-agent", label: "Cursor Agent", pattern: /\bcursor-agent\b/i },
-  { kind: "github-copilot", label: "Copilot", pattern: /\b(?:github-)?copilot\b/i },
-  { kind: "amp-code", label: "Amp", pattern: /\b(?:ampcode|amp-code|amp)\b/i },
+const PRETTY_LABELS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\bclaude(?:[- ]code)?\b/i, label: "Claude Code" },
+  { pattern: /\bcodex\b/i, label: "Codex" },
+  { pattern: /\bopencode\b/i, label: "OpenCode" },
+  { pattern: /\bpi(?:[- ]agent)?\b/i, label: "Pi Agent" },
+  { pattern: /\bgemini(?:[- ]cli)?\b/i, label: "Gemini CLI" },
+  { pattern: /\bcursor[- ]agent\b/i, label: "Cursor Agent" },
+  { pattern: /\b(?:github[- ])?copilot\b/i, label: "Copilot" },
+  { pattern: /\b(?:ampcode|amp[- ]code|amp)\b/i, label: "Amp" },
 ];
 
-function detectTerminalDisplay(source: string): TerminalDisplayState | null {
-  for (const detector of DETECTORS) {
-    if (detector.pattern.test(source)) {
-      return { kind: detector.kind, label: detector.label };
-    }
+function prettyLabel(name: string): string {
+  for (const { pattern, label } of PRETTY_LABELS) {
+    if (pattern.test(name)) return label;
   }
-  return null;
+  return name;
 }
 
 export function detectTerminalDisplayFromProcess(
   foregroundProcess: string | null | undefined,
 ): TerminalDisplayState | null {
   if (!foregroundProcess) return null;
-  return detectTerminalDisplay(foregroundProcess);
+  if (AUTO_SHELL_NAME.test(foregroundProcess)) return null;
+  return { kind: "process", label: prettyLabel(foregroundProcess) };
 }
 
 function customSlotLabel(slot: SlotState | undefined): string | null {
@@ -52,13 +44,20 @@ function customSlotLabel(slot: SlotState | undefined): string | null {
   return name;
 }
 
+function effectiveProcessName(session: SessionState | undefined): string | null {
+  // Agent CLI signal is the source of truth — use it when available.
+  if (session?.foregroundProcess) return session.foregroundProcess;
+  // Fall back to the raw PTY process name for non-agent commands.
+  return session?.ptyForegroundProcess ?? null;
+}
+
 export function terminalDisplayForSlot(
   slot: SlotState | undefined,
   session: SessionState | undefined,
   detected: TerminalDisplayState | undefined,
 ): TerminalDisplayState {
   const customLabel = customSlotLabel(slot);
-  const liveDetected = detectTerminalDisplayFromProcess(session?.foregroundProcess);
+  const liveDetected = detectTerminalDisplayFromProcess(effectiveProcessName(session));
   if (customLabel) {
     if (liveDetected && liveDetected.kind !== "terminal") {
       return { kind: liveDetected.kind, label: customLabel };

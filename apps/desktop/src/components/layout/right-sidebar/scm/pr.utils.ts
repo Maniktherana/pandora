@@ -1,17 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PrContext, TerminalDisplayKind, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { PrContext, WorkspaceRuntimeState } from "@/lib/shared/types";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
 import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import type { AgentTerminalTarget } from "./pr.types";
 
-const AGENT_KINDS: TerminalDisplayKind[] = [
-  "claude-code",
-  "codex",
-  "opencode",
-  "pi-agent",
-  "gemini",
-];
+const AGENT_LABEL_PATTERN =
+  /\b(?:claude(?:[- ]code)?|codex|opencode|pi[- ]agent|gemini(?:[- ]cli)?|cursor[- ]agent|(?:github[- ])?copilot|ampcode|amp[- ]code)\b/i;
 
 /**
  * Find a running coding agent terminal in the workspace or project runtime.
@@ -37,7 +32,7 @@ function findAgentInRuntime(runtime: WorkspaceRuntimeState): AgentTerminalTarget
     const slot = slots.find((item) => item.id === slotId);
     const session = sessions.find((s) => s.slotID === slotId && s.status === "running");
     const display = terminalDisplayForSlot(slot, session, terminalDisplayBySlotId[slotId]);
-    if (!display || !AGENT_KINDS.includes(display.kind)) return null;
+    if (!display || !AGENT_LABEL_PATTERN.test(display.label)) return null;
     if (!session) return null;
     return {
       slotId,

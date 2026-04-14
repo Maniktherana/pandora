@@ -130,6 +130,7 @@ describe("terminal agent status", () => {
       startedAt: null,
       lastOutputAt: null,
       foregroundProcess: null,
+      ptyForegroundProcess: null,
       agentActivity: workingActivity,
       capabilities: {
         canFocus: true,

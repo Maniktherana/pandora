@@ -1,5 +1,4 @@
-import { Pencil, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { cn } from "@/lib/shared/utils";
@@ -25,7 +24,7 @@ type ProjectTabProps = {
 };
 
 function TreeGutter({ treeState }: { treeState: SidebarRow["treeState"] }) {
-  if (treeState === "none") return <span className="w-2 shrink-0" aria-hidden />;
+  if (treeState === "none") return null;
   return (
     <span
       className="inline-block w-4 shrink-0 whitespace-pre font-mono text-[10px] leading-none text-neutral-600"
@@ -52,7 +51,6 @@ export function ProjectTab({
   onPointerDown,
   onPointerUp,
   onKeyDown,
-  onRenameClick,
   onCloseClick,
   onRenameValueChange,
   onRenameSubmit,
@@ -68,7 +66,7 @@ export function ProjectTab({
       data-bottom-terminal-slot-id={row.slotId}
       data-bottom-terminal-slot-index={row.slotIndex}
       className={cn(
-        "group/tab relative flex min-h-8 w-full cursor-default select-none items-center gap-1.5 border-r border-[var(--theme-border)] px-2 text-left text-[11px] outline-none",
+        "group/tab relative flex h-8 w-full cursor-default select-none items-center gap-1.5 pl-3 pr-1.5 text-left text-xs outline-none",
         {
           "border-t border-[var(--theme-border)]": !isFirst,
           "border-b border-[var(--theme-border)]": isLast,
@@ -82,7 +80,7 @@ export function ProjectTab({
       onKeyDown={(e) => onKeyDown(e, row)}
     >
       <TreeGutter treeState={row.treeState} />
-      <TerminalIdentityIcon identity={row.display} className="size-4" />
+      <TerminalIdentityIcon identity={row.display} className="size-3.5" />
       {isRenaming ? (
         <Input
           type="text"
@@ -112,7 +110,7 @@ export function ProjectTab({
           <div
             aria-hidden
             className={cn(
-              "pointer-events-none absolute right-0 top-0 h-full w-16 opacity-0 transition-opacity group-hover/tab:opacity-100",
+              "pointer-events-none absolute right-0 top-0 h-full w-14 opacity-0 transition-opacity group-hover/tab:opacity-100",
               "bg-gradient-to-l to-transparent",
               {
                 "from-[var(--theme-panel-hover)]": active,
@@ -121,28 +119,22 @@ export function ProjectTab({
             )}
           />
           <div className="relative z-10 ml-1 flex h-full items-center pl-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => onRenameClick(e, row.slotId)}
-              title="Rename terminal"
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="text-neutral-500 opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100 hover:bg-white/10 hover:text-neutral-100"
+            <div
+              role="button"
+              tabIndex={-1}
+              aria-label="Close terminal"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => onCloseClick(e, row.slotId)}
-              title="Close terminal"
+              className={cn(
+                "flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-[opacity,color,background-color] group-hover/tab:opacity-100",
+                {
+                  "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100": active,
+                  "text-neutral-600 hover:bg-neutral-800 hover:text-neutral-200": !active,
+                },
+              )}
             >
-              <X className="h-3 w-3" />
-            </Button>
+              <X className="h-3 w-3" aria-hidden />
+            </div>
           </div>
         </>
       )}
