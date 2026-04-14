@@ -20,5 +20,10 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.96.2"
-  }
+  },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "esbuild",
+    "node-pty"
+  ]
 }

@@ -1,10 +1,77 @@
-import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 
 import type { PresentationMode, SessionDefinition, SlotDefinition, SlotKind } from "./types";
+
+type StatementResult = {
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+  run(...params: unknown[]): unknown;
+};
+
+type BetterSqlite3Module = {
+  new (path: string): {
+    exec(sql: string): void;
+    close(): void;
+    prepare(sql: string): {
+      get(...params: unknown[]): unknown;
+      all(...params: unknown[]): unknown[];
+      run(...params: unknown[]): unknown;
+    };
+  };
+};
+
+type BunSqliteModule = {
+  Database: new (path: string) => {
+    exec(sql: string): void;
+    close(): void;
+    query(sql: string): {
+      get(...params: unknown[]): unknown;
+      all(...params: unknown[]): unknown[];
+      run(...params: unknown[]): unknown;
+    };
+  };
+};
+
+export interface Database {
+  exec(sql: string): void;
+  close(): void;
+  query(sql: string): StatementResult;
+}
+
+class WrappedDatabase implements Database {
+  constructor(
+    private readonly db: {
+      exec(sql: string): void;
+      close(): void;
+      prepare(sql: string): {
+        get(...params: unknown[]): unknown;
+        all(...params: unknown[]): unknown[];
+        run(...params: unknown[]): unknown;
+      };
+    },
+  ) {}
+
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  query(sql: string): StatementResult {
+    const statement = this.db.prepare(sql);
+    return {
+      get: (...params: unknown[]) => statement.get(...params),
+      all: (...params: unknown[]) => statement.all(...params),
+      run: (...params: unknown[]) => statement.run(...params),
+    };
+  }
+}
 
 function pandoraDirectory(): string {
   return process.env.PANDORA_HOME || join(homedir(), ".pandora");
@@ -59,6 +126,18 @@ function resetLegacyGlobalDatabase(): void {
   removeDatabaseFiles(legacyGlobalDatabasePath());
 }
 
+function openBetterSqlite(dbPath: string): WrappedDatabase {
+  const require = createRequire(import.meta.url);
+  const BetterSqlite3 = require("better-sqlite3") as BetterSqlite3Module;
+  return new WrappedDatabase(new BetterSqlite3(dbPath));
+}
+
+function openBunSqlite(dbPath: string): Database {
+  const require = createRequire(import.meta.url);
+  const bunSqlite = require("bun:sqlite") as BunSqliteModule;
+  return new bunSqlite.Database(dbPath);
+}
+
 function databaseUserVersion(db: Database): number {
   const row = db.query("PRAGMA user_version;").get() as { user_version?: number } | null;
   return row?.user_version ?? 0;
@@ -89,7 +168,7 @@ export function openDatabase(options?: {
   dbPath?: string;
   workspacePath?: string;
   defaultCwd?: string;
-  /** Distinct per Bun daemon (workspace UUID or `project:id`); required when `dbPath` is omitted. */
+  /** Distinct per daemon runtime (workspace UUID or `project:id`); required when `dbPath` is omitted. */
   runtimeId?: string;
 }): Database {
   const runtimeId = options?.runtimeId ?? "legacy";
@@ -98,13 +177,14 @@ export function openDatabase(options?: {
     defaultRuntimeDatabasePath(options?.workspacePath ?? pandoraDirectory(), runtimeId);
   ensureDirectory(dirname(dbPath));
   resetLegacyGlobalDatabase();
-  let db = new Database(dbPath);
+
+  let db = process.versions.bun ? openBunSqlite(dbPath) : openBetterSqlite(dbPath);
   db.exec("PRAGMA busy_timeout = 10000;");
   if (databaseUserVersion(db) < 2) {
     db.close();
     removeDatabaseFiles(dbPath);
     ensureDirectory(dirname(dbPath));
-    db = new Database(dbPath);
+    db = process.versions.bun ? openBunSqlite(dbPath) : openBetterSqlite(dbPath);
     db.exec("PRAGMA busy_timeout = 10000;");
   }
   db.exec("PRAGMA journal_mode = WAL;");

@@ -14,15 +14,14 @@ use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSView;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::ffi::CString;
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::time::Duration;
 
 unsafe extern "C" {
     fn pandora_terminal_view_new(x: f64, y: f64, width: f64, height: f64) -> *mut c_void;
@@ -75,14 +74,18 @@ struct SurfaceCallbackContext {
 struct RegistryInner {
     surfaces: HashMap<String, NativeSurface>,
     session_map: HashMap<String, String>,
-    pending_output: HashMap<String, Vec<Vec<u8>>>,
+    pending_output: HashMap<String, PendingOutput>,
 }
 
-/// Per-surface output mailbox. Kept in a separate map from `RegistryInner` so that
-/// the hot `feed_output` path (called from the daemon read loop) never contends with
-/// surface lifecycle operations (create / update / focus / destroy).
-struct OutputMailbox {
-    queue: Mutex<Vec<Vec<u8>>>,
+struct PendingOutput {
+    queue: VecDeque<Vec<u8>>,
+    total_bytes: usize,
+    last_updated_ms: u64,
+}
+
+struct SurfaceOutputQueue {
+    queue: Mutex<VecDeque<Vec<u8>>>,
+    total_bytes: AtomicUsize,
     flush_scheduled: AtomicBool,
 }
 
@@ -92,7 +95,6 @@ struct NativeSurface {
     ns_view: Retained<NSView>,
     _callback_ctx: Arc<SurfaceCallbackContext>,
     callback_ctx_raw: *const SurfaceCallbackContext,
-    mailbox: Arc<OutputMailbox>,
     rect: SurfaceRect,
     visible: bool,
     focused: bool,
@@ -237,9 +239,7 @@ fn surface_state_unchanged(
 
 pub struct SurfaceRegistry {
     inner: Mutex<RegistryInner>,
-    /// Per-surface output mailboxes keyed by surface_id. Separate from `inner` so
-    /// `feed_output` (daemon read loop) never contends with surface lifecycle ops.
-    mailboxes: Mutex<HashMap<String, Arc<OutputMailbox>>>,
+    surface_queues: Mutex<HashMap<String, Arc<SurfaceOutputQueue>>>,
     /// session_id → surface_id fast lookup for the output path.
     /// Guarded separately so output routing doesn't touch `inner` at all.
     output_routes: Mutex<HashMap<String, String>>,
@@ -258,11 +258,21 @@ pub struct SurfaceRegistry {
 unsafe impl Send for SurfaceRegistry {}
 unsafe impl Sync for SurfaceRegistry {}
 
-const FLUSH_BATCH_CHUNK_LIMIT: usize = 128;
+const PENDING_OUTPUT_MAX_BYTES: usize = 2 * 1024 * 1024;
+const PENDING_OUTPUT_MAX_CHUNKS: usize = 2_048;
+const PENDING_OUTPUT_STALE_MS: u64 = 60_000;
+const QUEUE_MAX_BYTES: usize = 4 * 1024 * 1024;
+const QUEUE_MAX_CHUNKS: usize = 4_096;
 const FLUSH_BATCH_BYTE_LIMIT: usize = 512 * 1024;
-/// Delay before rescheduling the next flush when data remains. Prevents the main
-/// thread from being monopolised by back-to-back flush callbacks during heavy output.
 const FLUSH_RESCHEDULE_DELAY_MS: u64 = 4;
+const FLUSH_BATCH_CHUNK_LIMIT: usize = 128;
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 impl SurfaceRegistry {
     /// Create an empty registry.
@@ -273,12 +283,114 @@ impl SurfaceRegistry {
                 session_map: HashMap::new(),
                 pending_output: HashMap::new(),
             }),
-            mailboxes: Mutex::new(HashMap::new()),
+            surface_queues: Mutex::new(HashMap::new()),
             output_routes: Mutex::new(HashMap::new()),
             window_ptr: Mutex::new(None),
             web_overlay_state: Mutex::new(WebOverlayState::default()),
             web_occlusion_rects: Mutex::new(Vec::new()),
         }
+    }
+
+    fn pending_stats(chunks: &VecDeque<Vec<u8>>) -> (usize, usize) {
+        (chunks.len(), chunks.iter().map(Vec::len).sum())
+    }
+
+    fn push_pending_output(
+        inner: &mut RegistryInner,
+        session_id: &str,
+        data: &[u8],
+    ) -> (usize, usize, usize, usize) {
+        let now_ms = current_epoch_ms();
+        let pending = inner
+            .pending_output
+            .entry(session_id.to_string())
+            .or_insert_with(|| PendingOutput {
+                queue: VecDeque::new(),
+                total_bytes: 0,
+                last_updated_ms: now_ms,
+            });
+
+        pending.queue.push_back(data.to_vec());
+        pending.total_bytes += data.len();
+        pending.last_updated_ms = now_ms;
+
+        let mut dropped_chunks = 0usize;
+        let mut dropped_bytes = 0usize;
+        while pending.queue.len() > PENDING_OUTPUT_MAX_CHUNKS
+            || pending.total_bytes > PENDING_OUTPUT_MAX_BYTES
+        {
+            let Some(old) = pending.queue.pop_front() else {
+                break;
+            };
+            pending.total_bytes = pending.total_bytes.saturating_sub(old.len());
+            dropped_chunks += 1;
+            dropped_bytes += old.len();
+        }
+
+        (
+            pending.queue.len(),
+            pending.total_bytes,
+            dropped_chunks,
+            dropped_bytes,
+        )
+    }
+
+    fn sweep_stale_pending_locked(
+        inner: &mut RegistryInner,
+        now_ms: u64,
+    ) -> Vec<(String, usize, usize)> {
+        let stale_sessions = inner
+            .pending_output
+            .iter()
+            .filter_map(|(session_id, pending)| {
+                let is_stale =
+                    now_ms.saturating_sub(pending.last_updated_ms) > PENDING_OUTPUT_STALE_MS;
+                let has_surface = inner.session_map.contains_key(session_id);
+                if is_stale && !has_surface {
+                    Some((session_id.clone(), pending.queue.len(), pending.total_bytes))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for (session_id, _, _) in &stale_sessions {
+            inner.pending_output.remove(session_id);
+        }
+
+        stale_sessions
+    }
+
+    fn debug_route_snapshot(&self, session_id: &str) -> String {
+        let route_surface = {
+            let routes = self.output_routes.lock().unwrap();
+            routes.get(session_id).cloned()
+        };
+        let (session_surface, pending_chunks, pending_bytes, total_surfaces, total_sessions) = {
+            let inner = self.inner.lock().unwrap();
+            let pending = inner.pending_output.get(session_id);
+            let (pending_chunks, pending_bytes) = pending
+                .map(|entry| (entry.queue.len(), entry.total_bytes))
+                .unwrap_or((0, 0));
+            (
+                inner.session_map.get(session_id).cloned(),
+                pending_chunks,
+                pending_bytes,
+                inner.surfaces.len(),
+                inner.session_map.len(),
+            )
+        };
+
+        format!(
+            "session={} route={:?} session_map={:?} pending_chunks={} pending_bytes={} surfaces={} sessions={}",
+            session_id,
+            route_surface,
+            session_surface,
+            pending_chunks,
+            pending_bytes,
+            total_surfaces,
+            total_sessions
+        )
     }
 
     fn effective_web_overlay_mode(&self) -> Option<WebOverlayMode> {
@@ -387,71 +499,71 @@ impl SurfaceRegistry {
         {
             inner.session_map.remove(&native_surface.session_id);
         }
-        inner.pending_output.remove(&native_surface.session_id);
         Some(native_surface)
     }
 
-    fn flush_pending_locked(inner: &mut RegistryInner, session_id: &str) -> Vec<Vec<u8>> {
-        inner.pending_output.remove(session_id).unwrap_or_default()
+    fn flush_pending_locked(inner: &mut RegistryInner, session_id: &str) -> VecDeque<Vec<u8>> {
+        inner
+            .pending_output
+            .remove(session_id)
+            .map(|pending| pending.queue)
+            .unwrap_or_default()
     }
 
-    /// Schedule an immediate flush on a background thread.
-    ///
-    /// `ghostty_surface_write_buffer` does NOT need the main thread — in standalone
-    /// ghostty the IO thread calls into the terminal parser. Dispatching via
-    /// `run_on_main_thread` was causing the main thread to block on an internal
-    /// ghostty futex, freezing the entire UI (beachball).
-    fn schedule_surface_flush(
-        self: &Arc<Self>,
-        app_handle: &AppHandle,
-        surface_id: &str,
-    ) -> Result<(), String> {
+    /// Schedule an immediate flush on a blocking thread.
+    fn schedule_flush(self: &Arc<Self>, surface_id: &str, output_queue: &Arc<SurfaceOutputQueue>) {
+        if output_queue.flush_scheduled.swap(true, Ordering::AcqRel) {
+            return; // already scheduled
+        }
         let registry = Arc::clone(self);
-        let flush_handle = app_handle.clone();
-        let surface_id = surface_id.to_string();
+        let sid = surface_id.to_string();
         tauri::async_runtime::spawn_blocking(move || {
-            registry.flush_surface_output(&flush_handle, &surface_id);
+            registry.flush_surface_output(&sid);
         });
-        Ok(())
     }
 
     /// Schedule a flush after a short delay. Used when data remains after a flush so
-    /// other work can proceed between batches.
-    fn schedule_surface_flush_delayed(self: &Arc<Self>, app_handle: &AppHandle, surface_id: &str) {
+    /// other work can proceed between batches — the main thread gets a window to
+    /// process input (Ctrl+C), ghostty_app_tick (rendering), and other surfaces.
+    fn schedule_flush_delayed(self: &Arc<Self>, surface_id: &str) {
         let registry = Arc::clone(self);
-        let flush_handle = app_handle.clone();
-        let surface_id = surface_id.to_string();
+        let sid = surface_id.to_string();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(FLUSH_RESCHEDULE_DELAY_MS)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(FLUSH_RESCHEDULE_DELAY_MS)).await;
             tokio::task::spawn_blocking(move || {
-                registry.flush_surface_output(&flush_handle, &surface_id);
+                registry.flush_surface_output(&sid);
             });
         });
     }
 
-    fn flush_surface_output(self: &Arc<Self>, app_handle: &AppHandle, surface_id: &str) {
-        let t0 = Instant::now();
-
-        // Get the mailbox and ghostty surface without holding inner for long.
-        let (ghostty_surface, mailbox) = {
+    /// Drain a bounded batch from one surface's queue and write to Ghostty.
+    /// Runs on a spawn_blocking thread. Ghostty's wakeup_cb → tick handles rendering.
+    fn flush_surface_output(self: &Arc<Self>, surface_id: &str) {
+        let (output_queue, ghostty_surface) = {
+            let queues = self.surface_queues.lock().unwrap();
+            let output_queue = match queues.get(surface_id) {
+                Some(queue) => Arc::clone(queue),
+                None => return,
+            };
             let inner = self.inner.lock().unwrap();
-            let surface = match inner.surfaces.get(surface_id) {
-                Some(s) => s,
+            let ghostty_surface = match inner.surfaces.get(surface_id) {
+                Some(surface) => surface.ghostty_surface,
                 None => {
-                    tlog!("FLUSH", "surface={} NOT FOUND, bail", surface_id);
+                    output_queue
+                        .flush_scheduled
+                        .store(false, Ordering::Release);
                     return;
                 }
             };
-            (surface.ghostty_surface, Arc::clone(&surface.mailbox))
+            (output_queue, ghostty_surface)
         };
-        let t_lock = t0.elapsed().as_micros();
 
-        // Drain a batch from the mailbox (separate lock from inner).
-        let (merged, has_more, chunk_count, remaining) = {
-            let mut queue = mailbox.queue.lock().unwrap();
+        let merged = {
+            let mut queue = output_queue.queue.lock().unwrap();
             if queue.is_empty() {
-                mailbox.flush_scheduled.store(false, Ordering::Release);
-                tlog!("FLUSH", "surface={} empty queue, clearing flag", surface_id);
+                output_queue
+                    .flush_scheduled
+                    .store(false, Ordering::Release);
                 return;
             }
 
@@ -472,34 +584,55 @@ impl SurfaceRegistry {
             }
 
             let chunk_count = chunk_count.max(1);
-
-            let mut merged = Vec::with_capacity(byte_count);
-            for chunk in queue.drain(..chunk_count) {
-                merged.extend_from_slice(&chunk);
+            let mut buf = Vec::with_capacity(byte_count);
+            for _ in 0..chunk_count {
+                let Some(chunk) = queue.pop_front() else {
+                    break;
+                };
+                output_queue
+                    .total_bytes
+                    .fetch_sub(chunk.len(), Ordering::AcqRel);
+                buf.extend_from_slice(&chunk);
             }
-            let remaining = queue.len();
-            let has_more = remaining > 0;
+
+            let has_more = !queue.is_empty();
             if !has_more {
-                mailbox.flush_scheduled.store(false, Ordering::Release);
+                output_queue
+                    .flush_scheduled
+                    .store(false, Ordering::Release);
             }
 
-            (merged, has_more, chunk_count, remaining)
+            (buf, has_more)
         };
-        let t_drain = t0.elapsed().as_micros();
 
-        if !merged.is_empty() {
+        let (data, has_more) = merged;
+
+        let t0 = std::time::Instant::now();
+        if !data.is_empty() {
             unsafe {
-                ghostty_surface_write_buffer(ghostty_surface, merged.as_ptr(), merged.len());
+                ghostty_surface_write_buffer(ghostty_surface, data.as_ptr(), data.len());
             }
         }
-        let t_write = t0.elapsed().as_micros();
+        let write_us = t0.elapsed().as_micros();
 
-        tlog!("FLUSH", "surface={} chunks={} bytes={} remaining={} has_more={} lock={}µs drain={}µs write={}µs total={}µs",
-            surface_id, chunk_count, merged.len(), remaining, has_more,
-            t_lock, t_drain - t_lock, t_write - t_drain, t_write);
+        // Log every flush so we can diagnose stalls
+        if write_us > 1000 || has_more {
+            tlog!(
+                "FLUSH",
+                "surface={} bytes={} has_more={} write={}µs",
+                surface_id,
+                data.len(),
+                has_more,
+                write_us
+            );
+        }
 
+        // If more data remains, schedule the next flush after a delay.
+        // flush_scheduled stays TRUE during the delay — this prevents feed_output
+        // from spawning competing tasks. The 4ms gap gives the main thread a window
+        // for input handling, ghostty_app_tick, and other surfaces' flushes.
         if has_more {
-            self.schedule_surface_flush_delayed(app_handle, surface_id);
+            self.schedule_flush_delayed(surface_id);
         }
     }
 
@@ -566,24 +699,51 @@ impl SurfaceRegistry {
 
             if let Some(old_id) = inner.session_map.get(&session_id).cloned() {
                 if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &old_id) {
+                    tlog!(
+                        "CREATE",
+                        "session={} replacing old surface={} with new surface={}",
+                        session_id,
+                        old_id,
+                        surface_id
+                    );
                     old_surfaces.push((old_id.clone(), native_surface));
                 } else {
                     inner.session_map.remove(&session_id);
                     inner.pending_output.remove(&session_id);
+                    tlog!(
+                        "CREATE",
+                        "session={} had stale session_map route old_surface={} before create",
+                        session_id,
+                        old_id
+                    );
                 }
             }
 
             if let Some(native_surface) = Self::extract_surface_locked(&mut inner, &surface_id) {
+                tlog!(
+                    "CREATE",
+                    "surface={} already existed for session={} and will be recreated",
+                    surface_id,
+                    native_surface.session_id
+                );
                 old_surfaces.push((surface_id.clone(), native_surface));
             }
         }
-        // Clean up mailboxes/routes for old surfaces.
+        // Clean up routes/queues for old surfaces.
         if !old_surfaces.is_empty() {
-            let mut mboxes = self.mailboxes.lock().unwrap();
             let mut routes = self.output_routes.lock().unwrap();
+            let mut queues = self.surface_queues.lock().unwrap();
             for (old_sid, ref ns) in &old_surfaces {
-                mboxes.remove(old_sid);
                 routes.remove(&ns.session_id);
+                queues.remove(old_sid);
+                tlog!(
+                    "CREATE",
+                    "removed old route/queue session={} old_surface={} remaining_routes={} remaining_queues={}",
+                    ns.session_id,
+                    old_sid,
+                    routes.len(),
+                    queues.len()
+                );
             }
         }
         for (_, native_surface) in old_surfaces {
@@ -676,25 +836,18 @@ impl SurfaceRegistry {
         unsafe { ghostty_surface_set_size(surface, width_px, height_px) };
 
         // --- Store in maps ---
-        let mailbox = Arc::new(OutputMailbox {
-            queue: Mutex::new(Vec::new()),
-            flush_scheduled: AtomicBool::new(false),
-        });
-
         let native_surface = NativeSurface {
             session_id: session_id.clone(),
             ghostty_surface: surface,
             ns_view,
             _callback_ctx: callback_ctx,
             callback_ctx_raw,
-            mailbox: Arc::clone(&mailbox),
             rect,
             visible: true,
             focused: false,
             overlay_exempt,
         };
 
-        let mut should_flush_output = false;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.surfaces.insert(surface_id.clone(), native_surface);
@@ -702,13 +855,15 @@ impl SurfaceRegistry {
                 .session_map
                 .insert(session_id.clone(), surface_id.clone());
 
-            // Drain any output that arrived before the surface existed.
-            let pending_output = Self::flush_pending_locked(&mut inner, &session_id);
-            if !pending_output.is_empty() {
-                let mut queue = mailbox.queue.lock().unwrap();
-                queue.extend(pending_output);
-                mailbox.flush_scheduled.store(true, Ordering::Release);
-                should_flush_output = true;
+            let stale_pending = Self::sweep_stale_pending_locked(&mut inner, current_epoch_ms());
+            for (stale_session_id, stale_chunks, stale_bytes) in stale_pending {
+                tlog!(
+                    "CREATE",
+                    "dropped stale pending output session={} chunks={} bytes={}",
+                    stale_session_id,
+                    stale_chunks,
+                    stale_bytes
+                );
             }
 
             if let Some(s) = inner.surfaces.get_mut(&surface_id) {
@@ -727,20 +882,77 @@ impl SurfaceRegistry {
             }
         }
 
+        {
+            let mut queues = self.surface_queues.lock().unwrap();
+            queues.insert(
+                surface_id.clone(),
+                Arc::new(SurfaceOutputQueue {
+                    queue: Mutex::new(VecDeque::new()),
+                    total_bytes: AtomicUsize::new(0),
+                    flush_scheduled: AtomicBool::new(false),
+                }),
+            );
+        }
+
         // Register output routing (separate from inner).
         {
             let mut routes = self.output_routes.lock().unwrap();
+            let was_empty = routes.is_empty();
             routes.insert(session_id.clone(), surface_id.clone());
+            tlog!(
+                "CREATE",
+                "installed output route session={} surface={} total_routes={}",
+                session_id,
+                surface_id,
+                routes.len()
+            );
+            if was_empty {
+                tlog!(
+                    "CREATE",
+                    "output routes transitioned from empty session={} surface={}",
+                    session_id,
+                    surface_id
+                );
+            }
         }
-        {
-            let mut mboxes = self.mailboxes.lock().unwrap();
-            mboxes.insert(surface_id.clone(), mailbox);
-        }
+        let route_snapshot = self.debug_route_snapshot(&session_id);
+        let pending_output = {
+            let mut inner = self.inner.lock().unwrap();
+            let pending_output = Self::flush_pending_locked(&mut inner, &session_id);
+            if !pending_output.is_empty() {
+                let (pending_chunks, pending_bytes) = Self::pending_stats(&pending_output);
+                tlog!(
+                    "CREATE",
+                    "surface={} restored pending output session={} chunks={} bytes={}",
+                    surface_id,
+                    session_id,
+                    pending_chunks,
+                    pending_bytes
+                );
+            }
+            pending_output
+        };
 
-        if should_flush_output {
-            tlog!("CREATE", "surface={} flushing pending output", surface_id);
-            let registry = app_handle.state::<Arc<SurfaceRegistry>>().inner().clone();
-            registry.flush_surface_output(&app_handle, &surface_id);
+        if !pending_output.is_empty() {
+            let (pending_chunks, pending_bytes) = Self::pending_stats(&pending_output);
+            let merged = pending_output.into_iter().flatten().collect::<Vec<_>>();
+            let ghostty_surface = surface as usize;
+            let write_handle = app_handle.clone();
+            tlog!(
+                "CREATE",
+                "surface={} writing pending output chunks={} bytes={} {}",
+                surface_id,
+                pending_chunks,
+                pending_bytes,
+                route_snapshot
+            );
+            let _ = write_handle.run_on_main_thread(move || unsafe {
+                ghostty_surface_write_buffer(
+                    ghostty_surface as ghostty_surface_t,
+                    merged.as_ptr(),
+                    merged.len(),
+                );
+            });
         }
 
         tlog!(
@@ -771,14 +983,7 @@ impl SurfaceRegistry {
 
         let overlay_mode = self.effective_web_overlay_mode();
         let occlusion_rects = self.web_occlusion_rects.lock().unwrap().clone();
-        let (
-            ghostty_surface,
-            ns_view_ptr,
-            prev_rect,
-            prev_visible,
-            prev_focused,
-            overlay_exempt,
-        ) = {
+        let (ghostty_surface, ns_view_ptr, prev_rect, prev_visible, prev_focused, overlay_exempt) = {
             let inner = self.inner.lock().unwrap();
             let surface = match inner.surfaces.get(surface_id) {
                 Some(surface) => surface,
@@ -871,6 +1076,7 @@ impl SurfaceRegistry {
             surface.focused = focused;
         }
 
+
         tlog!(
             "UPDATE",
             "surface={} vis={} foc={} overlay={:?} rect=({:.0},{:.0} {:.0}x{:.0} @{:.2}) took={}µs",
@@ -906,8 +1112,8 @@ impl SurfaceRegistry {
         ));
         fs::write(&config_path, format!("font-size = {font_size}\n"))
             .map_err(|error| error.to_string())?;
-        let config_path_cstr =
-            CString::new(config_path.to_string_lossy().as_ref()).map_err(|error| error.to_string())?;
+        let config_path_cstr = CString::new(config_path.to_string_lossy().as_ref())
+            .map_err(|error| error.to_string())?;
 
         let width_px = (rect.width * rect.scale_factor) as u32;
         let height_px = (rect.height * rect.scale_factor) as u32;
@@ -1041,8 +1247,19 @@ impl SurfaceRegistry {
         {
             let mut routes = self.output_routes.lock().unwrap();
             routes.remove(&session_id);
+            let remaining_routes = routes.len();
+            tlog!(
+                "DESTROY",
+                "removed output route session={} surface={} remaining_routes={}",
+                session_id,
+                surface_id,
+                remaining_routes
+            );
+            if remaining_routes == 0 {
+                tlog!("DESTROY", "output routes transitioned to empty");
+            }
         }
-        self.mailboxes.lock().unwrap().remove(surface_id);
+        self.surface_queues.lock().unwrap().remove(surface_id);
 
         unsafe { Self::teardown_native_surface(native_surface) };
 
@@ -1058,10 +1275,9 @@ impl SurfaceRegistry {
 
     /// Feed terminal output data to a surface, identified by session ID.
     ///
-    /// This is the hot path — called from the daemon read loop for every output
-    /// chunk. It only touches `output_routes` and the per-surface `OutputMailbox`,
-    /// never the main `inner` mutex, so it cannot contend with surface lifecycle
-    /// operations running on the main thread.
+    /// Live output is queued from the daemon thread and coalesced into bounded
+    /// main-thread Ghostty writes. Output that arrives before a surface is routed
+    /// stays in the bounded pending buffer.
     ///
     /// Returns `true` if the surface was found and data was queued.
     pub fn feed_output(
@@ -1072,7 +1288,6 @@ impl SurfaceRegistry {
     ) -> bool {
         let t0 = Instant::now();
 
-        // Fast path: look up surface_id and mailbox without touching inner.
         let surface_id = {
             let routes = self.output_routes.lock().unwrap();
             match routes.get(session_id) {
@@ -1080,84 +1295,140 @@ impl SurfaceRegistry {
                 None => {
                     drop(routes);
                     let mut inner = self.inner.lock().unwrap();
-                    inner
-                        .pending_output
-                        .entry(session_id.to_string())
-                        .or_default()
-                        .push(data.to_vec());
+                    let (pending_chunks, pending_bytes, dropped_chunks, dropped_bytes) =
+                        Self::push_pending_output(&mut inner, session_id, data);
+                    drop(inner);
+
+                    if let Some(surface_id) =
+                        self.output_routes.lock().unwrap().get(session_id).cloned()
+                    {
+                        let pending_output = {
+                            let mut inner = self.inner.lock().unwrap();
+                            Self::flush_pending_locked(&mut inner, session_id)
+                        };
+                        if !pending_output.is_empty() {
+                            let (pending_chunks, pending_bytes) =
+                                Self::pending_stats(&pending_output);
+                            if let Some(output_queue) = self
+                                .surface_queues
+                                .lock()
+                                .unwrap()
+                                .get(&surface_id)
+                                .cloned()
+                            {
+                                {
+                                    let mut queue = output_queue.queue.lock().unwrap();
+                                    for chunk in pending_output {
+                                        output_queue
+                                            .total_bytes
+                                            .fetch_add(chunk.len(), Ordering::AcqRel);
+                                        queue.push_back(chunk);
+                                    }
+                                }
+                                // Data is in the queue — the timer will flush it
+                                tlog!(
+                                    "FEED",
+                                    "session={} surface={} replayed pending after route race chunks={} bytes={} took={}µs",
+                                    session_id,
+                                    surface_id,
+                                    pending_chunks,
+                                    pending_bytes,
+                                    t0.elapsed().as_micros()
+                                );
+                                return true;
+                            }
+                        }
+                    }
+
                     tlog!(
                         "FEED",
-                        "session={} bytes={} → pending (no route) took={}µs",
+                        "session={} bytes={} -> pending (no route) pending_chunks={} pending_bytes={} dropped_chunks={} dropped_bytes={} {} took={}µs",
                         session_id,
                         data.len(),
+                        pending_chunks,
+                        pending_bytes,
+                        dropped_chunks,
+                        dropped_bytes,
+                        self.debug_route_snapshot(session_id),
                         t0.elapsed().as_micros()
                     );
                     return false;
                 }
             }
         };
-        let mailbox = {
-            let mboxes = self.mailboxes.lock().unwrap();
-            match mboxes.get(&surface_id) {
-                Some(mb) => Arc::clone(mb),
-                None => {
-                    drop(mboxes);
-                    let mut inner = self.inner.lock().unwrap();
-                    inner
-                        .pending_output
-                        .entry(session_id.to_string())
-                        .or_default()
-                        .push(data.to_vec());
-                    tlog!(
-                        "FEED",
-                        "session={} surface={} bytes={} → pending (no mailbox) took={}µs",
-                        session_id,
-                        surface_id,
-                        data.len(),
-                        t0.elapsed().as_micros()
-                    );
-                    return false;
+
+        let output_queue = {
+            let queues = self.surface_queues.lock().unwrap();
+            queues.get(&surface_id).cloned()
+        };
+        let Some(output_queue) = output_queue else {
+            {
+                let mut routes = self.output_routes.lock().unwrap();
+                if routes
+                    .get(session_id)
+                    .map(|current| current == &surface_id)
+                    .unwrap_or(false)
+                {
+                    routes.remove(session_id);
                 }
             }
-        };
-
-        let queue_len = {
-            let mut q = mailbox.queue.lock().unwrap();
-            q.push(data.to_vec());
-            q.len()
-        };
-
-        // Schedule a flush if one isn't already pending.
-        let scheduled = if !mailbox.flush_scheduled.swap(true, Ordering::AcqRel) {
-            if let Err(err) = self.schedule_surface_flush(app_handle, &surface_id) {
-                eprintln!(
-                    "[surface_registry] failed to schedule surface flush for {}: {}",
-                    surface_id, err
-                );
-                mailbox.flush_scheduled.store(false, Ordering::Release);
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        };
-
-        let elapsed = t0.elapsed().as_micros();
-        // Only log if slow (>500µs) or we scheduled a flush, to avoid flooding the log.
-        if scheduled || elapsed > 500 {
+            let mut inner = self.inner.lock().unwrap();
+            let (pending_chunks, pending_bytes, dropped_chunks, dropped_bytes) =
+                Self::push_pending_output(&mut inner, session_id, data);
+            drop(inner);
             tlog!(
                 "FEED",
-                "session={} surface={} bytes={} queue={} scheduled={} took={}µs",
+                "session={} surface={} bytes={} -> pending (stale route) pending_chunks={} pending_bytes={} dropped_chunks={} dropped_bytes={} {} took={}µs",
                 session_id,
                 surface_id,
                 data.len(),
-                queue_len,
-                scheduled,
-                elapsed
+                pending_chunks,
+                pending_bytes,
+                dropped_chunks,
+                dropped_bytes,
+                self.debug_route_snapshot(session_id),
+                t0.elapsed().as_micros()
             );
+            return false;
+        };
+
+        {
+            let mut queue = output_queue.queue.lock().unwrap();
+            output_queue
+                .total_bytes
+                .fetch_add(data.len(), Ordering::AcqRel);
+            queue.push_back(data.to_vec());
+
+            let mut dropped_chunks = 0usize;
+            let mut dropped_bytes = 0usize;
+            while queue.len() > QUEUE_MAX_CHUNKS
+                || output_queue.total_bytes.load(Ordering::Relaxed) > QUEUE_MAX_BYTES
+            {
+                let Some(old) = queue.pop_front() else {
+                    break;
+                };
+                output_queue
+                    .total_bytes
+                    .fetch_sub(old.len(), Ordering::AcqRel);
+                dropped_chunks += 1;
+                dropped_bytes += old.len();
+            }
+
+            if dropped_chunks > 0 {
+                tlog!(
+                    "FEED",
+                    "surface={} output queue bounded dropped_chunks={} dropped_bytes={} queue={} bytes={}",
+                    surface_id,
+                    dropped_chunks,
+                    dropped_bytes,
+                    queue.len(),
+                    output_queue.total_bytes.load(Ordering::Acquire)
+                );
+            }
         }
 
+        // Schedule immediate flush on a blocking thread
+        self.schedule_flush(&surface_id, &output_queue);
         true
     }
 

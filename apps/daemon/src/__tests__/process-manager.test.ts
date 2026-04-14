@@ -95,8 +95,11 @@ describe("ProcessManager updates", () => {
             foregroundProcess: string | null;
             agentActivity: null;
           };
-          process: null;
+          worker: null;
           stopTimer: null;
+          outputPaused: boolean;
+          crashCount: number;
+          exitHandled: boolean;
         }
       >;
     }).sessions;
@@ -115,8 +118,11 @@ describe("ProcessManager updates", () => {
         foregroundProcess: "claude",
         agentActivity: null,
       },
-      process: null,
+      worker: null,
       stopTimer: null,
+      outputPaused: false,
+      crashCount: 0,
+      exitHandled: false,
     });
 
     const encode = (payload: unknown) => Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -181,5 +187,36 @@ describe("ProcessManager updates", () => {
         phase: "finished",
       }),
     );
+  });
+
+  test("forwards worker output directly to daemon consumers", () => {
+    const outputs: string[] = [];
+    const manager = new ProcessManager(
+      [createSlot()],
+      [createSessionDefinition()],
+      () => {},
+      (_sessionID, data) => {
+        outputs.push(data.toString("utf8"));
+      },
+    );
+
+    const internal = manager as unknown as {
+      handleWorkerMessage(
+        session: {
+          instance: { id: string; pid: number | null; lastOutputAt: string | null };
+        },
+        message: { type: "output"; data: Buffer | Uint8Array },
+      ): void;
+    };
+
+    const session = {
+      instance: { id: "session-1", pid: null, lastOutputAt: null },
+    };
+
+    internal.handleWorkerMessage(session, { type: "output", data: Buffer.from("hello ") });
+    internal.handleWorkerMessage(session, { type: "output", data: Buffer.from("world") });
+
+    expect(outputs).toEqual(["hello ", "world"]);
+    expect(session.instance.lastOutputAt).toBeTruthy();
   });
 });

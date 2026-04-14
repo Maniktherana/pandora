@@ -1,8 +1,8 @@
 //! File-based diagnostic logger for terminal surface operations.
 //!
 //! Writes timestamped lines to `/tmp/pandora-terminal.log`. Every entry includes
-//! the thread name (or id), elapsed µs since process start, and a tag so you can
-//! grep for specific subsystems:
+//! an absolute wall-clock timestamp, the thread name (or id), elapsed µs since
+//! process start, and a tag so you can grep for specific subsystems:
 //!
 //!   [FEED]    — feed_output (daemon read loop)
 //!   [FLUSH]   — flush_surface_output (main thread)
@@ -14,6 +14,7 @@
 //!   [DAEMON]  — daemon_bridge read loop
 //!   [OVERLAY] — begin/end_web_overlay
 
+use chrono::Local;
 use std::fmt::Write as FmtWrite;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -37,15 +38,16 @@ pub fn log(tag: &str, msg: &str) {
     let elapsed = epoch().elapsed();
     let secs = elapsed.as_secs();
     let micros = elapsed.subsec_micros();
+    let wall = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %z");
 
     let thread = std::thread::current();
     let tname = thread.name().unwrap_or("?");
 
-    let mut buf = String::with_capacity(128);
+    let mut buf = String::with_capacity(192);
     let _ = write!(
         buf,
-        "{:>6}.{:06} [{}] ({}) {}\n",
-        secs, micros, tag, tname, msg
+        "{} +{:>6}.{:06} [{}] ({}) {}\n",
+        wall, secs, micros, tag, tname, msg
     );
 
     if let Ok(mut f) = OpenOptions::new()

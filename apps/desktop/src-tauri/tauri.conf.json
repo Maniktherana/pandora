@@ -36,7 +36,8 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "app"],
-    "externalBin": ["binaries/pandorad"],
+    "externalBin": ["binaries/node"],
+    "resources": ["binaries/pandorad-dist"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

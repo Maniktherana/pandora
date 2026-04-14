@@ -14,23 +14,37 @@ import {
   updateSessionDefinition,
   updateSlotDefinition,
 } from "./db";
-import { ProcessManager } from "./process-manager";
 import { logger } from "./logger";
-import { createMessageReader, writeMessage } from "./protocol";
+import { ProcessManager } from "./process-manager";
+import {
+  createControlMessageReader,
+  writeControlMessage,
+  writeOutputFrame,
+} from "./protocol";
 import type { ClientMessage, DaemonMessage, SlotState } from "./types";
+
+interface DataClientState {
+  socket: net.Socket;
+  draining: boolean;
+}
 
 export class DaemonServer {
   private readonly db;
-  private readonly clients = new Set<net.Socket>();
+  private readonly controlClients = new Set<net.Socket>();
+  private readonly dataClients = new Map<net.Socket, DataClientState>();
   private readonly processManager: ProcessManager;
-  private readonly socketPath: string;
-  private server: net.Server | null = null;
+  private readonly controlSocketPath: string;
+  private readonly dataSocketPath: string;
+  private allClientsDraining = false;
+  private controlServer: net.Server | null = null;
+  private dataServer: net.Server | null = null;
 
   constructor(workspacePath: string, defaultCwd?: string, runtimeId?: string) {
     const normalizedPath = path.resolve(workspacePath);
     const rid = runtimeId ?? "legacy";
     const hash = createHash("sha256").update(`${normalizedPath}\0${rid}`).digest("hex").slice(0, 8);
-    this.socketPath = `/tmp/pandora-${hash}.sock`;
+    this.controlSocketPath = `/tmp/pandora-${hash}-ctl.sock`;
+    this.dataSocketPath = `/tmp/pandora-${hash}-data.sock`;
     this.db = openDatabase({
       workspacePath: normalizedPath,
       defaultCwd: defaultCwd ?? normalizedPath,
@@ -45,8 +59,11 @@ export class DaemonServer {
     this.processManager = new ProcessManager(
       slotDefinitions,
       sessionDefinitions,
-      (session) => this.broadcast({ type: "session_state_changed", session }),
+      (session) => this.broadcastControl({ type: "session_state_changed", session }),
       (sessionID, data) => {
+        if (this.dataClients.size === 0 || this.allClientsDraining) {
+          return;
+        }
         broadcastOutputCount++;
         broadcastOutputBytes += data.length;
         if (broadcastOutputCount % 100 === 0) {
@@ -57,16 +74,12 @@ export class DaemonServer {
               sessionID,
               bytes: data.length,
               totalBytes: broadcastOutputBytes,
-              clients: this.clients.size,
+              clients: this.dataClients.size,
             },
-            "output_chunk",
+            "output_frame",
           );
         }
-        this.broadcast({
-          type: "output_chunk",
-          sessionID,
-          data: data.toString("base64"),
-        });
+        this.broadcastOutput(sessionID, data);
       },
       resolvedDefaultCwd,
       rid,
@@ -74,9 +87,9 @@ export class DaemonServer {
   }
 
   async start(): Promise<void> {
-    if (existsSync(this.socketPath)) {
+    if (existsSync(this.controlSocketPath)) {
       const alreadyListening = await new Promise<boolean>((resolve) => {
-        const client = net.createConnection(this.socketPath);
+        const client = net.createConnection(this.controlSocketPath);
         const done = (value: boolean) => {
           client.removeAllListeners();
           client.destroy();
@@ -87,13 +100,18 @@ export class DaemonServer {
       });
 
       if (alreadyListening) {
-        console.log(`pandorad already running on ${this.socketPath}`);
+        console.log(`pandorad already running on ${this.controlSocketPath}`);
         this.db.close();
         process.exit(0);
       }
-
-      unlinkSync(this.socketPath);
     }
+    if (existsSync(this.controlSocketPath)) {
+      unlinkSync(this.controlSocketPath);
+    }
+    if (existsSync(this.dataSocketPath)) {
+      unlinkSync(this.dataSocketPath);
+    }
+
     try {
       await this.processManager.autostartSlots();
     } catch (error) {
@@ -101,75 +119,137 @@ export class DaemonServer {
       throw error;
     }
 
-    this.server = net.createServer((socket) => this.handleConnection(socket));
+    this.controlServer = net.createServer((socket) => this.handleControlConnection(socket));
+    this.dataServer = net.createServer((socket) => this.handleDataConnection(socket));
+
     await new Promise<void>((resolve, reject) => {
-      this.server?.once("error", reject);
-      this.server?.listen(this.socketPath, resolve);
+      this.controlServer?.once("error", reject);
+      this.controlServer?.listen(this.controlSocketPath, resolve);
+    });
+    await new Promise<void>((resolve, reject) => {
+      this.dataServer?.once("error", reject);
+      this.dataServer?.listen(this.dataSocketPath, resolve);
     });
 
-    console.log(`pandorad listening on ${this.socketPath}`);
+    console.log(`pandorad listening on ${this.controlSocketPath} + ${this.dataSocketPath}`);
   }
 
   async stop(): Promise<void> {
     this.processManager.closeAllSessions();
 
-    for (const client of this.clients) {
-      client.destroy();
+    for (const socket of this.controlClients) {
+      socket.destroy();
     }
-    this.clients.clear();
+    this.controlClients.clear();
 
-    if (this.server) {
-      await new Promise<void>((resolve) => this.server?.close(() => resolve()));
-      this.server = null;
+    for (const { socket } of this.dataClients.values()) {
+      socket.destroy();
+    }
+    this.dataClients.clear();
+    this.updateAllClientsDraining();
+
+    if (this.controlServer) {
+      await new Promise<void>((resolve) => this.controlServer?.close(() => resolve()));
+      this.controlServer = null;
+    }
+    if (this.dataServer) {
+      await new Promise<void>((resolve) => this.dataServer?.close(() => resolve()));
+      this.dataServer = null;
     }
 
-    if (existsSync(this.socketPath)) {
-      unlinkSync(this.socketPath);
+    if (existsSync(this.controlSocketPath)) {
+      unlinkSync(this.controlSocketPath);
+    }
+    if (existsSync(this.dataSocketPath)) {
+      unlinkSync(this.dataSocketPath);
     }
     this.db.close();
   }
 
-  private handleConnection(socket: net.Socket): void {
-    this.clients.add(socket);
-    logger.info({ tag: "CONN", total: this.clients.size }, "client connected");
-    writeMessage(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
-    writeMessage(socket, {
+  getControlSocketPath(): string {
+    return this.controlSocketPath;
+  }
+
+  getDataSocketPath(): string {
+    return this.dataSocketPath;
+  }
+
+  private handleControlConnection(socket: net.Socket): void {
+    this.controlClients.add(socket);
+    logger.info({ tag: "CONN_CTL", total: this.controlClients.size }, "control client connected");
+    this.writeControl(socket, { type: "slot_snapshot", slots: this.processManager.listSlotStates() });
+    this.writeControl(socket, {
       type: "session_snapshot",
       sessions: this.processManager.listSessionStates(),
     });
 
-    const reader = createMessageReader(
+    const reader = createControlMessageReader(
       (message) => {
-        this.handleMessage(socket, message as ClientMessage);
+        this.handleControlMessage(socket, message as ClientMessage);
       },
       (error) => {
-        logger.warn({ tag: "CONN", err: error.message }, "message parse error");
-        writeMessage(socket, { type: "error", message: error.message });
+        logger.warn({ tag: "CONN_CTL", err: error.message }, "message parse error");
+        this.writeControl(socket, { type: "error", message: error.message });
       },
     );
 
     socket.on("data", reader);
     socket.on("close", () => {
-      this.clients.delete(socket);
-      logger.info({ tag: "CONN", total: this.clients.size }, "client disconnected");
+      this.controlClients.delete(socket);
+      logger.info(
+        { tag: "CONN_CTL", total: this.controlClients.size },
+        "control client disconnected",
+      );
     });
     socket.on("error", (err) => {
-      logger.error({ tag: "CONN", err: err.message, total: this.clients.size }, "client error");
-      this.clients.delete(socket);
+      logger.error(
+        { tag: "CONN_CTL", err: err.message, total: this.controlClients.size },
+        "control client error",
+      );
+      this.controlClients.delete(socket);
     });
   }
 
-  private handleMessage(socket: net.Socket, message: ClientMessage): void {
+  private handleDataConnection(socket: net.Socket): void {
+    const state: DataClientState = { socket, draining: false };
+    this.dataClients.set(socket, state);
+    this.updateAllClientsDraining();
+    logger.info({ tag: "CONN_DATA", total: this.dataClients.size }, "data client connected");
+
+    socket.on("drain", () => {
+      state.draining = false;
+      this.updateAllClientsDraining();
+    });
+    socket.on("close", () => {
+      this.dataClients.delete(socket);
+      this.updateAllClientsDraining();
+      logger.info(
+        { tag: "CONN_DATA", total: this.dataClients.size },
+        "data client disconnected",
+      );
+    });
+    socket.on("error", (err) => {
+      this.dataClients.delete(socket);
+      this.updateAllClientsDraining();
+      logger.error(
+        { tag: "CONN_DATA", err: err.message, total: this.dataClients.size },
+        "data client error",
+      );
+    });
+  }
+
+  private handleControlMessage(socket: net.Socket, message: ClientMessage): void {
     if (message.type !== "input" && message.type !== "resize") {
       logger.debug({ tag: "MSG", type: message.type }, "client message");
     }
+
     switch (message.type) {
       case "request_snapshot":
-        writeMessage(socket, {
+        this.writeControl(socket, {
           type: "slot_snapshot",
           slots: this.processManager.listSlotStates(),
         });
-        writeMessage(socket, {
+        this.writeControl(socket, {
           type: "session_snapshot",
           sessions: this.processManager.listSessionStates(),
         });
@@ -186,7 +266,7 @@ export class DaemonServer {
           sortOrder: message.slot.sortOrder,
         });
         this.processManager.registerSlot(slot);
-        this.broadcast({ type: "slot_added", slot: this.findSlotState(slot.id) });
+        this.broadcastControl({ type: "slot_added", slot: this.findSlotState(slot.id) });
         break;
       }
       case "update_slot":
@@ -201,12 +281,12 @@ export class DaemonServer {
           sortOrder: message.slot.sortOrder,
         });
         this.processManager.updateSlotDefinition(message.slot);
-        this.broadcast({ type: "slot_state_changed", slot: this.findSlotState(message.slot.id) });
+        this.broadcastControl({ type: "slot_state_changed", slot: this.findSlotState(message.slot.id) });
         break;
       case "remove_slot":
         this.processManager.removeSlot(message.slotID);
         removeSlotDefinition(this.db, message.slotID);
-        this.broadcast({ type: "slot_removed", slotID: message.slotID });
+        this.broadcastControl({ type: "slot_removed", slotID: message.slotID });
         break;
       case "create_session_def": {
         const session = createSessionDefinition(this.db, {
@@ -291,14 +371,14 @@ export class DaemonServer {
       case "open_session_instance": {
         const session = this.processManager.openSessionInstance(message.sessionDefID);
         if (session) {
-          this.broadcast({ type: "session_opened", session });
+          this.broadcastControl({ type: "session_opened", session });
           this.broadcastSnapshots();
         }
         break;
       }
       case "close_session_instance":
         this.processManager.closeSession(message.sessionID);
-        this.broadcast({ type: "session_closed", sessionID: message.sessionID });
+        this.broadcastControl({ type: "session_closed", sessionID: message.sessionID });
         this.broadcastSnapshots();
         break;
       case "input":
@@ -311,7 +391,7 @@ export class DaemonServer {
         this.processManager.recordAgentCliSignal(message.signal);
         break;
       default:
-        writeMessage(socket, { type: "error", message: "Unsupported message" });
+        this.writeControl(socket, { type: "error", message: "Unsupported message" });
     }
   }
 
@@ -324,29 +404,78 @@ export class DaemonServer {
   }
 
   private broadcastSnapshots(): void {
-    this.broadcast({ type: "slot_snapshot", slots: this.processManager.listSlotStates() });
-    this.broadcast({ type: "session_snapshot", sessions: this.processManager.listSessionStates() });
+    this.broadcastControl({ type: "slot_snapshot", slots: this.processManager.listSlotStates() });
+    this.broadcastControl({ type: "session_snapshot", sessions: this.processManager.listSessionStates() });
   }
 
   private broadcastCount = 0;
-  private broadcast(message: DaemonMessage): void {
+  private broadcastControl(message: DaemonMessage): void {
     this.broadcastCount++;
     const t0 = Date.now();
-    for (const client of this.clients) {
-      writeMessage(client, message);
+    for (const socket of this.controlClients) {
+      this.writeControl(socket, message);
     }
     const elapsed = Date.now() - t0;
-    // Log if broadcast is slow (>5ms) — indicates socket backpressure
     if (elapsed > 5) {
       logger.warn(
         {
-          tag: "BROADCAST",
+          tag: "BROADCAST_CTL",
           type: message.type,
           count: this.broadcastCount,
-          clients: this.clients.size,
+          clients: this.controlClients.size,
           elapsedMs: elapsed,
         },
-        "slow broadcast",
+        "slow control broadcast",
+      );
+    }
+  }
+
+  private broadcastOutput(sessionID: string, data: Buffer): void {
+    if (this.allClientsDraining) {
+      return;
+    }
+
+    for (const state of this.dataClients.values()) {
+      if (state.draining) {
+        continue;
+      }
+      this.writeOutput(state, sessionID, data);
+    }
+  }
+
+  private writeControl(socket: net.Socket, message: DaemonMessage): void {
+    writeControlMessage(socket, message);
+  }
+
+  private writeOutput(state: DataClientState, sessionID: string, data: Buffer): void {
+    const flushed = writeOutputFrame(state.socket, sessionID, data);
+    if (!flushed) {
+      state.draining = true;
+      this.updateAllClientsDraining();
+    } else if (state.draining) {
+      state.draining = false;
+      this.updateAllClientsDraining();
+    }
+  }
+
+  private updateAllClientsDraining(): void {
+    const previous = this.allClientsDraining;
+
+    if (this.dataClients.size === 0) {
+      this.allClientsDraining = false;
+    } else {
+      this.allClientsDraining = Array.from(this.dataClients.values()).every((state) => state.draining);
+    }
+
+    if (previous !== this.allClientsDraining) {
+      this.processManager.setOutputsPaused(this.allClientsDraining);
+      logger.info(
+        {
+          tag: "BACKPRESSURE",
+          allClientsDraining: this.allClientsDraining,
+          dataClients: this.dataClients.size,
+        },
+        "updated global output pause state",
       );
     }
   }

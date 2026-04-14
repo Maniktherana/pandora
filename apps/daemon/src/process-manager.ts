@@ -1,5 +1,8 @@
+import { fork, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger";
 import type {
@@ -15,12 +18,41 @@ import type {
   SlotState,
 } from "./types";
 
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const workerEntry = path.join(moduleDir, "pty-worker.js");
+
 interface ManagedSession {
   definition: SessionDefinition;
   instance: SessionInstance;
-  process: Bun.Subprocess | null;
+  worker: ChildProcess | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
+  outputPaused: boolean;
+  crashCount: number;
+  exitHandled: boolean;
 }
+
+type WorkerSpawnMessage = {
+  type: "spawn";
+  shell: string;
+  cmd: string;
+  cwd: string;
+  env: Record<string, string>;
+  cols: number;
+  rows: number;
+};
+
+type WorkerControlMessage =
+  | WorkerSpawnMessage
+  | { type: "write"; data: string }
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "kill"; signal?: NodeJS.Signals };
+
+type WorkerRuntimeMessage =
+  | { type: "spawned"; pid: number | null }
+  | { type: "output"; data: Buffer | Uint8Array }
+  | { type: "exited"; exitCode: number | null; signal: number | string | null };
 
 function defaultPandoraHome() {
   return process.env.PANDORA_HOME || `${homedir()}/.pandora`;
@@ -240,8 +272,8 @@ export class ProcessManager {
   private readonly sessionDefinitions = new Map<string, SessionDefinition>();
   private readonly slotDefinitions = new Map<string, SlotDefinition>();
   private readonly sessions = new Map<string, ManagedSession>();
-
   private readonly defaultCwd: string;
+  private outputsPaused = false;
 
   constructor(
     slotDefinitions: SlotDefinition[],
@@ -330,19 +362,28 @@ export class ProcessManager {
 
   closeAllSessions(): void {
     for (const session of this.sessions.values()) {
-      if (session.stopTimer) {
-        clearTimeout(session.stopTimer);
-        session.stopTimer = null;
-      }
-      session.process?.kill("SIGKILL");
-      session.process?.terminal?.close();
-      session.process = null;
+      this.clearStopTimer(session);
+      this.detachWorker(session);
       session.instance.status = "stopped";
       session.instance.pid = null;
       session.instance.exitCode = null;
       session.instance.foregroundProcess = null;
     }
     this.sessions.clear();
+  }
+
+  setOutputsPaused(paused: boolean): void {
+    if (this.outputsPaused === paused) {
+      return;
+    }
+    this.outputsPaused = paused;
+    for (const session of this.sessions.values()) {
+      if (paused) {
+        this.pauseSessionOutput(session.instance.id);
+      } else {
+        this.resumeSessionOutput(session.instance.id);
+      }
+    }
   }
 
   startSlot(slotID: string): void {
@@ -385,7 +426,7 @@ export class ProcessManager {
 
   startSession(sessionID: string): void {
     const session = this.sessions.get(sessionID);
-    if (!session || session.process) {
+    if (!session || session.worker) {
       return;
     }
     this.spawnSession(session);
@@ -393,16 +434,17 @@ export class ProcessManager {
 
   stopSession(sessionID: string): void {
     const session = this.sessions.get(sessionID);
-    if (!session?.process) {
+    if (!session?.worker) {
       return;
     }
 
     session.instance.status = "stopped";
     session.instance.foregroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
-    session.process.kill("SIGTERM");
+    this.sendToWorker(session, { type: "kill", signal: "SIGTERM" });
+    this.clearStopTimer(session);
     session.stopTimer = setTimeout(() => {
-      session.process?.kill("SIGKILL");
+      this.sendToWorker(session, { type: "kill", signal: "SIGKILL" });
     }, 5_000);
   }
 
@@ -413,13 +455,16 @@ export class ProcessManager {
     }
 
     session.instance.status = "restarting";
+    session.instance.foregroundProcess = null;
+    session.instance.agentActivity = null;
     this.onSessionStateChanged(this.sessionState(session));
     this.onOutput(session.instance.id, Buffer.from("\u001bc", "utf8"));
-    if (session.process) {
-      session.process.kill("SIGTERM");
+
+    if (session.worker) {
+      this.sendToWorker(session, { type: "kill", signal: "SIGTERM" });
+      this.clearStopTimer(session);
       session.stopTimer = setTimeout(() => {
-        session.process?.kill("SIGKILL");
-        this.spawnSession(session);
+        this.sendToWorker(session, { type: "kill", signal: "SIGKILL" });
       }, 500);
     } else {
       this.spawnSession(session);
@@ -428,10 +473,10 @@ export class ProcessManager {
 
   pauseSession(sessionID: string): void {
     const session = this.sessions.get(sessionID);
-    if (!session?.process || !session.definition.pauseSupported) {
+    if (!session?.worker || !session.definition.pauseSupported) {
       return;
     }
-    session.process.kill("SIGSTOP");
+    this.sendToWorker(session, { type: "kill", signal: "SIGSTOP" });
     session.instance.status = "paused";
     session.instance.foregroundProcess = null;
     this.onSessionStateChanged(this.sessionState(session));
@@ -439,12 +484,30 @@ export class ProcessManager {
 
   resumeSession(sessionID: string): void {
     const session = this.sessions.get(sessionID);
-    if (!session?.process || !session.definition.resumeSupported) {
+    if (!session?.worker || !session.definition.resumeSupported) {
       return;
     }
-    session.process.kill("SIGCONT");
+    this.sendToWorker(session, { type: "kill", signal: "SIGCONT" });
     session.instance.status = "running";
     this.onSessionStateChanged(this.sessionState(session));
+  }
+
+  pauseSessionOutput(sessionID: string): void {
+    const session = this.sessions.get(sessionID);
+    if (!session?.worker || session.outputPaused) {
+      return;
+    }
+    session.outputPaused = true;
+    this.sendToWorker(session, { type: "pause" });
+  }
+
+  resumeSessionOutput(sessionID: string): void {
+    const session = this.sessions.get(sessionID);
+    if (!session?.worker || !session.outputPaused) {
+      return;
+    }
+    session.outputPaused = false;
+    this.sendToWorker(session, { type: "resume" });
   }
 
   openSessionInstance(sessionDefID: string): SessionState | null {
@@ -467,8 +530,11 @@ export class ProcessManager {
         foregroundProcess: null,
         agentActivity: null,
       },
-      process: null,
+      worker: null,
       stopTimer: null,
+      outputPaused: false,
+      crashCount: 0,
+      exitHandled: false,
     };
 
     this.sessions.set(managed.instance.id, managed);
@@ -481,52 +547,52 @@ export class ProcessManager {
     if (!session) {
       return;
     }
-    if (session.stopTimer) {
-      clearTimeout(session.stopTimer);
-    }
-    session.process?.kill("SIGKILL");
-    session.process?.terminal?.close();
+    this.clearStopTimer(session);
+    this.detachWorker(session);
     this.sessions.delete(sessionID);
   }
 
   writeToSession(sessionID: string, data: Buffer): void {
     const session = this.sessions.get(sessionID);
-    if (session?.process) {
-      logger.debug(
-        {
-          tag: "PTY_WRITE",
-          sessionID,
-          pid: session.instance.pid,
-          cmd: session.definition.command,
-          bytes: data.length,
-        },
-        "pty write",
-      );
-      session.process.terminal?.write(data);
+    if (!session?.worker) {
+      return;
     }
+    logger.debug(
+      {
+        tag: "PTY_WRITE",
+        sessionID,
+        pid: session.instance.pid,
+        cmd: session.definition.command,
+        bytes: data.length,
+      },
+      "pty write",
+    );
+    this.sendToWorker(session, { type: "write", data: data.toString("utf8") });
   }
 
   resizeSession(sessionID: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionID);
-    if (session) {
-      logger.debug(
-        {
-          tag: "PTY_RESIZE",
-          sessionID,
-          pid: session.instance.pid,
-          cmd: session.definition.command,
-          cols,
-          rows,
-        },
-        "pty resize",
-      );
+    if (!session?.worker) {
+      return;
     }
-    session?.process?.terminal?.resize(Math.max(cols, 1), Math.max(rows, 1));
+    logger.debug(
+      {
+        tag: "PTY_RESIZE",
+        sessionID,
+        pid: session.instance.pid,
+        cmd: session.definition.command,
+        cols,
+        rows,
+      },
+      "pty resize",
+    );
+    this.sendToWorker(session, { type: "resize", cols, rows });
   }
 
   recordAgentCliSignal(signal: AgentCliSignal): SessionState | null {
     const session = this.findSessionsBySlot(signal.slotID).find(
-      (candidate) => candidate.instance.status === "running" || candidate.instance.status === "paused",
+      (candidate) =>
+        candidate.instance.status === "running" || candidate.instance.status === "paused",
     );
     if (!session) {
       return null;
@@ -549,13 +615,12 @@ export class ProcessManager {
   }
 
   private spawnSession(session: ManagedSession): void {
-    if (session.process) {
+    if (session.worker) {
       return;
     }
 
     const shell = process.env.SHELL || "/bin/zsh";
     const env = sessionSpawnEnv(session.definition, this.runtimeId, session.instance.slotID);
-
     const sid = session.instance.id;
     const cmd = session.definition.command;
     const normalizedCwd = session.definition.cwd?.trim();
@@ -563,93 +628,153 @@ export class ProcessManager {
 
     logger.info({ tag: "SPAWN", sessionID: sid, cmd, cwd, shell }, "spawning session");
 
-    let outputCount = 0;
-    let outputBytes = 0;
-    let lastLogTime = Date.now();
-    const subprocess = Bun.spawn([shell, "-lc", cmd], {
-      cwd,
-      env,
-      terminal: {
-        cols: 120,
-        rows: 40,
-        name: "xterm-256color",
-        data: (_terminal, data) => {
-          const buf = Buffer.from(data);
-          outputCount++;
-          outputBytes += buf.length;
-          session.instance.lastOutputAt = new Date().toISOString();
-          const now = Date.now();
-          if (
-            outputCount <= 5 ||
-            outputCount % 50 === 0 ||
-            buf.length > 4096 ||
-            now - lastLogTime > 500
-          ) {
-            logger.debug(
-              {
-                tag: "PTY_OUT",
-                sessionID: sid,
-                cmd,
-                chunk: outputCount,
-                bytes: buf.length,
-                totalBytes: outputBytes,
-              },
-              "pty output",
-            );
-            lastLogTime = now;
-          }
-          this.onOutput(sid, buf);
-        },
-      },
+    const worker = fork(workerEntry, [], {
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      serialization: "advanced",
     });
 
-    session.process = subprocess;
-    session.instance.pid = subprocess.pid;
+    session.worker = worker;
+    session.exitHandled = false;
+    session.outputPaused = this.outputsPaused;
     session.instance.status = "running";
     session.instance.startedAt = new Date().toISOString();
     session.instance.exitCode = null;
+    session.instance.pid = null;
+    session.instance.foregroundProcess = null;
+    session.instance.agentActivity = null;
+    this.onSessionStateChanged(this.sessionState(session));
+
+    worker.on("message", (message: WorkerRuntimeMessage) => {
+      this.handleWorkerMessage(session, message);
+    });
+    worker.once("exit", (code, signal) => {
+      this.handleWorkerExit(session, code, signal ?? null);
+    });
+    worker.once("error", (error) => {
+      logger.error({ tag: "SPAWN", sessionID: sid, err: error.message }, "worker error");
+    });
+
+    const spawnMessage: WorkerSpawnMessage = {
+      type: "spawn",
+      shell,
+      cmd,
+      cwd,
+      env: env as Record<string, string>,
+      cols: 120,
+      rows: 40,
+    };
+    this.sendToWorker(session, spawnMessage);
+    if (session.outputPaused) {
+      this.sendToWorker(session, { type: "pause" });
+    }
+  }
+
+  private handleWorkerMessage(session: ManagedSession, message: WorkerRuntimeMessage): void {
+    switch (message.type) {
+      case "spawned":
+        session.instance.pid = message.pid ?? null;
+        session.crashCount = 0;
+        this.onSessionStateChanged(this.sessionState(session));
+        break;
+      case "output": {
+        const chunk = Buffer.isBuffer(message.data)
+          ? message.data
+          : Buffer.from(message.data);
+        session.instance.lastOutputAt = new Date().toISOString();
+        this.onOutput(session.instance.id, chunk);
+        break;
+      }
+      case "exited":
+        this.finalizeWorkerExit(session, message.exitCode, message.signal);
+        break;
+    }
+  }
+
+  private handleWorkerExit(
+    session: ManagedSession,
+    exitCode: number | null,
+    signal: number | string | null,
+  ): void {
+    this.finalizeWorkerExit(session, exitCode, signal);
+  }
+
+  private finalizeWorkerExit(
+    session: ManagedSession,
+    exitCode: number | null,
+    signal: number | string | null,
+  ): void {
+    if (session.exitHandled) {
+      return;
+    }
+    session.exitHandled = true;
+
+    this.clearStopTimer(session);
+    const worker = session.worker;
+    if (worker) {
+      worker.removeAllListeners();
+    }
+    session.worker = null;
+    session.outputPaused = false;
+    session.instance.pid = null;
+    session.instance.exitCode = exitCode;
     session.instance.foregroundProcess = null;
     session.instance.agentActivity = null;
 
-    logger.info({ tag: "SPAWN", sessionID: sid, pid: subprocess.pid, cmd }, "session running");
+    logger.info(
+      {
+        tag: "EXIT",
+        sessionID: session.instance.id,
+        exitCode,
+        signal,
+        status: session.instance.status,
+      },
+      "worker exited",
+    );
+
+    if (session.instance.status === "restarting") {
+      this.spawnSession(session);
+      return;
+    }
+
+    session.instance.status = session.instance.status === "stopped" ? "stopped" : "crashed";
     this.onSessionStateChanged(this.sessionState(session));
 
-    void subprocess.exited.then((exitCode) => {
-      logger.info(
-        {
-          tag: "EXIT",
-          sessionID: sid,
-          pid: session.instance.pid,
-          exitCode,
-          outputChunks: outputCount,
-          outputBytes,
-        },
-        "session exited",
-      );
-      session.process?.terminal?.close();
-      session.process = null;
-      session.instance.pid = null;
-      session.instance.exitCode = exitCode;
-      session.instance.foregroundProcess = null;
-      session.instance.agentActivity = null;
-      if (session.stopTimer) {
-        clearTimeout(session.stopTimer);
-        session.stopTimer = null;
-      }
-
-      if (session.instance.status === "restarting") {
-        logger.info({ tag: "EXIT", sessionID: sid }, "restarting session");
+    if (session.definition.restartPolicy === "always" && session.instance.status === "crashed") {
+      const backoff = Math.min(30_000, 1_000 * 2 ** session.crashCount);
+      session.crashCount += 1;
+      setTimeout(() => {
+        if (session.instance.status !== "crashed" || session.worker) {
+          return;
+        }
+        session.instance.status = "restarting";
+        this.onSessionStateChanged(this.sessionState(session));
         this.spawnSession(session);
-        return;
-      }
+      }, backoff);
+    }
+  }
 
-      session.instance.status = session.instance.status === "stopped" ? "stopped" : "crashed";
-      logger.info(
-        { tag: "EXIT", sessionID: sid, status: session.instance.status },
-        "session final status",
-      );
-      this.onSessionStateChanged(this.sessionState(session));
-    });
+  private detachWorker(session: ManagedSession): void {
+    const worker = session.worker;
+    if (!worker) {
+      return;
+    }
+    session.exitHandled = true;
+    session.worker = null;
+    worker.removeAllListeners();
+    worker.kill("SIGKILL");
+    session.outputPaused = false;
+  }
+
+  private sendToWorker(session: ManagedSession, message: WorkerControlMessage): void {
+    session.worker?.send(message);
+  }
+
+  private clearStopTimer(session: ManagedSession): void {
+    if (!session.stopTimer) {
+      return;
+    }
+    clearTimeout(session.stopTimer);
+    session.stopTimer = null;
   }
 
   private sessionDefinitionsForSlot(slotID: string): SessionDefinition[] {
@@ -696,4 +821,5 @@ export class ProcessManager {
       capabilities: capabilitiesForStatus(session.instance.status, session.definition),
     };
   }
+
 }

@@ -3,18 +3,16 @@
 //! - **Workspace runtime** — key = workspace UUID; `workspace_path` is the worktree; used for
 //!   editor + workspace-scoped terminals.
 //! - **Project runtime** — key = `project:<project_id>`; `workspace_path` is the git root; one
-//!   shared shell per project (bottom panel). Same binary as the workspace daemon; a future
-//!   multiplexed single-process design can merge these without changing the frontend key scheme.
-//!
-//! Frontend `daemon_send` / events use the runtime id as `workspaceId` for routing.
+//!   shared shell per project (bottom panel).
 
 use crate::surface_registry::SurfaceRegistry;
-use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -22,7 +20,7 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 struct WorkspaceRuntime {
-    writer: Option<tokio::io::WriteHalf<UnixStream>>,
+    control_writer: Option<tokio::io::WriteHalf<UnixStream>>,
     daemon_process: Option<CommandChild>,
     connected: bool,
 }
@@ -41,10 +39,7 @@ impl DaemonState {
     }
 }
 
-/// Socket path must be unique per **runtime** (workspace UUID or `project:…`), not only `workspace_path`.
-/// Otherwise a linked workspace (worktree path == git root) spawns two daemons that fought over one
-/// socket and one `runtime.db`, causing `SQLITE_BUSY` and broken routing.
-fn socket_path_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
+fn socket_prefix_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
     let normalized = std::fs::canonicalize(workspace_path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| workspace_path.to_string());
@@ -54,7 +49,21 @@ fn socket_path_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
     hasher.update(runtime_id.as_bytes());
     let hash = hex::encode(hasher.finalize());
     let prefix = &hash[..8];
-    format!("/tmp/pandora-{}.sock", prefix)
+    format!("/tmp/pandora-{}", prefix)
+}
+
+fn control_socket_path_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
+    format!(
+        "{}-ctl.sock",
+        socket_prefix_for_runtime(workspace_path, runtime_id)
+    )
+}
+
+fn data_socket_path_for_runtime(workspace_path: &str, runtime_id: &str) -> String {
+    format!(
+        "{}-data.sock",
+        socket_prefix_for_runtime(workspace_path, runtime_id)
+    )
 }
 
 async fn read_lp_message(
@@ -71,6 +80,27 @@ async fn read_lp_message(
     Ok(String::from_utf8(buf)?)
 }
 
+async fn read_output_frame(
+    stream: &mut tokio::io::ReadHalf<UnixStream>,
+) -> Result<(String, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len == 0 || len > 16 * 1024 * 1024 {
+        return Err("invalid output frame size".into());
+    }
+
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+    let session_len = *buf.first().ok_or("missing output frame session length")? as usize;
+    if len < 1 + session_len {
+        return Err("invalid output frame payload".into());
+    }
+    let session_id = String::from_utf8(buf[1..1 + session_len].to_vec())?;
+    let data = buf[1 + session_len..].to_vec();
+    Ok((session_id, data))
+}
+
 async fn write_lp_message(
     writer: &mut tokio::io::WriteHalf<UnixStream>,
     msg: &str,
@@ -81,6 +111,12 @@ async fn write_lp_message(
     writer.write_all(bytes).await?;
     writer.flush().await?;
     Ok(())
+}
+
+fn daemon_script_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .resolve("binaries/pandorad-dist/index.js", BaseDirectory::Resource)
+        .map_err(|e| e.to_string())
 }
 
 pub async fn send_workspace_message(
@@ -96,7 +132,7 @@ pub async fn send_workspace_message(
     drop(map);
 
     let mut rt = runtime.lock().await;
-    match rt.writer.as_mut() {
+    match rt.control_writer.as_mut() {
         Some(writer) => write_lp_message(writer, message)
             .await
             .map_err(|e| e.to_string()),
@@ -151,17 +187,11 @@ fn start_daemon_runtime(
                 );
 
                 let mut rt = existing_runtime.lock().await;
-                if let Some(writer) = rt.writer.as_mut() {
+                if let Some(writer) = rt.control_writer.as_mut() {
                     let _ = write_lp_message(writer, r#"{"type":"request_snapshot"}"#).await;
                 }
                 return;
             }
-
-            tlog!(
-                "DAEMON",
-                "runtime={} stale disconnected runtime found; restarting",
-                runtime_id
-            );
 
             {
                 let mut map = runtimes.lock().await;
@@ -169,7 +199,7 @@ fn start_daemon_runtime(
             }
 
             let mut rt = existing_runtime.lock().await;
-            rt.writer = None;
+            rt.control_writer = None;
             rt.connected = false;
             if let Some(child) = rt.daemon_process.take() {
                 let _ = child.kill();
@@ -177,7 +207,7 @@ fn start_daemon_runtime(
         }
 
         let runtime = Arc::new(Mutex::new(WorkspaceRuntime {
-            writer: None,
+            control_writer: None,
             daemon_process: None,
             connected: false,
         }));
@@ -189,30 +219,111 @@ fn start_daemon_runtime(
 
         let pid = std::process::id();
         let pandora_home = crate::git::pandora_home();
+        let daemon_script = match daemon_script_path(&app) {
+            Ok(path) => path,
+            Err(err) => {
+                tlog!(
+                    "DAEMON",
+                    "runtime={} failed to resolve daemon script: {}",
+                    runtime_id,
+                    err
+                );
+                eprintln!("Failed to resolve daemon script path: {}", err);
+                let mut map = runtimes.lock().await;
+                map.remove(&runtime_id);
+                let _ = startup_guard.take();
+                return;
+            }
+        };
 
         let mut sidecar_started = false;
-        match app.shell().sidecar("pandorad") {
+        match app.shell().sidecar("node") {
             Ok(cmd) => match cmd
-                .args([&workspace_path, &default_cwd, &runtime_id])
+                .args([
+                    daemon_script.to_string_lossy().as_ref(),
+                    &workspace_path,
+                    &default_cwd,
+                    &runtime_id,
+                ])
                 .env("PANDORA_PARENT_PID", pid.to_string())
                 .env("PANDORA_HOME", &pandora_home)
                 .spawn()
             {
                 Ok((mut rx, child)) => {
                     sidecar_started = true;
+                    tlog!(
+                        "DAEMON",
+                        "runtime={} started node sidecar pid={} script={}",
+                        runtime_id,
+                        child.pid(),
+                        daemon_script.display()
+                    );
                     eprintln!("Daemon PID {} for runtime {}", child.pid(), runtime_id);
+                    let runtime_for_output = runtime_id.clone();
                     tauri::async_runtime::spawn(async move {
-                        while rx.recv().await.is_some() {}
+                        while let Some(event) = rx.recv().await {
+                            match event {
+                                CommandEvent::Stdout(bytes) => {
+                                    tlog!(
+                                        "DAEMON",
+                                        "runtime={} sidecar stdout: {}",
+                                        runtime_for_output,
+                                        String::from_utf8_lossy(&bytes).trim()
+                                    );
+                                }
+                                CommandEvent::Stderr(bytes) => {
+                                    tlog!(
+                                        "DAEMON",
+                                        "runtime={} sidecar stderr: {}",
+                                        runtime_for_output,
+                                        String::from_utf8_lossy(&bytes).trim()
+                                    );
+                                }
+                                CommandEvent::Error(err) => {
+                                    tlog!(
+                                        "DAEMON",
+                                        "runtime={} sidecar event error: {}",
+                                        runtime_for_output,
+                                        err
+                                    );
+                                }
+                                CommandEvent::Terminated(payload) => {
+                                    tlog!(
+                                        "DAEMON",
+                                        "runtime={} sidecar terminated code={:?} signal={:?}",
+                                        runtime_for_output,
+                                        payload.code,
+                                        payload.signal
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
                     });
                     let mut rt = runtime.lock().await;
                     rt.daemon_process = Some(child);
                 }
                 Err(e) => {
-                    eprintln!("Failed to start pandorad sidecar for {}: {}", runtime_id, e);
+                    tlog!(
+                        "DAEMON",
+                        "runtime={} failed to start node daemon sidecar: {}",
+                        runtime_id,
+                        e
+                    );
+                    eprintln!(
+                        "Failed to start node daemon sidecar for {}: {}",
+                        runtime_id, e
+                    );
                 }
             },
             Err(e) => {
-                eprintln!("Failed to resolve pandorad sidecar: {}", e);
+                tlog!(
+                    "DAEMON",
+                    "runtime={} failed to resolve node sidecar: {}",
+                    runtime_id,
+                    e
+                );
+                eprintln!("Failed to resolve node sidecar: {}", e);
             }
         }
 
@@ -223,23 +334,33 @@ fn start_daemon_runtime(
             return;
         }
 
-        let socket_path = socket_path_for_runtime(&workspace_path, &runtime_id);
+        let control_socket_path = control_socket_path_for_runtime(&workspace_path, &runtime_id);
+        let data_socket_path = data_socket_path_for_runtime(&workspace_path, &runtime_id);
 
         loop {
-            let sock = loop {
-                if std::path::Path::new(&socket_path).exists() {
-                    match UnixStream::connect(&socket_path).await {
-                        Ok(s) => break s,
-                        Err(_) => {}
+            let control = loop {
+                if std::path::Path::new(&control_socket_path).exists() {
+                    if let Ok(sock) = UnixStream::connect(&control_socket_path).await {
+                        break sock;
                     }
                 }
                 sleep(Duration::from_millis(200)).await;
             };
 
-            let (mut reader, writer) = tokio::io::split(sock);
+            let data = loop {
+                if std::path::Path::new(&data_socket_path).exists() {
+                    if let Ok(sock) = UnixStream::connect(&data_socket_path).await {
+                        break sock;
+                    }
+                }
+                sleep(Duration::from_millis(200)).await;
+            };
+
+            let (mut control_reader, control_writer) = tokio::io::split(control);
+            let (mut data_reader, _) = tokio::io::split(data);
             {
                 let mut rt = runtime.lock().await;
-                rt.writer = Some(writer);
+                rt.control_writer = Some(control_writer);
                 rt.connected = true;
             }
 
@@ -247,9 +368,10 @@ fn start_daemon_runtime(
 
             tlog!(
                 "DAEMON",
-                "runtime={} CONNECTED via {}",
+                "runtime={} CONNECTED via {} + {}",
                 runtime_id,
-                socket_path
+                control_socket_path,
+                data_socket_path
             );
 
             let _ = app.emit(
@@ -261,25 +383,22 @@ fn start_daemon_runtime(
                 .to_string(),
             );
 
-            // Read loop
-            let mut msg_count: u64 = 0;
-            let mut output_chunk_count: u64 = 0;
-            let mut output_bytes_total: u64 = 0;
-            loop {
-                let t0 = std::time::Instant::now();
-                match read_lp_message(&mut reader).await {
-                    Ok(msg) => {
-                        msg_count += 1;
-                        let read_us = t0.elapsed().as_micros();
+            let app_for_control = app.clone();
+            let runtime_id_for_control = runtime_id.clone();
+            let mut control_task = tauri::async_runtime::spawn(async move {
+                let mut msg_count: u64 = 0;
+                loop {
+                    let t0 = std::time::Instant::now();
+                    let msg = read_lp_message(&mut control_reader).await?;
+                    msg_count += 1;
+                    let read_us = t0.elapsed().as_micros();
 
-                        // Wrap message with workspaceId
-                        let wrapped = if let Ok(mut parsed) =
-                            serde_json::from_str::<serde_json::Value>(&msg)
-                        {
+                    let wrapped =
+                        if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&msg) {
                             if let Some(obj) = parsed.as_object_mut() {
                                 obj.insert(
                                     "workspaceId".into(),
-                                    serde_json::Value::String(runtime_id.clone()),
+                                    serde_json::Value::String(runtime_id_for_control.clone()),
                                 );
                             }
                             serde_json::to_string(&parsed).unwrap_or(msg)
@@ -287,75 +406,95 @@ fn start_daemon_runtime(
                             msg
                         };
 
-                        let mut emitted_to_surface = false;
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&wrapped) {
-                            let msg_type =
-                                parsed.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-
-                            if msg_type == "output_chunk" {
-                                if let (Some(session_id), Some(data)) = (
-                                    parsed.get("sessionID").and_then(|v| v.as_str()),
-                                    parsed.get("data").and_then(|v| v.as_str()),
-                                ) {
-                                    if let Ok(bytes) =
-                                        base64::engine::general_purpose::STANDARD.decode(data)
-                                    {
-                                        output_chunk_count += 1;
-                                        output_bytes_total += bytes.len() as u64;
-                                        let registry = app.state::<Arc<SurfaceRegistry>>();
-                                        let t_feed = std::time::Instant::now();
-                                        emitted_to_surface =
-                                            registry.inner().feed_output(&app, session_id, &bytes);
-                                        let feed_us = t_feed.elapsed().as_micros();
-
-                                        // Log every 100th chunk or if feed was slow.
-                                        if output_chunk_count % 100 == 0 || feed_us > 1000 {
-                                            tlog!("DAEMON", "runtime={} output_chunk #{} session={} bytes={} routed={} read={}µs feed={}µs total_bytes={}",
-                                                runtime_id, output_chunk_count, session_id,
-                                                bytes.len(), emitted_to_surface, read_us, feed_us,
-                                                output_bytes_total);
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Log non-output messages (these are infrequent).
-                                tlog!(
-                                    "DAEMON",
-                                    "runtime={} msg #{} type={} len={} read={}µs",
-                                    runtime_id,
-                                    msg_count,
-                                    msg_type,
-                                    wrapped.len(),
-                                    read_us
-                                );
-                            }
-                        }
-
-                        if !emitted_to_surface {
-                            let _ = app.emit("daemon-message", wrapped);
-                        }
-                    }
-                    Err(e) => {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&wrapped) {
+                        let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("?");
                         tlog!(
                             "DAEMON",
-                            "runtime={} READ ERROR after {} msgs ({} output chunks, {} bytes): {}",
-                            runtime_id,
+                            "runtime={} msg #{} type={} len={} read={}µs",
+                            runtime_id_for_control,
                             msg_count,
-                            output_chunk_count,
-                            output_bytes_total,
-                            e
+                            msg_type,
+                            wrapped.len(),
+                            read_us
                         );
-                        eprintln!("Daemon read error for runtime {}: {}", runtime_id, e);
-                        break;
+                    }
+
+                    let _ = app_for_control.emit("daemon-message", wrapped);
+                }
+
+                #[allow(unreachable_code)]
+                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+            });
+
+            let app_for_data = app.clone();
+            let runtime_id_for_data = runtime_id.clone();
+            let mut data_task = tauri::async_runtime::spawn(async move {
+                let mut output_chunk_count: u64 = 0;
+                let mut output_bytes_total: u64 = 0;
+                loop {
+                    let t0 = std::time::Instant::now();
+                    let (session_id, bytes) = read_output_frame(&mut data_reader).await?;
+                    output_chunk_count += 1;
+                    output_bytes_total += bytes.len() as u64;
+
+                    let registry = app_for_data.state::<Arc<SurfaceRegistry>>();
+
+                    let t_feed = std::time::Instant::now();
+                    let routed =
+                        registry
+                            .inner()
+                            .feed_output(&app_for_data, &session_id, bytes.as_slice());
+                    let feed_us = t_feed.elapsed().as_micros();
+
+                    if output_chunk_count % 100 == 0 || feed_us > 1000 {
+                        tlog!(
+                            "DAEMON",
+                            "runtime={} output_frame #{} session={} bytes={} routed={} read={}µs feed={}µs total_bytes={}",
+                            runtime_id_for_data,
+                            output_chunk_count,
+                            session_id,
+                            bytes.len(),
+                            routed,
+                            t0.elapsed().as_micros(),
+                            feed_us,
+                            output_bytes_total
+                        );
                     }
                 }
-            }
 
-            // Disconnected
-            tlog!("DAEMON", "runtime={} DISCONNECTED", runtime_id);
+                #[allow(unreachable_code)]
+                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+            });
+
+            let disconnect_reason = tokio::select! {
+                control_result = &mut control_task => {
+                    match control_result {
+                        Ok(Ok(())) => "control socket closed".to_string(),
+                        Ok(Err(err)) => format!("control read error: {}", err),
+                        Err(err) => format!("control task join error: {}", err),
+                    }
+                }
+                data_result = &mut data_task => {
+                    match data_result {
+                        Ok(Ok(())) => "data socket closed".to_string(),
+                        Ok(Err(err)) => format!("data read error: {}", err),
+                        Err(err) => format!("data task join error: {}", err),
+                    }
+                }
+            };
+
+            control_task.abort();
+            data_task.abort();
+
+            tlog!(
+                "DAEMON",
+                "runtime={} DISCONNECTED: {}",
+                runtime_id,
+                disconnect_reason
+            );
             {
                 let mut rt = runtime.lock().await;
-                rt.writer = None;
+                rt.control_writer = None;
                 rt.connected = false;
             }
             let _ = app.emit(
@@ -367,7 +506,6 @@ fn start_daemon_runtime(
                 .to_string(),
             );
 
-            // Check if runtime was removed (workspace / project deleted)
             {
                 let map = runtimes.lock().await;
                 if !map.contains_key(&runtime_id) {
@@ -403,7 +541,7 @@ pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
     let mut map = state.runtimes.lock().await;
     if let Some(runtime) = map.remove(workspace_id) {
         let mut rt = runtime.lock().await;
-        rt.writer = None;
+        rt.control_writer = None;
         rt.connected = false;
         if let Some(child) = rt.daemon_process.take() {
             let _ = child.kill();

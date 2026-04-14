@@ -5,11 +5,10 @@
     "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "src",
-    "types": [
-      "bun"
-    ]
+    "types": ["node", "bun"]
   },
   "include": [
     "src/**/*.ts"

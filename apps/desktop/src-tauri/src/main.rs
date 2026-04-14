@@ -248,6 +248,9 @@ fn main() {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             ghostty_app::init_ghostty_app(app.handle().clone());
 
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            ghostty_app::start_tick_timer(app.handle().clone());
+
             let handle = app.handle().clone();
 
             let rt = tokio::runtime::Builder::new_multi_thread()

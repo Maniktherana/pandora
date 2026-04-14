@@ -1,38 +1,65 @@
-async function runCycle(label: string): Promise<void> {
-  const shell = process.env.SHELL || "/bin/zsh";
-  let sawReady = false;
-  let sawReply = false;
+import * as pty from "node-pty";
+import { chmodSync, existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 
-  const proc = Bun.spawn([shell, "-lc", "echo ready; read line; echo reply:$line"], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      TERM: "xterm-256color",
-    },
-    terminal: {
+const require = createRequire(import.meta.url);
+
+function ensureNodePtySpawnHelperExecutable(): void {
+  const packageRoot = path.dirname(require.resolve("node-pty/package.json"));
+  const prebuildsDir = path.join(packageRoot, "prebuilds");
+  if (!existsSync(prebuildsDir)) {
+    return;
+  }
+
+  for (const entry of readdirSync(prebuildsDir)) {
+    const helperPath = path.join(prebuildsDir, entry, "spawn-helper");
+    if (existsSync(helperPath)) {
+      chmodSync(helperPath, 0o755);
+    }
+  }
+}
+
+async function runCycle(label: string): Promise<void> {
+  ensureNodePtySpawnHelperExecutable();
+  const shell = process.env.SHELL || "/bin/zsh";
+  await new Promise<void>((resolve, reject) => {
+    let output = "";
+    let wroteInput = false;
+    const proc = pty.spawn(shell, ["-lc", "echo ready; read line; echo reply:$line"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TERM: "xterm-256color",
+      },
       cols: 80,
       rows: 24,
       name: "xterm-256color",
-      data(term, data) {
-        const text = Buffer.from(data).toString("utf8");
-        if (text.includes("ready") && !sawReady) {
-          sawReady = true;
-          term.write(`${label}\n`);
-          term.resize(100, 30);
-        }
-        if (text.includes(`reply:${label}`)) {
-          sawReply = true;
-        }
-      },
-    },
+    });
+
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error("PTY smoke cycle timed out"));
+    }, 5_000);
+
+    proc.onData((data) => {
+      output += data;
+      if (output.includes("ready") && !wroteInput) {
+        wroteInput = true;
+        proc.resize(100, 30);
+        proc.write(`${label}\n`);
+      }
+    });
+
+    proc.onExit(({ exitCode }) => {
+      clearTimeout(timeout);
+      if (exitCode === 0 && output.includes(`reply:${label}`)) {
+        resolve();
+      } else {
+        reject(new Error(`PTY smoke cycle failed with exit=${exitCode} output=${JSON.stringify(output)}`));
+      }
+    });
   });
-
-  const exitCode = await proc.exited;
-  proc.terminal?.close();
-
-  if (!(sawReady && sawReply && exitCode === 0)) {
-    throw new Error("PTY smoke cycle did not complete");
-  }
 }
 
 await runCycle("cycle1");

@@ -91,6 +91,37 @@ pub fn get_ghostty_app() -> Option<ghostty_app_t> {
     GHOSTTY_APP.get().map(|s| s.app)
 }
 
+/// Start a periodic ghostty_app_tick on the main thread.
+///
+/// In embedded/HOST_MANAGED mode, the host must call tick regularly to drain
+/// the app mailbox and keep the IO→render pipeline flowing. Ghostty's internal
+/// BlockingQueue has capacity 64 — when full, `ghostty_surface_write_buffer`
+/// blocks until the IO thread consumes messages. The IO thread signals via
+/// `wakeup_cb` which dispatches tick to the main thread. Under heavy output,
+/// these async dispatches pile up behind WebView/IPC work on Tauri's main
+/// thread, causing the pipeline to stall permanently.
+///
+/// This timer guarantees tick runs at ~120Hz regardless of wakeup callback
+/// delays, matching standalone Ghostty's behavior where tick runs every
+/// iteration of the macOS run loop.
+pub fn start_tick_timer(app_handle: tauri::AppHandle) {
+    // Cache the app pointer as usize to cross thread boundaries (raw pointer isn't Send).
+    // Safety: ghostty_app_t is thread-safe for tick (same assertion as GhosttyAppState).
+    let app_ptr = get_ghostty_app().expect("ghostty app must be initialized before tick timer");
+    let app_usize = app_ptr as usize;
+
+    tauri::async_runtime::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_millis(8));
+        loop {
+            interval.tick().await;
+            let _ = app_handle.run_on_main_thread(move || unsafe {
+                ghostty_app_tick(app_usize as ghostty_app_t);
+            });
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Runtime callbacks (extern "C")
 // ---------------------------------------------------------------------------
