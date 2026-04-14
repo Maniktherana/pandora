@@ -255,8 +255,8 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
   const tokens = theme.codeEditor;
   return {
     base: theme.mode === "dark" ? "vs-dark" : "vs",
-    inherit: false,
-    semanticHighlighting: false,
+    inherit: true,
+    semanticHighlighting: true,
     rules: [
       {
         token: "",
@@ -301,6 +301,14 @@ export function toMonacoTheme(theme: WorkspaceTheme): editor.IStandaloneThemeDat
       { token: "metatag.content", foreground: tokens.syntax.string.slice(1) },
       { token: "metatag.attribute", foreground: tokens.syntax.property.slice(1) },
       { token: "invalid", foreground: tokens.diff.delete.base.slice(1) },
+      { token: "function", foreground: tokens.syntax.primitive.slice(1) },
+      { token: "function.declaration", foreground: tokens.syntax.primitive.slice(1) },
+      { token: "namespace", foreground: tokens.syntax.type.slice(1) },
+      { token: "enum", foreground: tokens.syntax.type.slice(1) },
+      { token: "enumMember", foreground: tokens.syntax.constant.slice(1) },
+      { token: "decorator", foreground: tokens.syntax.keyword.slice(1) },
+      { token: "annotation", foreground: tokens.syntax.keyword.slice(1) },
+      { token: "meta.embedded", foreground: tokens.syntax.string.slice(1) },
     ],
     colors: {
       "editor.background": tokens.surface.base,

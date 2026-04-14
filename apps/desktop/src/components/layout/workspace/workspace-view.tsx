@@ -210,19 +210,25 @@ function PaneView({
         }}
         onPointerDownCapture={handlePanePointerDownCapture}
       >
+        {/* Single editor instance per pane — model-swaps via path prop */}
+        {leaf.tabs.some((t) => t.kind === "editor") && (
+          <PaneEditor
+            key={`pane-editor-${leaf.id}`}
+            workspaceId={workspaceId}
+            workspaceRoot={workspaceRoot}
+            relativePath={
+              leaf.tabs[leaf.selectedIndex]?.kind === "editor"
+                ? (leaf.tabs[leaf.selectedIndex] as { path: string }).path
+                : (leaf.tabs.find((t) => t.kind === "editor") as { path: string } | undefined)
+                    ?.path ?? null
+            }
+            isVisible={leaf.tabs[leaf.selectedIndex]?.kind === "editor"}
+          />
+        )}
+
         {leaf.tabs.map((tab, idx) => {
           const isActiveTab = idx === leaf.selectedIndex;
-          if (tab.kind === "editor") {
-            return (
-              <PaneEditor
-                key={tabKey(tab)}
-                workspaceId={workspaceId}
-                workspaceRoot={workspaceRoot}
-                relativePath={tab.path}
-                isActive={isActiveTab}
-              />
-            );
-          }
+          if (tab.kind === "editor") return null;
           if (tab.kind === "diff") {
             return (
               <div

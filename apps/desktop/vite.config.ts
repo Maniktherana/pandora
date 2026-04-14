@@ -12,7 +12,13 @@ const monacoEditorPlugin =
   monacoEditorPluginPkg;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), monacoEditorPlugin({})],
+  plugins: [
+    react(),
+    tailwindcss(),
+    monacoEditorPlugin({
+      languageWorkers: ["editorWorkerService", "typescript", "json", "css", "html"],
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
