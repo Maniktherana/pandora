@@ -54,3 +54,12 @@ export type SelectScmEntryFn = (
 ) => boolean;
 
 export type DiscardEntryFn = (entry: ScmStatusEntry) => void;
+
+export type CheckRun = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};

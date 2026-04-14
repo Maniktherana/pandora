@@ -70,6 +70,19 @@ impl AppDatabase {
               updated_at TEXT NOT NULL,
               FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS project_settings (
+              project_id TEXT PRIMARY KEY,
+              default_branch TEXT NOT NULL DEFAULT 'main',
+              worktree_root TEXT,
+              setup_scripts TEXT NOT NULL DEFAULT '[]',
+              run_scripts TEXT NOT NULL DEFAULT '[]',
+              teardown_scripts TEXT NOT NULL DEFAULT '[]',
+              env_vars TEXT NOT NULL DEFAULT '{}',
+              auto_run_setup INTEGER NOT NULL DEFAULT 1,
+              updated_at TEXT NOT NULL DEFAULT '',
+              FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
             ",
         )
         .map_err(|e| e.to_string())?;
@@ -90,6 +103,13 @@ impl AppDatabase {
         if !cols.iter().any(|c| c == "workspace_kind") {
             conn.execute(
                 "ALTER TABLE workspaces ADD COLUMN workspace_kind TEXT NOT NULL DEFAULT 'worktree'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if !cols.iter().any(|c| c == "worktree_deleted") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN worktree_deleted INTEGER NOT NULL DEFAULT 0",
                 [],
             )
             .map_err(|e| e.to_string())?;
@@ -303,6 +323,16 @@ impl AppDatabase {
         Ok(())
     }
 
+    pub fn update_worktree_deleted(&self, id: &str, deleted: bool) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET worktree_deleted = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, deleted as i32, now_iso8601()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn workspaces_with_open_prs(&self) -> Vec<WorkspaceRecord> {
         self.load_workspaces(None)
             .into_iter()
@@ -377,6 +407,61 @@ impl AppDatabase {
         .optional()
         .ok()
         .flatten()
+    }
+
+    pub fn load_project_settings(&self, project_id: &str) -> Option<ProjectSettingsRow> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT project_id, default_branch, worktree_root, setup_scripts, run_scripts, teardown_scripts, env_vars, auto_run_setup, updated_at
+             FROM project_settings WHERE project_id = ?1 LIMIT 1",
+            params![project_id],
+            |row| {
+                Ok(ProjectSettingsRow {
+                    project_id: row.get(0)?,
+                    default_branch: row.get(1)?,
+                    worktree_root: row.get(2)?,
+                    setup_scripts: row.get(3)?,
+                    run_scripts: row.get(4)?,
+                    teardown_scripts: row.get(5)?,
+                    env_vars: row.get(6)?,
+                    auto_run_setup: row.get::<_, i32>(7)? == 1,
+                    updated_at: row.get(8)?,
+                })
+            },
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    pub fn upsert_project_settings(&self, s: &ProjectSettingsRow) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO project_settings (project_id, default_branch, worktree_root, setup_scripts, run_scripts, teardown_scripts, env_vars, auto_run_setup, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(project_id) DO UPDATE SET
+               default_branch = excluded.default_branch,
+               worktree_root = excluded.worktree_root,
+               setup_scripts = excluded.setup_scripts,
+               run_scripts = excluded.run_scripts,
+               teardown_scripts = excluded.teardown_scripts,
+               env_vars = excluded.env_vars,
+               auto_run_setup = excluded.auto_run_setup,
+               updated_at = excluded.updated_at",
+            params![
+                s.project_id,
+                s.default_branch,
+                s.worktree_root,
+                s.setup_scripts,
+                s.run_scripts,
+                s.teardown_scripts,
+                s.env_vars,
+                if s.auto_run_setup { 1 } else { 0 },
+                s.updated_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 

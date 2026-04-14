@@ -81,6 +81,7 @@ export class DaemonServer {
         }
         this.broadcastOutput(sessionID, data);
       },
+      (ports) => this.broadcastControl({ type: "ports_snapshot", ports }),
       resolvedDefaultCwd,
       rid,
     );
@@ -181,6 +182,10 @@ export class DaemonServer {
     this.writeControl(socket, {
       type: "session_snapshot",
       sessions: this.processManager.listSessionStates(),
+    });
+    this.writeControl(socket, {
+      type: "ports_snapshot",
+      ports: this.processManager.listDetectedPorts(),
     });
 
     const reader = createControlMessageReader(

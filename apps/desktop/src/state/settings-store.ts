@@ -43,6 +43,9 @@ export interface SettingsStore {
   deleteLocalBranchOnArchive: boolean;
   archiveOnMerge: boolean;
 
+  // Scripts
+  runTeardownOnArchive: boolean;
+
   // Actions
   setTheme: (themeId: string) => void;
   setUiFont: (fontFamily: FontOption, custom?: string) => void;
@@ -58,6 +61,7 @@ export interface SettingsStore {
   setBranchPrefixMode: (mode: BranchPrefixMode, custom?: string) => void;
   setDeleteLocalBranchOnArchive: (value: boolean) => void;
   setArchiveOnMerge: (value: boolean) => void;
+  setRunTeardownOnArchive: (value: boolean) => void;
 }
 
 const STORAGE_KEY = "pandora-settings";
@@ -122,6 +126,7 @@ export const useSettingsStore = create<SettingsStore>()(
       branchPrefixCustom: "",
       deleteLocalBranchOnArchive: false,
       archiveOnMerge: false,
+      runTeardownOnArchive: true,
 
       setTheme: (themeId: string) => set({ selectedThemeId: themeId }),
       setUiFont: (fontFamily: FontOption, custom: string = "") =>
@@ -145,6 +150,7 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ branchPrefixMode: mode, branchPrefixCustom: custom }),
       setDeleteLocalBranchOnArchive: (value: boolean) => set({ deleteLocalBranchOnArchive: value }),
       setArchiveOnMerge: (value: boolean) => set({ archiveOnMerge: value }),
+      setRunTeardownOnArchive: (value: boolean) => set({ runTeardownOnArchive: value }),
     }),
     {
       name: STORAGE_KEY,

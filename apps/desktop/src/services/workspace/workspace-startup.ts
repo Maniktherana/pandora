@@ -66,6 +66,7 @@ export function createWorkspaceRuntimeState(
     workspaceId,
     slots: [],
     sessions: [],
+    detectedPorts: [],
     terminalDisplayBySlotId: {},
     terminalAgentStatusBySlotId: {},
     connectionState: "connecting",

@@ -8,10 +8,12 @@ export default function GitSettings() {
   const deleteLocalBranchOnArchive = useSettingsStore((s) => s.deleteLocalBranchOnArchive);
   const archiveDeletesWorktree = useSettingsStore((s) => s.archiveDeletesWorktree);
   const archiveOnMerge = useSettingsStore((s) => s.archiveOnMerge);
+  const runTeardownOnArchive = useSettingsStore((s) => s.runTeardownOnArchive);
   const setBranchPrefixMode = useSettingsStore((s) => s.setBranchPrefixMode);
   const setDeleteLocalBranchOnArchive = useSettingsStore((s) => s.setDeleteLocalBranchOnArchive);
   const setArchiveDeletesWorktree = useSettingsStore((s) => s.setArchiveDeletesWorktree);
   const setArchiveOnMerge = useSettingsStore((s) => s.setArchiveOnMerge);
+  const setRunTeardownOnArchive = useSettingsStore((s) => s.setRunTeardownOnArchive);
 
   return (
     <div className="space-y-8">
@@ -81,6 +83,18 @@ export default function GitSettings() {
             </p>
           </div>
           <Switch checked={archiveOnMerge} onCheckedChange={setArchiveOnMerge} />
+        </div>
+      </section>
+      {/* Run teardown on archive */}
+      <section className="border-t border-[var(--theme-border)] pt-6">
+        <div className="flex items-start justify-between">
+          <div className="flex-1 pr-6">
+            <h2 className="text-sm font-medium text-[var(--theme-text)]">Run teardown scripts on archive</h2>
+            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
+              Execute teardown scripts before archiving a workspace.
+            </p>
+          </div>
+          <Switch checked={runTeardownOnArchive} onCheckedChange={setRunTeardownOnArchive} />
         </div>
       </section>
     </div>

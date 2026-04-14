@@ -100,3 +100,36 @@ pub struct WorkspaceRecord {
     pub pr_number: Option<i64>,
     pub pr_state: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRun {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub html_url: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorInfo {
+    pub id: String,
+    pub display_name: String,
+    pub category: String, // "finder", "ide", "terminal"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSettingsRow {
+    pub project_id: String,
+    pub default_branch: String,
+    pub worktree_root: Option<String>,
+    pub setup_scripts: String,     // JSON array string
+    pub run_scripts: String,       // JSON array string
+    pub teardown_scripts: String,  // JSON array string
+    pub env_vars: String,          // JSON object string
+    pub auto_run_setup: bool,
+    pub updated_at: String,
+}

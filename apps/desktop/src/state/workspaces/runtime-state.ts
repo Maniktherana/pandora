@@ -1,4 +1,5 @@
 import type {
+  DetectedPort,
   LayoutNode,
   PersistedWorkspaceLayout,
   SessionState,
@@ -53,6 +54,7 @@ export function createWorkspaceRuntimeState(workspaceId: string): WorkspaceRunti
     workspaceId,
     slots: [],
     sessions: [],
+    detectedPorts: [],
     terminalDisplayBySlotId: {},
     terminalAgentStatusBySlotId: {},
     connectionState: "disconnected",
@@ -129,6 +131,10 @@ export function replaceRuntimeSlots(runtime: WorkspaceRuntimeState, slots: SlotS
 
 export function replaceRuntimeSessions(runtime: WorkspaceRuntimeState, sessions: SessionState[]) {
   runtime.sessions = sessions;
+}
+
+export function replaceRuntimePorts(runtime: WorkspaceRuntimeState, ports: DetectedPort[]) {
+  runtime.detectedPorts = ports;
 }
 
 export function updateRuntimeSlot(runtime: WorkspaceRuntimeState, slot: SlotState) {

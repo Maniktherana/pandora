@@ -53,6 +53,7 @@ function runtimeWithStatuses(
       },
     })),
     sessions: [],
+    detectedPorts: [],
     terminalDisplayBySlotId: {},
     terminalAgentStatusBySlotId,
     connectionState: "connected",

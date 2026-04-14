@@ -5,11 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger";
+import { PortManager } from "./port-manager";
 import type {
   ActionCapabilities,
   AggregateStatus,
   AgentActivityState,
   AgentCliSignal,
+  DetectedPort,
   SessionDefinition,
   SessionInstance,
   SessionState,
@@ -274,6 +276,7 @@ export class ProcessManager {
   private readonly slotDefinitions = new Map<string, SlotDefinition>();
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly defaultCwd: string;
+  private readonly portManager: PortManager;
   private outputsPaused = false;
 
   constructor(
@@ -281,6 +284,7 @@ export class ProcessManager {
     sessionDefinitions: SessionDefinition[],
     private readonly onSessionStateChanged: (session: SessionState) => void,
     private readonly onOutput: (sessionID: string, data: Buffer) => void,
+    private readonly onPortsChanged: (ports: DetectedPort[]) => void,
     defaultCwd?: string,
     private readonly runtimeId: string = "legacy",
   ) {
@@ -291,6 +295,9 @@ export class ProcessManager {
     for (const definition of sessionDefinitions) {
       this.sessionDefinitions.set(definition.id, definition);
     }
+    this.portManager = new PortManager();
+    this.portManager.onPortsChanged((ports) => this.onPortsChanged(ports));
+    this.portManager.start();
   }
 
   listSessionStates(): SessionState[] {
@@ -361,7 +368,12 @@ export class ProcessManager {
     }
   }
 
+  listDetectedPorts(): import("./types").DetectedPort[] {
+    return this.portManager.listPorts();
+  }
+
   closeAllSessions(): void {
+    this.portManager.stop();
     for (const session of this.sessions.values()) {
       this.clearStopTimer(session);
       this.detachWorker(session);
@@ -681,6 +693,9 @@ export class ProcessManager {
       case "spawned":
         session.instance.pid = message.pid ?? null;
         session.crashCount = 0;
+        if (message.pid) {
+          this.portManager.registerSession(session.instance.id, message.pid);
+        }
         this.onSessionStateChanged(this.sessionState(session));
         break;
       case "output": {
@@ -688,6 +703,7 @@ export class ProcessManager {
           ? message.data
           : Buffer.from(message.data);
         session.instance.lastOutputAt = new Date().toISOString();
+        this.portManager.checkOutputForHint(chunk, session.instance.id);
         this.onOutput(session.instance.id, chunk);
         break;
       }
@@ -724,6 +740,7 @@ export class ProcessManager {
     session.exitHandled = true;
 
     this.clearStopTimer(session);
+    this.portManager.unregisterSession(session.instance.id);
     const worker = session.worker;
     if (worker) {
       worker.removeAllListeners();

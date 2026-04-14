@@ -1,83 +1,65 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { PortDataRow } from "./port-data-row";
-import type { SessionState } from "@/lib/shared/types";
-import { parseUserPort } from "../bottom-panel.utils";
+import { useRuntimeStore } from "@/state/runtime-store";
+import { useDesktopView } from "@/hooks/use-desktop-view";
+import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import type { DetectedPort, WorkspaceRecord } from "@/lib/shared/types";
 
-type PortsTabContentProps = {
-  projectSessions: SessionState[];
-  workspaceSessions: SessionState[];
-};
+interface PortRow {
+  port: number;
+  processName: string;
+  address: string;
+  source: string;
+}
 
-export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTabContentProps) {
-  const [manual, setManual] = useState<{ id: string; port: number }[]>([]);
-  const [forwardUiOpen, setForwardUiOpen] = useState(false);
-  const [draft, setDraft] = useState("");
+function buildPortRows(
+  runtimeState: Readonly<Record<string, import("@/lib/shared/types").WorkspaceRuntimeState>>,
+  workspaces: readonly WorkspaceRecord[],
+): PortRow[] {
+  const wsNameById = new Map(workspaces.map((ws) => [ws.id, ws.name]));
+  const seen = new Map<number, PortRow>();
 
-  const sessionRows = useMemo(() => {
-    const map = new Map<number, { port: number; process: string; origin: string }>();
-    const add = (session: (typeof projectSessions)[number], origin: string) => {
-      if (session.port == null || session.port <= 0) return;
-      if (!map.has(session.port)) {
-        map.set(session.port, { port: session.port, process: session.name, origin });
-      }
-    };
-    projectSessions.forEach((session) => add(session, "Project"));
-    workspaceSessions.forEach((session) => add(session, "Workspace"));
-    return Array.from(map.values()).sort((a, b) => a.port - b.port);
-  }, [projectSessions, workspaceSessions]);
+  for (const [runtimeId, runtime] of Object.entries(runtimeState)) {
+    if (!runtime.detectedPorts?.length) continue;
 
-  const hasAnyRows = sessionRows.length > 0 || manual.length > 0;
-  const showTable = hasAnyRows || forwardUiOpen;
-
-  const addManual = () => {
-    const parsed = parseUserPort(draft);
-    if (parsed == null) return;
-    const exists =
-      sessionRows.some((row) => row.port === parsed) ||
-      manual.some((entry) => entry.port === parsed);
-    if (exists) {
-      setDraft("");
-      return;
+    let source: string;
+    if (isProjectRuntimeKey(runtimeId)) {
+      source = "Project";
+    } else {
+      source = wsNameById.get(runtimeId) ?? runtimeId.slice(0, 8);
     }
-    setManual((previous) => [...previous, { id: crypto.randomUUID(), port: parsed }]);
-    setDraft("");
-  };
 
-  const handleDraftChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setDraft(event.target.value);
-  };
+    for (const p of runtime.detectedPorts) {
+      if (!seen.has(p.port)) {
+        seen.set(p.port, {
+          port: p.port,
+          processName: p.processName,
+          address: p.address,
+          source,
+        });
+      }
+    }
+  }
 
-  const handleDraftKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") addManual();
-  };
+  return Array.from(seen.values()).sort((a, b) => a.port - b.port);
+}
 
-  const handleOpenForwardUi = () => {
-    setForwardUiOpen(true);
-  };
+export function PortsTabContent() {
+  const runtimeState = useRuntimeStore((s) => s.runtimeState);
+  const workspaces = useDesktopView((v) => v.workspaces);
 
-  const handleCancelForwardUi = () => {
-    setForwardUiOpen(false);
-    setDraft("");
-  };
+  const rows = useMemo(
+    () => buildPortRows(runtimeState, workspaces),
+    [runtimeState, workspaces],
+  );
 
-  const handleRemoveManualEntry = (id: string) => {
-    setManual((previous) => previous.filter((item) => item.id !== id));
-  };
-
-  if (!showTable) {
+  if (rows.length === 0) {
     return (
-      <div className="bg-[var(--theme-bg)] px-4 py-5">
-        <p className="mb-4 max-w-lg text-sm text-[var(--theme-text-muted)]">
-          No forwarded ports. Forward a port to access your locally running services over the
-          internet.
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-sm font-medium text-[var(--theme-text)]">No ports detected</p>
+        <p className="max-w-sm text-xs text-[var(--theme-text-muted)]">
+          Ports from running sessions will appear here automatically.
         </p>
-        <button
-          type="button"
-          onClick={() => setForwardUiOpen(true)}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
-        >
-          Forward a Port
-        </button>
       </div>
     );
   }
@@ -89,74 +71,24 @@ export function PortsTabContent({ projectSessions, workspaceSessions }: PortsTab
           <thead>
             <tr className="border-b border-[var(--theme-border)] text-[11px] uppercase tracking-wide text-[var(--theme-text-muted)]">
               <th className="px-3 py-2 font-medium">Port</th>
-              <th className="py-2 font-medium">Forwarded Address</th>
-              <th className="py-2 font-medium">Running Process</th>
-              <th className="py-2 pr-3 font-medium">Origin</th>
+              <th className="py-2 font-medium">Local Address</th>
+              <th className="py-2 font-medium">Process</th>
+              <th className="py-2 pr-3 font-medium">Source</th>
             </tr>
           </thead>
           <tbody className="text-[var(--theme-text)]">
-            {forwardUiOpen && (
-              <tr className="border-b border-[var(--theme-border)] bg-[var(--theme-bg)]">
-                <td className="px-3 py-2 align-middle">
-                  <input
-                    value={draft}
-                    onChange={handleDraftChange}
-                    onKeyDown={handleDraftKeyDown}
-                    placeholder="Port number or address (e.g. 3000 or localhost:3000)"
-                    className="w-full min-w-[200px] rounded border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1.5 text-xs text-[var(--theme-text)] placeholder:text-[var(--theme-text-faint)]"
-                  />
-                </td>
-                <td className="py-2 align-middle text-[var(--theme-text-faint)]">—</td>
-                <td className="py-2 align-middle text-[var(--theme-text-faint)]">—</td>
-                <td className="py-2 pr-3 align-middle">
-                  <button
-                    type="button"
-                    onClick={addManual}
-                    className="text-xs font-medium text-blue-400 hover:text-blue-300"
-                  >
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelForwardUi}
-                    className="ml-3 text-xs text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
-                  >
-                    Cancel
-                  </button>
-                </td>
-              </tr>
-            )}
-            {sessionRows.map((row) => (
+            {rows.map((row) => (
               <PortDataRow
-                key={`s-${row.port}`}
+                key={row.port}
                 port={row.port}
-                process={row.process}
-                origin={row.origin}
-              />
-            ))}
-            {manual.map((entry) => (
-              <PortDataRow
-                key={entry.id}
-                port={entry.port}
-                process="—"
-                origin="Forwarded"
-                onRemove={() => handleRemoveManualEntry(entry.id)}
+                processName={row.processName}
+                address={row.address}
+                source={row.source}
               />
             ))}
           </tbody>
         </table>
       </div>
-      {hasAnyRows && (
-        <div className="shrink-0 border-t border-[var(--theme-border)] bg-[var(--theme-bg)] px-3 py-2">
-          <button
-            type="button"
-            onClick={handleOpenForwardUi}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
-          >
-            Forward a Port
-          </button>
-        </div>
-      )}
     </div>
   );
 }

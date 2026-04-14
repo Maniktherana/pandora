@@ -32,6 +32,7 @@ import type { HeaderBranchContext, WorkspaceRecord } from "@/lib/shared/types";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { cn } from "@/lib/shared/utils";
 import { useSettingsStore } from "@/state/settings-store";
+import OpenInDropdown from "@/components/layout/app-header-open-in";
 
 const TARGET_BRANCH_STORAGE_KEY_PREFIX = "pandora.header.targetBranch.";
 
@@ -300,6 +301,15 @@ export default memo(function AppHeader({
           <div className="h-2.5 w-20 rounded-full bg-[var(--theme-panel-hover)] opacity-70" />
         </div>
       ) : null}
+
+      {selectedWorkspace?.status === "ready" && selectedWorkspace.worktreePath && (
+        <div className="ml-2 flex items-center">
+          <OpenInDropdown
+            worktreePath={selectedWorkspace.worktreePath}
+            workspaceName={selectedWorkspace.name}
+          />
+        </div>
+      )}
 
       <div className="flex-1 min-w-8 self-stretch" data-tauri-drag-region />
 

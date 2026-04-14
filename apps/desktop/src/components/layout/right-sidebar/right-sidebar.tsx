@@ -61,8 +61,12 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useAvailableEditors } from "@/hooks/use-available-editors";
 import DotGridLoader from "@/components/dot-grid-loader";
 
 function isPointerOutsideWindow(pointer: DragPointer): boolean {
@@ -166,6 +170,7 @@ export default memo(function RightSidebar({
   } | null>(null);
   const contextMenuActionRef = useRef(contextMenu);
   contextMenuActionRef.current = contextMenu;
+  const { data: availableEditors } = useAvailableEditors();
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null);
   const [selectedTreeKind, setSelectedTreeKind] = useState<TreeRowKind | null>(null);
@@ -1245,6 +1250,29 @@ export default memo(function RightSidebar({
               <ContextMenuContent side="right" align="start" className="min-w-[200px]">
                 {contextMenu.kind !== "root" ? (
                   <>
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger>Open in</ContextMenuSubTrigger>
+                      <ContextMenuSubContent>
+                        {(availableEditors ?? [])
+                          .filter((e) => e.category !== "utility")
+                          .map((editor) => (
+                            <ContextMenuItem
+                              key={editor.id}
+                              onClick={() => {
+                                const ctx = contextMenuActionRef.current;
+                                if (!ctx) return;
+                                const absPath = ctx.relPath
+                                  ? `${workspaceRoot}/${ctx.relPath}`
+                                  : workspaceRoot;
+                                invoke("open_in_app", { path: absPath, appId: editor.id }).catch(() => {});
+                              }}
+                            >
+                              {editor.displayName}
+                            </ContextMenuItem>
+                          ))}
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
                     <ContextMenuItem onClick={handleContextMenuCopyRelativePath}>
                       Copy Relative Path
                     </ContextMenuItem>

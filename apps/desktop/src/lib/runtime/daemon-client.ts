@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Effect, Schedule } from "effect";
-import type { ClientMessage, DaemonMessage, SessionState, SlotState } from "../shared/types";
+import type { ClientMessage, DaemonMessage, DetectedPort, SessionState, SlotState } from "../shared/types";
 import { DaemonSendError } from "./errors";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -16,6 +16,7 @@ export interface DaemonClientCallbacks {
   onSlotRemoved: (workspaceId: string, slotID: string) => void;
   onSessionOpened: (workspaceId: string, session: SessionState) => void;
   onSessionClosed: (workspaceId: string, sessionID: string) => void;
+  onPortsSnapshot: (workspaceId: string, ports: DetectedPort[]) => void;
   onOutputChunk?: (workspaceId: string, sessionID: string, data: string) => void;
   onError: (workspaceId: string, message: string) => void;
 }
@@ -133,6 +134,9 @@ export class DaemonClient {
         break;
       case "session_closed":
         this.callbacks.onSessionClosed(workspaceId, message.sessionID);
+        break;
+      case "ports_snapshot":
+        this.callbacks.onPortsSnapshot(workspaceId, message.ports);
         break;
       case "output_chunk":
         this.callbacks.onOutputChunk?.(workspaceId, message.sessionID, message.data);

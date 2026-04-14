@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Queue } from "effect";
 import type { ConnectionState } from "@/lib/runtime/daemon-client";
-import type { SessionState, SlotState } from "@/lib/shared/types";
+import type { DetectedPort, SessionState, SlotState } from "@/lib/shared/types";
 
 export type DaemonEvent =
   | {
@@ -47,6 +47,11 @@ export type DaemonEvent =
       readonly type: "session_closed";
       readonly workspaceId: string;
       readonly sessionID: string;
+    }
+  | {
+      readonly type: "ports_snapshot";
+      readonly workspaceId: string;
+      readonly ports: DetectedPort[];
     }
   | {
       readonly type: "output_chunk";

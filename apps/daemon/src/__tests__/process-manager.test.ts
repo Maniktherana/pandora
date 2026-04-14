@@ -47,7 +47,7 @@ describe("ProcessManager updates", () => {
   });
 
   test("uses updated slot names in subsequent slot state snapshots", () => {
-    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {});
+    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {}, () => {});
 
     manager.updateSlotDefinition({ id: "slot-1", name: "API Shell" });
 
@@ -60,7 +60,7 @@ describe("ProcessManager updates", () => {
   });
 
   test("updates stored session definitions", () => {
-    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {});
+    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {}, () => {});
 
     manager.updateSessionDefinition({ id: "session-def-1", name: "API Shell" });
 
@@ -77,7 +77,7 @@ describe("ProcessManager updates", () => {
   });
 
   test("normalizes Claude and Codex CLI signals into session agent activity", () => {
-    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {});
+    const manager = new ProcessManager([createSlot()], [createSessionDefinition()], () => {}, () => {}, () => {});
     const sessions = (manager as unknown as {
       sessions: Map<
         string,
@@ -198,6 +198,7 @@ describe("ProcessManager updates", () => {
       (_sessionID, data) => {
         outputs.push(data.toString("utf8"));
       },
+      () => {},
     );
 
     const internal = manager as unknown as {

@@ -183,6 +183,9 @@ fn main() {
             commands::add_project,
             commands::toggle_project,
             commands::remove_project,
+            // Project settings
+            commands::get_project_settings,
+            commands::save_project_settings,
             // Workspace commands
             commands::list_workspaces,
             commands::create_workspace,
@@ -222,6 +225,13 @@ fn main() {
             commands::scm_discard_tracked,
             commands::scm_discard_untracked,
             commands::scm_commit,
+            commands::scm_push,
+            commands::scm_fetch,
+            commands::scm_pull,
+            commands::scm_check_runs,
+            // Open in external apps
+            commands::list_available_editors,
+            commands::open_in_app,
             // PR + archive
             commands::pr_gather_context,
             commands::header_branch_context,

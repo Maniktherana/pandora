@@ -1386,6 +1386,136 @@ pub fn gh_pr_status(worktree_path: &str, pr_number: i64) -> Result<GhPrInfo, Str
     Ok(GhPrInfo { state })
 }
 
+pub fn delete_local_branch(git_root: &str, branch_name: &str) -> Result<(), String> {
+    run_git(&["-C", git_root, "branch", "-D", branch_name])?;
+    Ok(())
+}
+
+pub fn git_push(worktree_path: &str) -> Result<String, String> {
+    verify_git_worktree(worktree_path)?;
+    run_git(&["-C", worktree_path, "push", "-u", "origin", "HEAD"])
+}
+
+pub fn git_fetch(worktree_path: &str) -> Result<String, String> {
+    verify_git_worktree(worktree_path)?;
+    run_git(&["-C", worktree_path, "fetch"])
+}
+
+pub fn git_pull(worktree_path: &str) -> Result<String, String> {
+    verify_git_worktree(worktree_path)?;
+    run_git(&["-C", worktree_path, "pull"])
+}
+
+pub fn check_runs(worktree_path: &str) -> Result<Vec<CheckRun>, String> {
+    verify_git_worktree(worktree_path)?;
+
+    // Get HEAD sha
+    let sha = run_git(&["-C", worktree_path, "rev-parse", "HEAD"])?
+        .trim()
+        .to_string();
+    if sha.is_empty() {
+        return Err("Could not determine HEAD commit".into());
+    }
+
+    // Get remote URL
+    let remote_url = run_git(&["-C", worktree_path, "remote", "get-url", "origin"])?
+        .trim()
+        .to_string();
+    if remote_url.is_empty() {
+        return Err("No origin remote configured".into());
+    }
+
+    // Parse owner/repo from URL
+    let (owner, repo) = parse_owner_repo(&remote_url)?;
+
+    // Run gh api
+    let output = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{owner}/{repo}/commits/{sha}/check-runs"),
+        ])
+        .current_dir(worktree_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "gh api call failed".into()
+        } else {
+            stderr
+        });
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    let runs = parsed
+        .get("check_runs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "No check_runs array in response".to_string())?;
+
+    let mut result = Vec::new();
+    for run in runs {
+        result.push(CheckRun {
+            name: run
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            status: run
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            conclusion: run
+                .get("conclusion")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            html_url: run
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            started_at: run
+                .get("started_at")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            completed_at: run
+                .get("completed_at")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+        });
+    }
+
+    Ok(result)
+}
+
+/// Parse `owner/repo` from a GitHub remote URL (supports HTTPS and SSH formats).
+fn parse_owner_repo(url: &str) -> Result<(String, String), String> {
+    let url = url.trim();
+    // SSH: git@github.com:owner/repo.git
+    if let Some(pos) = url.find("github.com:") {
+        let after = &url[pos + 11..];
+        let path = after.trim_end_matches(".git");
+        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Ok((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+    // HTTPS: https://github.com/owner/repo.git
+    if let Some(pos) = url.find("github.com/") {
+        let after = &url[pos + 11..];
+        let path = after.trim_end_matches(".git");
+        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Ok((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+    Err(format!("Could not parse owner/repo from remote URL: {}", url))
+}
+
 pub fn git_commit_message(worktree_path: &str, message: &str) -> Result<(), String> {
     verify_git_worktree(worktree_path)?;
     let msg = message.trim();

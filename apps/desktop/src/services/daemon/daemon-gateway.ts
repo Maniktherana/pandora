@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Ref } from "effect";
 import type { DaemonClient, DaemonClientCallbacks } from "@/lib/runtime/daemon-client";
 import type { ConnectionState } from "@/lib/runtime/daemon-client";
 import { DaemonClient as RawDaemonClient } from "@/lib/runtime/daemon-client";
-import type { SessionState, SlotState } from "@/lib/shared/types";
+import type { DetectedPort, SessionState, SlotState } from "@/lib/shared/types";
 import { DaemonEventQueue, type DaemonEvent } from "./daemon-event-queue";
 
 export interface DaemonGatewayService {
@@ -55,6 +55,9 @@ export function createDaemonClientCallbacks(
     },
     onSessionClosed: (workspaceId: string, sessionID: string) => {
       emit({ type: "session_closed", workspaceId, sessionID });
+    },
+    onPortsSnapshot: (workspaceId: string, ports: DetectedPort[]) => {
+      emit({ type: "ports_snapshot", workspaceId, ports });
     },
     onOutputChunk: (workspaceId: string, sessionID: string, data: string) => {
       emit({ type: "output_chunk", workspaceId, sessionID, data });

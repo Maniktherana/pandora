@@ -12,6 +12,7 @@ type LeftSidebarProps = {
   booting: boolean;
   onCollapse: () => void;
   onOpenSettings: () => void;
+  onOpenProjectSettings?: (projectId: string) => void;
 };
 
 function SidebarBootLoader() {
@@ -24,7 +25,7 @@ function SidebarBootLoader() {
   );
 }
 
-export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings }: LeftSidebarProps) {
+export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings, onOpenProjectSettings }: LeftSidebarProps) {
   const projects = useDesktopView((view) => view.projects);
   const workspaceCommands = useWorkspaceActions();
 
@@ -68,7 +69,7 @@ export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings }
       <div className="flex-1 overflow-y-auto px-1.5 py-1">
         {booting && projects.length === 0 ? <SidebarBootLoader /> : null}
         {projects.map((project) => (
-          <ProjectRow key={project.id} project={project} />
+          <ProjectRow key={project.id} project={project} onOpenProjectSettings={onOpenProjectSettings} />
         ))}
 
         {!booting && projects.length === 0 && (

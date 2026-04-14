@@ -49,6 +49,7 @@ import {
   ensureRuntimeLayout as ensureRuntimeLayoutState,
   removeRuntimeSession as removeRuntimeSessionState,
   removeRuntimeSlot as removeRuntimeSlotState,
+  replaceRuntimePorts,
   replaceRuntimeSessions,
   replaceRuntimeSlots,
   setRuntimeConnectionState as setRuntimeConnectionStateState,
@@ -1328,6 +1329,11 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             });
             yield* refreshRuntimeTerminalStartup(event.workspaceId);
             break;
+          case "ports_snapshot":
+            yield* mutateRuntimeState(event.workspaceId, (runtime) => {
+              replaceRuntimePorts(runtime, event.ports);
+            });
+            break;
           case "slot_state_changed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
               updateRuntimeSlotState(runtime, event.slot);
@@ -1747,9 +1753,14 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               catch: (cause) => workspaceSelectionError(cause, workspaceId),
             }).pipe(Effect.orElseSucceed(() => undefined));
           }
-          const deleteWorktree = useSettingsStore.getState().archiveDeletesWorktree;
+          const { archiveDeletesWorktree, deleteLocalBranchOnArchive, runTeardownOnArchive } = useSettingsStore.getState();
           yield* Effect.tryPromise({
-            try: () => invoke("archive_workspace", { workspaceId, deleteWorktree }),
+            try: () => invoke("archive_workspace", {
+              workspaceId,
+              deleteWorktree: archiveDeletesWorktree,
+              deleteLocalBranch: deleteLocalBranchOnArchive,
+              runTeardown: runTeardownOnArchive,
+            }),
             catch: (cause) => cause,
           });
         }).pipe(

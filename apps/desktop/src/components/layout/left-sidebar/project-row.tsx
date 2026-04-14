@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowRight01Icon, ExternalDriveIcon, SplitIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon, ExternalDriveIcon, Settings03Icon, SplitIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDesktopView } from "@/hooks/use-desktop-view";
@@ -12,9 +12,10 @@ import { NewWorkspaceSplitButton } from "./new-workspace-split-button";
 
 type ProjectRowProps = {
   project: ProjectRecord;
+  onOpenProjectSettings?: (projectId: string) => void;
 };
 
-export function ProjectRow({ project }: ProjectRowProps) {
+export function ProjectRow({ project, onOpenProjectSettings }: ProjectRowProps) {
   const allWorkspaces = useDesktopView((view) => view.workspaces);
   const workspaceCommands = useWorkspaceActions();
   const [archivedExpanded, setArchivedExpanded] = useState(false);
@@ -74,6 +75,15 @@ export function ProjectRow({ project }: ProjectRowProps) {
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
           >
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Project Settings" />}
+                onClick={() => onOpenProjectSettings?.(project.id)}
+              >
+                <HugeiconsIcon icon={Settings03Icon} strokeWidth={1.5} className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>Project Settings</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={<Button type="button" variant="ghost" size="icon-sm" aria-label="New Worktree" />}

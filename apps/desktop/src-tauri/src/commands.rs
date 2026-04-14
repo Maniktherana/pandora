@@ -83,6 +83,24 @@ pub async fn remove_project(
     db.0.remove_project(&project_id)
 }
 
+// ─── Project settings commands ───
+
+#[tauri::command]
+pub fn get_project_settings(
+    db: tauri::State<'_, DbState>,
+    project_id: String,
+) -> Option<ProjectSettingsRow> {
+    db.0.load_project_settings(&project_id)
+}
+
+#[tauri::command]
+pub fn save_project_settings(
+    db: tauri::State<'_, DbState>,
+    settings: ProjectSettingsRow,
+) -> Result<(), String> {
+    db.0.upsert_project_settings(&settings)
+}
+
 // ─── Workspace commands ───
 
 #[tauri::command]
@@ -758,6 +776,36 @@ pub async fn scm_commit(worktree_path: String, message: String) -> Result<(), St
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn scm_push(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::git_push(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scm_fetch(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::git_fetch(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scm_pull(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::git_pull(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scm_check_runs(
+    worktree_path: String,
+) -> Result<Vec<crate::models::CheckRun>, String> {
+    tokio::task::spawn_blocking(move || git::check_runs(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── PR + archive commands ───
 
 #[tauri::command]
@@ -850,11 +898,107 @@ pub fn pr_link(
 }
 
 #[tauri::command]
+pub async fn list_available_editors() -> Vec<EditorInfo> {
+    let known_apps: Vec<(&str, &str, &str, &str)> = vec![
+        ("finder", "Finder", "Finder", "finder"),
+        ("cursor", "Cursor", "Cursor", "ide"),
+        ("vscode", "VS Code", "Visual Studio Code", "ide"),
+        ("xcode", "Xcode", "Xcode", "ide"),
+        ("zed", "Zed", "Zed", "ide"),
+        ("sublime", "Sublime Text", "Sublime Text", "ide"),
+        ("ghostty", "Ghostty", "Ghostty", "terminal"),
+        ("warp", "Warp", "Warp", "terminal"),
+        ("terminal", "Terminal", "Terminal", "terminal"),
+        ("iterm", "iTerm", "iTerm", "terminal"),
+    ];
+
+    tokio::task::spawn_blocking(move || {
+        let mut available = Vec::new();
+        for (id, display_name, app_name, category) in &known_apps {
+            let status = std::process::Command::new("open")
+                .args(["-Ra", app_name])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            if let Ok(s) = status {
+                if s.success() {
+                    available.push(EditorInfo {
+                        id: id.to_string(),
+                        display_name: display_name.to_string(),
+                        category: category.to_string(),
+                    });
+                }
+            }
+        }
+        // Always include copy_path utility
+        available.push(EditorInfo {
+            id: "copy_path".to_string(),
+            display_name: "Copy Path".to_string(),
+            category: "utility".to_string(),
+        });
+        available
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn open_in_app(path: String, app_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if app_id == "copy_path" {
+            let mut child = Command::new("pbcopy")
+                .stdin(Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(path.as_bytes()).map_err(|e| e.to_string())?;
+            }
+            child.wait().map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        let app_name = match app_id.as_str() {
+            "finder" => None,
+            "cursor" => Some("Cursor"),
+            "vscode" => Some("Visual Studio Code"),
+            "xcode" => Some("Xcode"),
+            "zed" => Some("Zed"),
+            "sublime" => Some("Sublime Text"),
+            "ghostty" => Some("Ghostty"),
+            "warp" => Some("Warp"),
+            "terminal" => Some("Terminal"),
+            "iterm" => Some("iTerm"),
+            _ => return Err(format!("Unknown app: {}", app_id)),
+        };
+
+        let mut cmd = Command::new("open");
+        if let Some(name) = app_name {
+            cmd.args(["-a", name, &path]);
+        } else {
+            // Finder: reveal in Finder. For files, use -R to highlight the file.
+            // For directories, just open the directory.
+            let p = std::path::Path::new(&path);
+            if p.is_file() {
+                cmd.args(["-R", &path]);
+            } else {
+                cmd.arg(&path);
+            }
+        }
+        cmd.status().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
     daemon_state: tauri::State<'_, DaemonState>,
     workspace_id: String,
     delete_worktree: bool,
+    delete_local_branch: bool,
+    run_teardown: bool,
 ) -> Result<(), String> {
     let workspaces = db.0.load_workspaces(None);
     let workspace = workspaces
@@ -865,13 +1009,87 @@ pub async fn archive_workspace(
     // Stop runtime
     daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
 
+    let projects = db.0.load_projects();
+    let project = projects
+        .into_iter()
+        .find(|p| p.id == workspace.project_id);
+
+    // Run teardown scripts if requested
+    if run_teardown {
+        if let Some(ref proj) = project {
+            if let Some(settings) = db.0.load_project_settings(&proj.id) {
+                let scripts: Vec<String> =
+                    serde_json::from_str(&settings.teardown_scripts).unwrap_or_default();
+                let env_vars: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(&settings.env_vars).unwrap_or_default();
+                let worktree_path = workspace.worktree_path.clone();
+                let git_root = proj.git_root_path.clone();
+                let ws_name = workspace.name.clone();
+                let ws_id_clone = workspace_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    for script in &scripts {
+                        let mut cmd = Command::new("/bin/bash");
+                        cmd.arg("-c")
+                            .arg(script)
+                            .current_dir(&worktree_path)
+                            .env("PANDORA_WORKSPACE_PATH", &worktree_path)
+                            .env("PANDORA_WORKSPACE_NAME", &ws_name)
+                            .env("PANDORA_WORKSPACE_ID", &ws_id_clone)
+                            .env("PANDORA_PROJECT_ROOT", &git_root)
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null());
+                        for (k, v) in &env_vars {
+                            if let Some(val) = v.as_str() {
+                                cmd.env(k, val);
+                            }
+                        }
+                        if let Ok(mut child) = cmd.spawn() {
+                            let start = std::time::Instant::now();
+                            let timeout = std::time::Duration::from_secs(30);
+                            loop {
+                                match child.try_wait() {
+                                    Ok(Some(_)) => break,
+                                    Ok(None) => {
+                                        if start.elapsed() >= timeout {
+                                            let _ = child.kill();
+                                            let _ = child.wait();
+                                            break;
+                                        }
+                                        std::thread::sleep(std::time::Duration::from_millis(100));
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                    }
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
     // Remove worktree if applicable and if requested
     if delete_worktree && workspace.workspace_kind == WorkspaceKind::Worktree {
-        let projects = db.0.load_projects();
-        if let Some(project) = projects.into_iter().find(|p| p.id == workspace.project_id) {
+        if let Some(ref proj) = project {
             let ws = workspace.clone();
+            let proj_clone = proj.clone();
             tokio::task::spawn_blocking(move || {
-                let _ = git::remove_worktree(&ws, &project);
+                let _ = git::remove_worktree(&ws, &proj_clone);
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        db.0.update_worktree_deleted(&workspace_id, true)?;
+    }
+
+    // Delete local branch if requested
+    if delete_local_branch {
+        if let Some(ref proj) = project {
+            let branch = workspace.git_branch_name.clone();
+            let git_root = proj.git_root_path.clone();
+            tokio::task::spawn_blocking(move || {
+                let _ = git::delete_local_branch(&git_root, &branch);
             })
             .await
             .map_err(|e| e.to_string())?;
@@ -888,8 +1106,127 @@ pub async fn restore_workspace(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
 ) -> Result<(), String> {
-    db.0.update_workspace_status(&workspace_id, "ready")?;
-    Ok(())
+    let workspace = db
+        .0
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+
+    let worktree_exists = std::path::Path::new(&workspace.worktree_path).exists();
+
+    if worktree_exists {
+        // Fast path: worktree still on disk
+        db.0.update_workspace_status(&workspace_id, "ready")?;
+        return Ok(());
+    }
+
+    // Worktree was deleted — need to recreate it
+    db.0.update_workspace_status(&workspace_id, "creating")?;
+
+    let project = db
+        .0
+        .load_projects()
+        .into_iter()
+        .find(|p| p.id == workspace.project_id)
+        .ok_or("Project not found")?;
+
+    let settings = db.0.load_project_settings(&project.id);
+
+    let branch_name = workspace.git_branch_name.clone();
+    let worktree_path = workspace.worktree_path.clone();
+    let git_root = project.git_root_path.clone();
+    let ws_name = workspace.name.clone();
+    let ws_id_clone = workspace_id.clone();
+    let db_arc = db.0.clone();
+    let ws_id = workspace_id.clone();
+
+    tokio::task::spawn_blocking(move || {
+        // Check if branch exists locally
+        let branch_check = Command::new("git")
+            .args(["-C", &git_root, "branch", "--list", &branch_name])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let branch_exists = !String::from_utf8_lossy(&branch_check.stdout)
+            .trim()
+            .is_empty();
+
+        let result = if branch_exists {
+            Command::new("git")
+                .args(["-C", &git_root, "worktree", "add", &worktree_path, &branch_name])
+                .output()
+                .map_err(|e| e.to_string())
+        } else {
+            Command::new("git")
+                .args(["-C", &git_root, "worktree", "add", "-b", &branch_name, &worktree_path])
+                .output()
+                .map_err(|e| e.to_string())
+        };
+
+        match result {
+            Ok(output) if output.status.success() => {
+                // Run setup scripts if auto_run_setup is enabled
+                if let Some(ref s) = settings {
+                    if s.auto_run_setup {
+                        let scripts: Vec<String> =
+                            serde_json::from_str(&s.setup_scripts).unwrap_or_default();
+                        let env_vars: serde_json::Map<String, serde_json::Value> =
+                            serde_json::from_str(&s.env_vars).unwrap_or_default();
+                        for script in &scripts {
+                            let mut cmd = Command::new("/bin/bash");
+                            cmd.arg("-c")
+                                .arg(script)
+                                .current_dir(&worktree_path)
+                                .env("PANDORA_WORKSPACE_PATH", &worktree_path)
+                                .env("PANDORA_WORKSPACE_NAME", &ws_name)
+                                .env("PANDORA_WORKSPACE_ID", &ws_id_clone)
+                                .env("PANDORA_PROJECT_ROOT", &git_root)
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null());
+                            for (k, v) in &env_vars {
+                                if let Some(val) = v.as_str() {
+                                    cmd.env(k, val);
+                                }
+                            }
+                            if let Ok(mut child) = cmd.spawn() {
+                                let start = std::time::Instant::now();
+                                let timeout = std::time::Duration::from_secs(60);
+                                loop {
+                                    match child.try_wait() {
+                                        Ok(Some(_)) => break,
+                                        Ok(None) => {
+                                            if start.elapsed() >= timeout {
+                                                let _ = child.kill();
+                                                let _ = child.wait();
+                                                break;
+                                            }
+                                            std::thread::sleep(std::time::Duration::from_millis(100));
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                db_arc.update_worktree_deleted(&ws_id, false)?;
+                db_arc.update_workspace_status(&ws_id, "ready")?;
+                Ok(())
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let _ = db_arc.update_workspace_status(&ws_id, "failed");
+                Err(format!("Failed to recreate worktree: {}", stderr))
+            }
+            Err(e) => {
+                let _ = db_arc.update_workspace_status(&ws_id, "failed");
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ─── File import (drag-drop into workspace) ───

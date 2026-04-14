@@ -6,15 +6,17 @@ import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-termi
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { PortsTabContent } from "./ports/ports-tab-content";
+import { ScriptTabContent } from "./scripts/script-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
 import DotGridLoader from "@/components/dot-grid-loader";
 
 type BottomPanelProps = {
   onCollapse: () => void;
+  onOpenProjectSettings?: (projectId: string) => void;
 };
 
-export default memo(function BottomPanel({ onCollapse }: BottomPanelProps) {
+export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: BottomPanelProps) {
   const [tab, setTab] = useState<BottomTab>("terminal");
   const project = useDesktopView((view) => view.selectedProject);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
@@ -71,8 +73,8 @@ export default memo(function BottomPanel({ onCollapse }: BottomPanelProps) {
       value={tab}
       className="flex h-full min-h-0 flex-col gap-0 bg-[var(--theme-bg)]"
       onValueChange={(next) => {
-        if (next === "terminal" || next === "ports") {
-          handleTabChange(next);
+        if (next === "setup" || next === "run" || next === "terminal" || next === "ports") {
+          handleTabChange(next as BottomTab);
         }
       }}
       onPointerDownCapture={() => {
@@ -87,14 +89,25 @@ export default memo(function BottomPanel({ onCollapse }: BottomPanelProps) {
         onSplitActiveGroup={splitActiveGroup}
         hasTerminalGroups={hasTerminalGroups}
       />
+      <TabsContent value="setup" className="min-h-0 flex-1 overflow-hidden m-0">
+        <ScriptTabContent
+          scriptKind="setup"
+          projectId={project.id}
+          onOpenSettings={() => onOpenProjectSettings?.(project.id)}
+        />
+      </TabsContent>
+      <TabsContent value="run" className="min-h-0 flex-1 overflow-hidden m-0">
+        <ScriptTabContent
+          scriptKind="run"
+          projectId={project.id}
+          onOpenSettings={() => onOpenProjectSettings?.(project.id)}
+        />
+      </TabsContent>
       <TabsContent value="terminal" className="min-h-0 flex-1 overflow-hidden m-0">
         <ProjectTerminalView workspaceId={projectKey} runtime={projectRuntime} />
       </TabsContent>
       <TabsContent value="ports" className="min-h-0 flex-1 overflow-hidden m-0">
-        <PortsTabContent
-          projectSessions={projectRuntime?.sessions ?? []}
-          workspaceSessions={workspaceRuntime?.sessions ?? []}
-        />
+        <PortsTabContent />
       </TabsContent>
     </Tabs>
   );

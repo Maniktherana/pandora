@@ -133,7 +133,17 @@ export type DaemonMessage =
   | { type: "session_opened"; session: SessionState }
   | { type: "session_closed"; sessionID: string }
   | { type: "output_chunk"; sessionID: string; data: string }
+  | { type: "ports_snapshot"; ports: DetectedPort[] }
   | { type: "error"; message: string };
+
+export interface DetectedPort {
+  port: number;
+  pid: number;
+  processName: string;
+  sessionID: string;
+  address: string;
+  detectedAt: number;
+}
 
 export interface ConnectedClient {
   socket: Socket;

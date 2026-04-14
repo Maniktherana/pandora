@@ -105,8 +105,18 @@ export type DaemonMessage =
   | { type: "slot_removed"; slotID: string; workspaceId?: string }
   | { type: "session_opened"; session: SessionState; workspaceId?: string }
   | { type: "session_closed"; sessionID: string; workspaceId?: string }
+  | { type: "ports_snapshot"; ports: DetectedPort[]; workspaceId?: string }
   | { type: "output_chunk"; sessionID: string; data: string; workspaceId?: string }
   | { type: "error"; message: string; workspaceId?: string };
+
+export interface DetectedPort {
+  port: number;
+  pid: number;
+  processName: string;
+  sessionID: string;
+  address: string;
+  detectedAt: number;
+}
 
 export type WorkspaceStatus = "creating" | "ready" | "failed" | "deleting" | "archived";
 
@@ -160,6 +170,17 @@ export interface WorkspaceRecord {
   prUrl: string | null;
   prNumber: number | null;
   prState: PrState | null;
+}
+
+export interface ProjectSettings {
+  projectId: string;
+  defaultBranch: string;
+  worktreeRoot: string | null;
+  setupScripts: string[];
+  runScripts: Array<{ name: string; command: string }>;
+  teardownScripts: string[];
+  envVars: Record<string, string>;
+  autoRunSetup: boolean;
 }
 
 export type LayoutAxis = "horizontal" | "vertical";
@@ -217,6 +238,7 @@ export interface WorkspaceRuntimeState {
   workspaceId: string;
   slots: SlotState[];
   sessions: SessionState[];
+  detectedPorts: DetectedPort[];
   terminalDisplayBySlotId: Record<string, TerminalDisplayState>;
   terminalAgentStatusBySlotId: Record<string, TerminalAgentStatus>;
   connectionState: "disconnected" | "connecting" | "connected";

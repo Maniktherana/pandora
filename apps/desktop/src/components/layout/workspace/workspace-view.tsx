@@ -26,6 +26,7 @@ import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal
 import type { SessionState } from "@/lib/shared/types";
 import { RotateCcw, Trash2 } from "lucide-react";
 import DotGridLoader from "@/components/dot-grid-loader";
+import WelcomeScreen from "@/components/layout/workspace/welcome-screen";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
 
 const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
@@ -519,14 +520,7 @@ function EmptyWorkspaceState() {
       );
     }
     if (!project) {
-      return (
-        <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
-          <div className="text-center">
-            <p className="text-lg font-medium">No project selected</p>
-            <p className="text-sm mt-1">Add a project from the sidebar to get started</p>
-          </div>
-        </div>
-      );
+      return <WelcomeScreen />;
     }
     return (
       <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">

@@ -8,8 +8,10 @@ import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import WorkspaceView from "@/components/layout/workspace/workspace-view";
 import ErrorBoundary from "@/components/error-boundary";
+import DotGridLoader from "@/components/dot-grid-loader";
 import AppHeader from "@/components/layout/app-header";
 import SettingsPanel from "@/components/settings/settings-panel";
+import ProjectSettingsPanel from "@/components/settings/project-settings-panel";
 import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
@@ -38,6 +40,7 @@ export default function App() {
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const [rightSidebarMode, setRightSidebarMode] = useState<LeftPanelMode>("files");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectSettingsProjectId, setProjectSettingsProjectId] = useState<string | null>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const workspaceFileTreeSplitRef = useRef<HTMLDivElement>(null);
   const sidebarResizeHandleRef = useRef<HTMLDivElement>(null);
@@ -169,6 +172,19 @@ export default function App() {
     setSettingsOpen(false);
   }, [workspaceCommands]);
 
+  const handleOpenProjectSettings = useCallback(
+    (projectId: string) => {
+      workspaceCommands.setLayoutTargetRuntimeId(null);
+      setProjectSettingsProjectId(projectId);
+    },
+    [workspaceCommands],
+  );
+
+  const handleCloseProjectSettings = useCallback(() => {
+    workspaceCommands.setLayoutTargetRuntimeId(null);
+    setProjectSettingsProjectId(null);
+  }, [workspaceCommands]);
+
   const handleSelectRightSidebarMode = useCallback(
     (mode: LeftPanelMode) => {
       if (selectedWs?.status !== "ready") return;
@@ -218,14 +234,23 @@ export default function App() {
     setRightSidebarResizeOcclusionElement(rightSidebarResizeHandleRef.current);
   }, [setRightSidebarResizeOcclusionElement]);
 
+  if (booting) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-transparent">
+        <DotGridLoader variant="expand" gridSize={5} sizeClassName="h-12 w-12" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      {sidebarVisible && !settingsOpen && (
+      {sidebarVisible && !settingsOpen && !projectSettingsProjectId && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
           <LeftSidebar
             booting={booting}
             onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)}
             onOpenSettings={handleOpenSettings}
+            onOpenProjectSettings={handleOpenProjectSettings}
           />
           <div
             ref={sidebarResizeHandleRef}
@@ -286,7 +311,7 @@ export default function App() {
       )}
 
       <div
-        className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen ? "bg-transparent" : "bg-[var(--theme-bg)]"}`}
+        className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen || projectSettingsProjectId ? "bg-transparent" : "bg-[var(--theme-bg)]"}`}
       >
         {settingsOpen ? (
           <ErrorBoundary name="settings">
@@ -295,6 +320,14 @@ export default function App() {
               sidebarWidth={sidebarWidth}
               activeWorkspaceId={selectedWsId ?? null}
               activeWorkspacePath={selectedWs?.status === "ready" ? selectedWs.worktreePath : null}
+            />
+          </ErrorBoundary>
+        ) : projectSettingsProjectId ? (
+          <ErrorBoundary name="project-settings">
+            <ProjectSettingsPanel
+              projectId={projectSettingsProjectId}
+              onClose={handleCloseProjectSettings}
+              sidebarWidth={sidebarWidth}
             />
           </ErrorBoundary>
         ) : (
@@ -360,7 +393,10 @@ export default function App() {
                           >
                             <ErrorBoundary name="bottom-panel">
                               {bottomPanelOpen ? (
-                                <BottomPanel onCollapse={() => setBottomPanelOpen(false)} />
+                                <BottomPanel
+                                  onCollapse={() => setBottomPanelOpen(false)}
+                                  onOpenProjectSettings={handleOpenProjectSettings}
+                                />
                               ) : null}
                             </ErrorBoundary>
                           </ResizablePanel>

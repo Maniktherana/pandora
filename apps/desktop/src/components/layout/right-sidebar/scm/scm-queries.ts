@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  scmCheckRuns,
   scmLineStats,
   scmPathLineStatsBulk,
   scmStatus,
@@ -36,6 +37,20 @@ export function useScmLineStatsQuery(worktreePath: string, options?: ScmQueryOpt
     queryFn: () => scmLineStats(worktreePath),
     enabled: Boolean(worktreePath) && (options?.enabled ?? true),
     refetchInterval: SCM_CHANGES_REFRESH_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+    staleTime: SCM_STALE_TIME_MS,
+    gcTime: SCM_GC_TIME_MS,
+  });
+}
+
+const SCM_CHECK_RUNS_INTERVAL_MS = 15_000;
+
+export function useCheckRunsQuery(worktreePath: string, options?: ScmQueryOptions) {
+  return useQuery({
+    queryKey: ["scm-check-runs", worktreePath],
+    queryFn: () => scmCheckRuns(worktreePath),
+    enabled: Boolean(worktreePath) && (options?.enabled ?? true),
+    refetchInterval: SCM_CHECK_RUNS_INTERVAL_MS,
     refetchIntervalInBackground: false,
     staleTime: SCM_STALE_TIME_MS,
     gcTime: SCM_GC_TIME_MS,

@@ -31,6 +31,8 @@ import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
+import { CommitDropdown } from "./commit-dropdown";
+import { ChecksPanel } from "./checks-panel";
 import { scmStatusQueryKey, useScmStatusQuery } from "./scm-queries";
 import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "./scm.types";
 import DotGridLoader from "@/components/dot-grid-loader";
@@ -64,6 +66,7 @@ export default function WorkspaceChangesPanel({
   const [prError, setPrError] = useState<string | null>(null);
   const [prSending, setPrSending] = useState(false);
   const [optimisticEntries, setOptimisticEntries] = useState<ScmStatusEntry[] | null>(null);
+  const [scmTab, setScmTab] = useState<"changes" | "checks">("changes");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -366,6 +369,31 @@ export default function WorkspaceChangesPanel({
 
   return (
     <div className="flex h-full min-h-0 select-none flex-col">
+      <div className="flex shrink-0 items-center gap-0 border-b border-[var(--theme-border)] px-2">
+        <button
+          type="button"
+          className={`px-2 py-1.5 text-[11px] font-medium ${
+            scmTab === "changes"
+              ? "border-b-2 border-[var(--theme-interactive)] text-[var(--theme-text)]"
+              : "text-[var(--theme-text-faint)] hover:text-[var(--theme-text-subtle)]"
+          }`}
+          onClick={() => setScmTab("changes")}
+        >
+          Changes
+        </button>
+        <button
+          type="button"
+          className={`px-2 py-1.5 text-[11px] font-medium ${
+            scmTab === "checks"
+              ? "border-b-2 border-[var(--theme-interactive)] text-[var(--theme-text)]"
+              : "text-[var(--theme-text-faint)] hover:text-[var(--theme-text-subtle)]"
+          }`}
+          onClick={() => setScmTab("checks")}
+        >
+          Checks
+        </button>
+      </div>
+
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
         <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">
           {workspaceLabel}
@@ -429,15 +457,14 @@ export default function WorkspaceChangesPanel({
             }
           }}
         />
-        <Button
-          type="button"
-          size="sm"
-          className="mt-1.5 h-8 w-full text-[12px]"
-          disabled={!canCommit}
-          onClick={onCommit}
-        >
-          Commit
-        </Button>
+        <div className="mt-1.5">
+          <CommitDropdown
+            onCommit={onCommit}
+            canCommit={canCommit}
+            busy={busy}
+            worktreePath={workspaceRoot}
+          />
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -451,68 +478,78 @@ export default function WorkspaceChangesPanel({
         </Button>
       </div>
 
-      {loadError && (
-        <div className="shrink-0 border-b border-red-900/40 bg-red-950/25 px-2 py-1.5 text-[11px] text-red-300/90">
-          {loadError}
-        </div>
+      {scmTab === "changes" && (
+        <>
+          {loadError && (
+            <div className="shrink-0 border-b border-red-900/40 bg-red-950/25 px-2 py-1.5 text-[11px] text-red-300/90">
+              {loadError}
+            </div>
+          )}
+
+          <div
+            data-scm-sidebar="true"
+            className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
+            style={{ overscrollBehavior: "none" }}
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) {
+                clearSelection();
+              }
+            }}
+          >
+            {entries === null && (
+              <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading changes…</div>
+            )}
+            {entries && entries.length === 0 && (
+              <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">No changes</div>
+            )}
+
+            {entries ? (
+              <StagedChangesSection
+                stagedList={stagedList}
+                stagedOpen={stagedOpen}
+                setStagedOpen={setStagedOpen}
+                busy={busy}
+                stickyTop={0}
+                stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
+                selectedPaths={selectedPathSet}
+                onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
+                onOpenReviewPath={(path) => onOpenReviewPath(path, "staged")}
+                onSelectEntry={selectEntry}
+                onUnstage={onUnstage}
+                onUnstageAll={onUnstageAll}
+              />
+            ) : null}
+
+            {entries ? (
+              <UnstagedChangesSection
+                unstagedList={unstagedList}
+                changesOpen={changesOpen}
+                setChangesOpen={setChangesOpen}
+                busy={busy}
+                stickyTop={0}
+                stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
+                selectedPaths={selectedPathSet}
+                onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
+                onOpenReviewPath={(path) => onOpenReviewPath(path, "working")}
+                onSelectEntry={selectEntry}
+                onDiscard={onDiscard}
+                onStage={onStage}
+                onDiscardAll={onDiscardAll}
+                onStageAll={onStageAll}
+              />
+            ) : null}
+          </div>
+          {prError && (
+            <div className="mx-2 mb-1 rounded border border-red-900/40 bg-red-950/25 px-2 py-1 text-[11px] text-red-300/90">
+              {prError}
+            </div>
+          )}
+        </>
       )}
 
-      <div
-        data-scm-sidebar="true"
-        className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
-        style={{ overscrollBehavior: "none" }}
-        onPointerDown={(event) => {
-          if (event.target === event.currentTarget) {
-            clearSelection();
-          }
-        }}
-      >
-        {entries === null && (
-          <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading changes…</div>
-        )}
-        {entries && entries.length === 0 && (
-          <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">No changes</div>
-        )}
-
-        {entries ? (
-          <StagedChangesSection
-            stagedList={stagedList}
-            stagedOpen={stagedOpen}
-            setStagedOpen={setStagedOpen}
-            busy={busy}
-            stickyTop={0}
-            stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
-            selectedPaths={selectedPathSet}
-            onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
-            onOpenReviewPath={(path) => onOpenReviewPath(path, "staged")}
-            onSelectEntry={selectEntry}
-            onUnstage={onUnstage}
-            onUnstageAll={onUnstageAll}
-          />
-        ) : null}
-
-        {entries ? (
-          <UnstagedChangesSection
-            unstagedList={unstagedList}
-            changesOpen={changesOpen}
-            setChangesOpen={setChangesOpen}
-            busy={busy}
-            stickyTop={0}
-            stickyZIndex={SCM_SECTION_STICKY_Z_INDEX_BASE}
-            selectedPaths={selectedPathSet}
-            onOpenFile={(path) => void openFile(workspaceId, workspaceRoot, path)}
-            onOpenReviewPath={(path) => onOpenReviewPath(path, "working")}
-            onSelectEntry={selectEntry}
-            onDiscard={onDiscard}
-            onStage={onStage}
-            onDiscardAll={onDiscardAll}
-            onStageAll={onStageAll}
-          />
-        ) : null}
-      </div>
-      {prError && (
-        <div className="mx-2 mb-1 rounded border border-red-900/40 bg-red-950/25 px-2 py-1 text-[11px] text-red-300/90">
-          {prError}
+      {scmTab === "checks" && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <ChecksPanel worktreePath={workspaceRoot} />
         </div>
       )}
     </div>

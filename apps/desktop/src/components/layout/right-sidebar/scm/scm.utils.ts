@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  CheckRun,
   ScmDiffResult,
   ScmGitBlobSource,
   ScmLineStats,
@@ -254,6 +255,22 @@ export function scmReadGitBlob(
   source: ScmGitBlobSource,
 ): Promise<string> {
   return invoke<string>("scm_read_git_blob", { worktreePath, relativePath, source });
+}
+
+export function scmPush(worktreePath: string): Promise<string> {
+  return invoke<string>("scm_push", { worktreePath });
+}
+
+export function scmFetch(worktreePath: string): Promise<string> {
+  return invoke<string>("scm_fetch", { worktreePath });
+}
+
+export function scmPull(worktreePath: string): Promise<string> {
+  return invoke<string>("scm_pull", { worktreePath });
+}
+
+export function scmCheckRuns(worktreePath: string): Promise<CheckRun[]> {
+  return invoke<CheckRun[]>("scm_check_runs", { worktreePath });
 }
 
 export function readWorkspaceTextFile(

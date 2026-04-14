@@ -217,6 +217,15 @@ select,
   animation: dot-grid-ripple 1.5s ease infinite;
 }
 
+@keyframes welcome-dot-shimmer {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 :root {
   --accent: --alpha(var(--color-black) / 4%);
   --accent-foreground: var(--color-neutral-800);
