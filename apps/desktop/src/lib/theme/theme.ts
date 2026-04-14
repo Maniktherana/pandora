@@ -73,7 +73,7 @@ export function getShadcnRootCssVariables(): Record<string, string> {
     "--destructive-foreground": "var(--theme-text, #ededed)",
     "--border": "var(--theme-border, #282828)",
     "--input": "var(--theme-panel, #232323)",
-    "--ring": "var(--theme-interactive, #034cff)",
+    "--ring": "var(--theme-text-subtle, #a0a0a0)",
     "--chart-1": "var(--theme-primary, #fab283)",
     "--chart-2": "var(--theme-info, #edb2f1)",
     "--chart-3": "var(--theme-warning, #fcd53a)",
@@ -87,7 +87,7 @@ export function getShadcnRootCssVariables(): Record<string, string> {
     "--sidebar-accent": "var(--theme-panel-elevated, #282828)",
     "--sidebar-accent-foreground": "var(--theme-text, #ededed)",
     "--sidebar-border": "var(--theme-border, #282828)",
-    "--sidebar-ring": "var(--theme-interactive, #034cff)",
+    "--sidebar-ring": "var(--theme-text-subtle, #a0a0a0)",
   };
 }
 
@@ -122,7 +122,7 @@ export function getThemeCssVariables(theme: WorkspaceTheme): Record<string, stri
     "--theme-error": ui.error,
     "--theme-error-bg": ui.errorBg,
     "--theme-info": ui.info,
-    "--theme-interactive": ui.interactive,
+    "--theme-interactive": ui.textSubtle,
     "--theme-diff-add": ui.diffAdd,
     "--theme-diff-delete": ui.diffDelete,
     "--theme-scm-added": ui.scm.added,

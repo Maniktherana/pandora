@@ -33,6 +33,7 @@ import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-ser
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(300);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const [rightSidebarMode, setRightSidebarMode] = useState<LeftPanelMode>("files");
@@ -46,6 +47,16 @@ export default function App() {
   const [sidebarResizeDragging, setSidebarResizeDragging] = useState(false);
   const setSidebarResizeOcclusionElement = useNativeTerminalOcclusion(
     sidebarResizeHovered || sidebarResizeDragging,
+    4,
+    { exitHoldMs: 0 },
+  );
+  const rightSidebarResizeHandleRef = useRef<HTMLDivElement>(null);
+  const rightSidebarResizeFrameRef = useRef<number | null>(null);
+  const rightSidebarResizeWidthRef = useRef<number | null>(null);
+  const [rightSidebarResizeHovered, setRightSidebarResizeHovered] = useState(false);
+  const [rightSidebarResizeDragging, setRightSidebarResizeDragging] = useState(false);
+  const setRightSidebarResizeOcclusionElement = useNativeTerminalOcclusion(
+    rightSidebarResizeHovered || rightSidebarResizeDragging,
     4,
     { exitHoldMs: 0 },
   );
@@ -203,6 +214,10 @@ export default function App() {
     setSidebarResizeOcclusionElement(sidebarResizeHandleRef.current);
   }, [setSidebarResizeOcclusionElement]);
 
+  useEffect(() => {
+    setRightSidebarResizeOcclusionElement(rightSidebarResizeHandleRef.current);
+  }, [setRightSidebarResizeOcclusionElement]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {sidebarVisible && !settingsOpen && (
@@ -265,7 +280,7 @@ export default function App() {
             }}
             className="group absolute inset-y-0 -right-1.5 z-20 w-3 cursor-col-resize bg-transparent"
           >
-            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-[var(--theme-text-subtle)] to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[var(--theme-text-subtle)] opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
           </div>
         </div>
       )}
@@ -357,11 +372,67 @@ export default function App() {
                   {fileTreePanelVisible && selectedWs && (
                     <div
                       className="relative h-full shrink-0"
-                      style={{ width: sidebarWidth }}
+                      style={{ width: rightSidebarWidth }}
                       onPointerDownCapture={() =>
                         workspaceCommands.setLayoutTargetRuntimeId(null)
                       }
                     >
+                      <div
+                        ref={rightSidebarResizeHandleRef}
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize file tree"
+                        onPointerEnter={() => setRightSidebarResizeHovered(true)}
+                        onPointerLeave={() => setRightSidebarResizeHovered(false)}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) return;
+                          event.preventDefault();
+                          setIsResizingPanels(true);
+                          setRightSidebarResizeDragging(true);
+
+                          const startX = event.clientX;
+                          const startWidth = rightSidebarWidth;
+
+                          const onPointerMove = (moveEvent: PointerEvent) => {
+                            const maxWidth = Math.floor(window.innerWidth * 0.4);
+                            const nextWidth = Math.min(
+                              maxWidth,
+                              Math.max(180, startWidth - (moveEvent.clientX - startX)),
+                            );
+                            rightSidebarResizeWidthRef.current = nextWidth;
+                            if (rightSidebarResizeFrameRef.current != null) return;
+                            rightSidebarResizeFrameRef.current = requestAnimationFrame(() => {
+                              rightSidebarResizeFrameRef.current = null;
+                              const width = rightSidebarResizeWidthRef.current;
+                              if (width != null) {
+                                setRightSidebarWidth(width);
+                              }
+                            });
+                          };
+
+                          const onPointerUp = () => {
+                            window.removeEventListener("pointermove", onPointerMove);
+                            window.removeEventListener("pointerup", onPointerUp);
+                            if (rightSidebarResizeFrameRef.current != null) {
+                              cancelAnimationFrame(rightSidebarResizeFrameRef.current);
+                              rightSidebarResizeFrameRef.current = null;
+                            }
+                            const width = rightSidebarResizeWidthRef.current;
+                            if (width != null) {
+                              setRightSidebarWidth(width);
+                              rightSidebarResizeWidthRef.current = null;
+                            }
+                            setIsResizingPanels(false);
+                            setRightSidebarResizeDragging(false);
+                          };
+
+                          window.addEventListener("pointermove", onPointerMove);
+                          window.addEventListener("pointerup", onPointerUp);
+                        }}
+                        className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize bg-transparent"
+                      >
+                        <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[var(--theme-text-subtle)] opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+                      </div>
                       <ErrorBoundary name="file-tree">
                         <RightSidebar
                           workspaceRoot={selectedWs.worktreePath}

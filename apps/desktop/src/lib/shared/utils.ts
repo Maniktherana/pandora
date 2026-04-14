@@ -37,14 +37,14 @@ export function panelResizeHandleClasses(
           "h-full w-3 -mx-[5.5px] cursor-col-resize",
           "before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2",
           "before:bg-[var(--theme-border)] before:transition-colors",
-          "data-[resize-handle-state=hover]:before:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=hover]:before:bg-[var(--theme-text-subtle)]",
           "data-[resize-handle-state=drag]:before:bg-[var(--theme-border)]",
         ]
       : [
           "h-3 w-full -my-[5.5px] cursor-row-resize",
           "before:absolute before:inset-x-0 before:top-1/2 before:h-px before:-translate-y-1/2",
           "before:bg-[var(--theme-border)] before:transition-colors",
-          "data-[resize-handle-state=hover]:before:bg-[var(--theme-interactive)]",
+          "data-[resize-handle-state=hover]:before:bg-[var(--theme-text-subtle)]",
           "data-[resize-handle-state=drag]:before:bg-[var(--theme-border)]",
         ],
   );

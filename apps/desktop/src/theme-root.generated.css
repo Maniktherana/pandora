@@ -23,7 +23,7 @@
   --primary: var(--theme-primary, #fab283);
   --primary-foreground: #171311;
   --radius: 0.625rem;
-  --ring: var(--theme-interactive, #034cff);
+  --ring: var(--theme-text-subtle, #a0a0a0);
   --secondary: var(--theme-panel, #232323);
   --secondary-foreground: var(--theme-text, #ededed);
   --sidebar: var(--theme-panel, #232323);
@@ -33,7 +33,7 @@
   --sidebar-foreground: var(--theme-text, #ededed);
   --sidebar-primary: var(--theme-primary, #fab283);
   --sidebar-primary-foreground: #171311;
-  --sidebar-ring: var(--theme-interactive, #034cff);
+  --sidebar-ring: var(--theme-text-subtle, #a0a0a0);
   --theme-bg: #151515;
   --theme-border: #242424;
   --theme-border-subtle: #1d1d1d;
@@ -69,7 +69,7 @@
   --theme-font-terminal: JetBrains Mono;
   --theme-font-terminal-size: 13px;
   --theme-info: #EDB2F1;
-  --theme-interactive: #034CFF;
+  --theme-interactive: #a0a0a0;
   --theme-panel: #121212;
   --theme-panel-elevated: #1a1a1a;
   --theme-panel-hover: #FFFFFF0D;
