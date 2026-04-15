@@ -40,9 +40,13 @@ export interface Database {
   exec(sql: string): void;
   close(): void;
   query(sql: string): StatementResult;
+  /** When set, all queries are scoped to this runtime ID (shared DB mode). */
+  runtimeId: string | null;
 }
 
 class WrappedDatabase implements Database {
+  runtimeId: string | null = null;
+
   constructor(
     private readonly db: {
       exec(sql: string): void;
@@ -73,12 +77,41 @@ class WrappedDatabase implements Database {
   }
 }
 
-function pandoraDirectory(): string {
-  return process.env.PANDORA_HOME || join(homedir(), ".pandora");
+class WrappedBunDatabase implements Database {
+  runtimeId: string | null = null;
+
+  constructor(
+    private readonly db: {
+      exec(sql: string): void;
+      close(): void;
+      query(sql: string): {
+        get(...params: unknown[]): unknown;
+        all(...params: unknown[]): unknown[];
+        run(...params: unknown[]): unknown;
+      };
+    },
+  ) {}
+
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  query(sql: string): StatementResult {
+    const q = this.db.query(sql);
+    return {
+      get: (...params: unknown[]) => q.get(...params),
+      all: (...params: unknown[]) => q.all(...params),
+      run: (...params: unknown[]) => q.run(...params),
+    };
+  }
 }
 
-function legacyGlobalDatabasePath(): string {
-  return join(pandoraDirectory(), "pandora.db");
+function pandoraDirectory(): string {
+  return process.env.PANDORA_HOME || join(homedir(), ".pandora");
 }
 
 function ensureDirectory(path: string): void {
@@ -108,8 +141,8 @@ function sanitizeRuntimeIdForFilename(runtimeId: string): string {
   return runtimeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 96);
 }
 
-/** One DB file per daemon runtime (workspace id or `project:…`), stored globally to avoid polluting worktrees. */
-function defaultRuntimeDatabasePath(_workspacePath: string, runtimeId: string): string {
+/** Legacy: one DB file per daemon runtime, stored globally. */
+function legacyRuntimeDatabasePath(runtimeId: string): string {
   const safe = sanitizeRuntimeIdForFilename(runtimeId);
   return join(pandoraDirectory(), "runtime", `runtime-${safe}.db`);
 }
@@ -122,20 +155,16 @@ function removeDatabaseFiles(dbPath: string): void {
   }
 }
 
-function resetLegacyGlobalDatabase(): void {
-  removeDatabaseFiles(legacyGlobalDatabasePath());
-}
-
 function openBetterSqlite(dbPath: string): WrappedDatabase {
   const require = createRequire(import.meta.url);
   const BetterSqlite3 = require("better-sqlite3") as BetterSqlite3Module;
   return new WrappedDatabase(new BetterSqlite3(dbPath));
 }
 
-function openBunSqlite(dbPath: string): Database {
+function openBunSqlite(dbPath: string): WrappedBunDatabase {
   const require = createRequire(import.meta.url);
   const bunSqlite = require("bun:sqlite") as BunSqliteModule;
-  return new bunSqlite.Database(dbPath);
+  return new WrappedBunDatabase(new bunSqlite.Database(dbPath));
 }
 
 function databaseUserVersion(db: Database): number {
@@ -143,48 +172,99 @@ function databaseUserVersion(db: Database): number {
   return row?.user_version ?? 0;
 }
 
-function getRuntimeMetadata(db: Database, key: string): string | null {
+function getRuntimeMetadata(db: Database, runtimeId: string | null, key: string): string | null {
+  if (runtimeId) {
+    const row = db.query("SELECT value FROM runtime_metadata WHERE runtime_id = ? AND key = ?").get(runtimeId, key) as {
+      value?: string;
+    } | null;
+    return row?.value ?? null;
+  }
   const row = db.query("SELECT value FROM runtime_metadata WHERE key = ?").get(key) as {
     value?: string;
   } | null;
   return row?.value ?? null;
 }
 
-function setRuntimeMetadata(db: Database, key: string, value: string): void {
-  db.query(
-    `INSERT INTO runtime_metadata (key, value)
-     VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-  ).run(key, value);
+function setRuntimeMetadata(db: Database, runtimeId: string | null, key: string, value: string): void {
+  if (runtimeId) {
+    db.query(
+      `INSERT INTO runtime_metadata (runtime_id, key, value)
+       VALUES (?, ?, ?)
+       ON CONFLICT(runtime_id, key) DO UPDATE SET value = excluded.value`,
+    ).run(runtimeId, key, value);
+  } else {
+    db.query(
+      `INSERT INTO runtime_metadata (key, value)
+       VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(key, value);
+  }
 }
 
-function disableTerminalSlotAutostart(db: Database): void {
-  db.query(
-    "UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0",
-  ).run();
+function disableTerminalSlotAutostart(db: Database, runtimeId: string | null): void {
+  if (runtimeId) {
+    db.query(
+      "UPDATE slot_definitions SET autostart = 0 WHERE runtime_id = ? AND kind = 'terminal_slot' AND autostart != 0",
+    ).run(runtimeId);
+  } else {
+    db.query(
+      "UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0",
+    ).run();
+  }
 }
 
+/**
+ * Open the database. Supports two modes:
+ * 1. Shared mode: PANDORA_DB_PATH env is set → open the global app-state.db and scope by runtimeId.
+ * 2. Legacy mode: per-runtime DB file (old behavior, for backward compat).
+ */
 export function openDatabase(options?: {
   dbPath?: string;
   workspacePath?: string;
   defaultCwd?: string;
-  /** Distinct per daemon runtime (workspace UUID or `project:id`); required when `dbPath` is omitted. */
   runtimeId?: string;
 }): Database {
   const runtimeId = options?.runtimeId ?? "legacy";
+
+  // Check for shared DB mode (set by Tauri host via env).
+  const sharedDbPath = process.env.PANDORA_DB_PATH ?? options?.dbPath;
+  const isSharedMode = !!process.env.PANDORA_DB_PATH;
+
+  if (isSharedMode && sharedDbPath) {
+    // Shared mode: open the global DB. Tables already exist (created by Rust side).
+    const db = process.versions.bun ? openBunSqlite(sharedDbPath) : openBetterSqlite(sharedDbPath);
+    db.runtimeId = runtimeId;
+    db.exec("PRAGMA busy_timeout = 10000;");
+    db.exec("PRAGMA journal_mode = WAL;");
+
+    // Rename legacy slot/session names
+    if (runtimeId) {
+      db.query(`UPDATE slot_definitions SET name = 'Terminal' WHERE runtime_id = ? AND name = 'Local Terminal'`).run(runtimeId);
+      db.query(`UPDATE session_definitions SET name = 'Terminal' WHERE runtime_id = ? AND name = 'Local Terminal'`).run(runtimeId);
+    }
+    disableTerminalSlotAutostart(db, runtimeId);
+
+    if (options?.workspacePath !== undefined || options?.defaultCwd !== undefined) {
+      ensureSeedData(db, runtimeId, options?.defaultCwd ?? options?.workspacePath ?? homedir());
+    }
+    return db;
+  }
+
+  // Legacy mode: per-runtime DB file.
   const dbPath =
     options?.dbPath ??
-    defaultRuntimeDatabasePath(options?.workspacePath ?? pandoraDirectory(), runtimeId);
+    legacyRuntimeDatabasePath(runtimeId);
   ensureDirectory(dirname(dbPath));
-  resetLegacyGlobalDatabase();
 
   let db = process.versions.bun ? openBunSqlite(dbPath) : openBetterSqlite(dbPath);
+  db.runtimeId = null; // No scoping in legacy mode.
   db.exec("PRAGMA busy_timeout = 10000;");
   if (databaseUserVersion(db) < 2) {
     db.close();
     removeDatabaseFiles(dbPath);
     ensureDirectory(dirname(dbPath));
     db = process.versions.bun ? openBunSqlite(dbPath) : openBetterSqlite(dbPath);
+    db.runtimeId = null;
     db.exec("PRAGMA busy_timeout = 10000;");
   }
   db.exec("PRAGMA journal_mode = WAL;");
@@ -222,62 +302,96 @@ export function openDatabase(options?: {
   `);
   db.query(`UPDATE slot_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
   db.query(`UPDATE session_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'`).run();
-  disableTerminalSlotAutostart(db);
+  disableTerminalSlotAutostart(db, null);
   db.exec("PRAGMA user_version = 3;");
   if (
     options?.dbPath === undefined ||
     options?.workspacePath !== undefined ||
     options?.defaultCwd !== undefined
   ) {
-    ensureSeedData(db, options?.defaultCwd ?? options?.workspacePath ?? homedir());
+    ensureSeedData(db, null, options?.defaultCwd ?? options?.workspacePath ?? homedir());
   }
   return db;
 }
 
-function ensureSeedData(db: Database, defaultCwd: string): void {
-  const slotCount = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as {
-    count: number;
-  };
+function ensureSeedData(db: Database, runtimeId: string | null, defaultCwd: string): void {
+  const countQuery = runtimeId
+    ? "SELECT COUNT(*) AS count FROM slot_definitions WHERE runtime_id = ?"
+    : "SELECT COUNT(*) AS count FROM slot_definitions";
+  const slotCount = (runtimeId
+    ? db.query(countQuery).get(runtimeId)
+    : db.query(countQuery).get()) as { count: number };
   if (slotCount.count > 0) {
     return;
   }
-  if (getRuntimeMetadata(db, "seed_terminal_when_empty") !== "1") {
+  if (getRuntimeMetadata(db, runtimeId, "seed_terminal_when_empty") !== "1") {
     return;
   }
 
   const slotID = randomUUID();
   const sessionID = randomUUID();
 
-  db.query(
-    `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(slotID, "terminal_slot", "Terminal", 0, "single", sessionID, 1, 0);
+  if (runtimeId) {
+    db.query(
+      `INSERT INTO slot_definitions (id, runtime_id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(slotID, runtimeId, "terminal_slot", "Terminal", 0, "single", sessionID, 1, 0);
 
-  db.query(
-    `INSERT INTO session_definitions
-     (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    sessionID,
-    slotID,
-    "terminal",
-    "Terminal",
-    "exec ${SHELL:-/bin/zsh} -i",
-    defaultCwd,
-    null,
-    "{}",
-    "manual",
-    1,
-    1,
-  );
-  setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
+    db.query(
+      `INSERT INTO session_definitions
+       (id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      sessionID,
+      runtimeId,
+      slotID,
+      "terminal",
+      "Terminal",
+      "exec ${SHELL:-/bin/zsh} -i",
+      defaultCwd,
+      null,
+      "{}",
+      "manual",
+      1,
+      1,
+    );
+  } else {
+    db.query(
+      `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(slotID, "terminal_slot", "Terminal", 0, "single", sessionID, 1, 0);
+
+    db.query(
+      `INSERT INTO session_definitions
+       (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      sessionID,
+      slotID,
+      "terminal",
+      "Terminal",
+      "exec ${SHELL:-/bin/zsh} -i",
+      defaultCwd,
+      null,
+      "{}",
+      "manual",
+      1,
+      1,
+    );
+  }
+  setRuntimeMetadata(db, runtimeId, "seed_terminal_when_empty", "0");
 }
 
 export function listSlotDefinitions(db: Database): SlotDefinition[] {
+  const rid = db.runtimeId;
+
   const sessionIDsBySlot = new Map<string, string[]>();
-  const sessionRows = db
-    .query("SELECT id, slot_id FROM session_definitions ORDER BY rowid")
-    .all() as Array<{ id: string; slot_id: string }>;
+  const sessionQuery = rid
+    ? "SELECT id, slot_id FROM session_definitions WHERE runtime_id = ? ORDER BY rowid"
+    : "SELECT id, slot_id FROM session_definitions ORDER BY rowid";
+  const sessionRows = (rid
+    ? db.query(sessionQuery).all(rid)
+    : db.query(sessionQuery).all()) as Array<{ id: string; slot_id: string }>;
 
   for (const row of sessionRows) {
     const existing = sessionIDsBySlot.get(row.slot_id) ?? [];
@@ -285,13 +399,16 @@ export function listSlotDefinitions(db: Database): SlotDefinition[] {
     sessionIDsBySlot.set(row.slot_id, existing);
   }
 
-  const rows = db
-    .query(
-      `SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order
+  const slotQuery = rid
+    ? `SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order
+       FROM slot_definitions WHERE runtime_id = ?
+       ORDER BY sort_order ASC, rowid ASC`
+    : `SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order
        FROM slot_definitions
-       ORDER BY sort_order ASC, rowid ASC`,
-    )
-    .all() as Array<{
+       ORDER BY sort_order ASC, rowid ASC`;
+  const rows = (rid
+    ? db.query(slotQuery).all(rid)
+    : db.query(slotQuery).all()) as Array<{
     id: string;
     kind: SlotKind;
     name: string;
@@ -316,13 +433,18 @@ export function listSlotDefinitions(db: Database): SlotDefinition[] {
 }
 
 export function listSessionDefinitions(db: Database): SessionDefinition[] {
-  const rows = db
-    .query(
-      `SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported
+  const rid = db.runtimeId;
+
+  const sessionQuery = rid
+    ? `SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported
+       FROM session_definitions WHERE runtime_id = ?
+       ORDER BY rowid ASC`
+    : `SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported
        FROM session_definitions
-       ORDER BY rowid ASC`,
-    )
-    .all() as Array<{
+       ORDER BY rowid ASC`;
+  const rows = (rid
+    ? db.query(sessionQuery).all(rid)
+    : db.query(sessionQuery).all()) as Array<{
     id: string;
     slot_id: string;
     kind: SessionDefinition["kind"];
@@ -356,20 +478,39 @@ export function createSlotDefinition(
   slot: Omit<SlotDefinition, "sessionDefIDs">,
 ): SlotDefinition {
   const id = slot.id;
-  db.query(
-    `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    slot.kind,
-    slot.name,
-    slot.autostart ? 1 : 0,
-    slot.presentationMode,
-    slot.primarySessionDefID,
-    slot.persisted ? 1 : 0,
-    slot.sortOrder,
-  );
-  setRuntimeMetadata(db, "seed_terminal_when_empty", "0");
+  const rid = db.runtimeId;
+
+  if (rid) {
+    db.query(
+      `INSERT INTO slot_definitions (id, runtime_id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      rid,
+      slot.kind,
+      slot.name,
+      slot.autostart ? 1 : 0,
+      slot.presentationMode,
+      slot.primarySessionDefID,
+      slot.persisted ? 1 : 0,
+      slot.sortOrder,
+    );
+  } else {
+    db.query(
+      `INSERT INTO slot_definitions (id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      slot.kind,
+      slot.name,
+      slot.autostart ? 1 : 0,
+      slot.presentationMode,
+      slot.primarySessionDefID,
+      slot.persisted ? 1 : 0,
+      slot.sortOrder,
+    );
+  }
+  setRuntimeMetadata(db, rid, "seed_terminal_when_empty", "0");
 
   return {
     ...slot,
@@ -422,13 +563,18 @@ export function updateSlotDefinition(
 }
 
 export function removeSlotDefinition(db: Database, slotID: string): void {
+  const rid = db.runtimeId;
   db.query("DELETE FROM session_definitions WHERE slot_id = ?").run(slotID);
   db.query("DELETE FROM slot_definitions WHERE id = ?").run(slotID);
-  const remaining = db.query("SELECT COUNT(*) AS count FROM slot_definitions").get() as {
-    count: number;
-  };
+
+  const countQuery = rid
+    ? "SELECT COUNT(*) AS count FROM slot_definitions WHERE runtime_id = ?"
+    : "SELECT COUNT(*) AS count FROM slot_definitions";
+  const remaining = (rid
+    ? db.query(countQuery).get(rid)
+    : db.query(countQuery).get()) as { count: number };
   if (remaining.count === 0) {
-    setRuntimeMetadata(db, "seed_terminal_when_empty", "1");
+    setRuntimeMetadata(db, rid, "seed_terminal_when_empty", "1");
   }
 }
 
@@ -437,23 +583,46 @@ export function createSessionDefinition(
   session: SessionDefinition,
 ): SessionDefinition {
   const id = session.id;
-  db.query(
-    `INSERT INTO session_definitions
-     (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    session.slotID,
-    session.kind,
-    session.name,
-    session.command,
-    session.cwd,
-    session.port,
-    encodeEnv(session.envOverrides),
-    session.restartPolicy,
-    session.pauseSupported ? 1 : 0,
-    session.resumeSupported ? 1 : 0,
-  );
+  const rid = db.runtimeId;
+
+  if (rid) {
+    db.query(
+      `INSERT INTO session_definitions
+       (id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      rid,
+      session.slotID,
+      session.kind,
+      session.name,
+      session.command,
+      session.cwd,
+      session.port,
+      encodeEnv(session.envOverrides),
+      session.restartPolicy,
+      session.pauseSupported ? 1 : 0,
+      session.resumeSupported ? 1 : 0,
+    );
+  } else {
+    db.query(
+      `INSERT INTO session_definitions
+       (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      session.slotID,
+      session.kind,
+      session.name,
+      session.command,
+      session.cwd,
+      session.port,
+      encodeEnv(session.envOverrides),
+      session.restartPolicy,
+      session.pauseSupported ? 1 : 0,
+      session.resumeSupported ? 1 : 0,
+    );
+  }
 
   return { ...session, id };
 }

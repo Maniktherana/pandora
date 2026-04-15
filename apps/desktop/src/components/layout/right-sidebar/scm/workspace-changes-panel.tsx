@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { GitPullRequest } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { useRuntimeState, useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
@@ -36,8 +44,13 @@ import { ChecksPanel } from "./checks-panel";
 import { scmStatusQueryKey, useScmStatusQuery } from "./scm-queries";
 import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "./scm.types";
 import DotGridLoader from "@/components/dot-grid-loader";
-import type { DiffSource } from "@/lib/shared/types";
+import type { DiffSource, HeaderBranchContext } from "@/lib/shared/types";
 import { requestReviewNavigation } from "@/state/review-navigation-store";
+import {
+  formatTargetBranch,
+  persistWorkspaceTargetBranch,
+  resolveWorkspaceTargetBranch,
+} from "./target-branch";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -69,6 +82,10 @@ export default function WorkspaceChangesPanel({
   const [scmTab, setScmTab] = useState<"changes" | "checks">("changes");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const [branchContext, setBranchContext] = useState<HeaderBranchContext | null>(null);
+  const [targetBranch, setTargetBranch] = useState<string | null>(null);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const [branchSearch, setBranchSearch] = useState("");
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
   const optimisticRevisionRef = useRef(0);
 
@@ -108,6 +125,60 @@ export default function WorkspaceChangesPanel({
     setSelectedPaths((current) => current.filter((path) => existingPaths.has(path)));
     setLastSelectedPath((current) => (current && existingPaths.has(current) ? current : null));
   }, [entriesData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<HeaderBranchContext>("header_branch_context", { workspaceId })
+      .then((ctx) => {
+        if (!cancelled) {
+          setBranchContext(ctx);
+          setTargetBranch(resolveWorkspaceTargetBranch(ctx, workspaceId));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBranchContext(null);
+          setTargetBranch(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!branchPickerOpen) setBranchSearch("");
+  }, [branchPickerOpen]);
+
+  const branchOptions = useMemo(() => {
+    const currentBranch = branchContext?.currentBranch ?? "";
+    const options = Array.from(new Set(branchContext?.availableBranches ?? []));
+    return options
+      .filter((branch) => branch && branch !== "origin" && (branch === "main" || branch !== currentBranch))
+      .sort((a, b) => {
+        if (a === "main") return -1;
+        if (b === "main") return 1;
+        return a.localeCompare(b, undefined, { sensitivity: "base" });
+      });
+  }, [branchContext?.availableBranches, branchContext?.currentBranch]);
+
+  const filteredBranchOptions = useMemo(() => {
+    const query = branchSearch.trim().toLowerCase();
+    if (!query) return branchOptions;
+    return branchOptions.filter((branch) => branch.toLowerCase().includes(query));
+  }, [branchOptions, branchSearch]);
+
+  const activeTargetBranch = targetBranch ?? branchContext?.defaultTargetBranch ?? null;
+
+  const handleSelectTargetBranch = useCallback(
+    (branch: string) => {
+      setTargetBranch(branch);
+      void persistWorkspaceTargetBranch(workspaceId, branch);
+      setBranchPickerOpen(false);
+      setBranchSearch("");
+    },
+    [workspaceId],
+  );
 
   const stagedList = useMemo(() => (entries ?? []).filter(hasStaged), [entries]);
   const unstagedList = useMemo(() => (entries ?? []).filter(hasUnstaged), [entries]);
@@ -299,7 +370,7 @@ export default function WorkspaceChangesPanel({
     setPrError(null);
     setPrSending(true);
     try {
-      const ctx = await gatherPrContext(workspaceId);
+      const ctx = await gatherPrContext(workspaceId, activeTargetBranch ?? undefined);
       const hasUncommittedChanges = (entries ?? []).length > 0;
       if (!ctx.hasCommits && !hasUncommittedChanges) {
         setPrError(`No commits or changes ahead of ${ctx.baseBranch}.`);
@@ -334,6 +405,7 @@ export default function WorkspaceChangesPanel({
     }
   }, [
     entries,
+    activeTargetBranch,
     layoutCommands,
     projectRuntime,
     terminalCommands,
@@ -393,6 +465,72 @@ export default function WorkspaceChangesPanel({
           Checks
         </button>
       </div>
+
+      {branchContext && branchOptions.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--theme-border)] px-2 py-1">
+          <span className="text-[11px] text-[var(--theme-text-faint)]">Base:</span>
+          <DropdownMenu open={branchPickerOpen} onOpenChange={setBranchPickerOpen}>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="max-w-full gap-1 rounded-sm px-1.5 py-0.5 font-normal text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
+                  disabled={branchOptions.length === 0}
+                />
+              }
+              title="Select target branch"
+              aria-label="Select target branch"
+            >
+              <span className="truncate font-mono text-[11px]">
+                {formatTargetBranch(activeTargetBranch)}
+              </span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                strokeWidth={1.8}
+                className="size-3 shrink-0"
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64 min-w-64 p-0">
+              <div className="border-b border-[var(--theme-border)] p-1">
+                <Input
+                  value={branchSearch}
+                  autoFocus
+                  placeholder="Search branches"
+                  onChange={(event) => setBranchSearch(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  className="h-7 border-[var(--theme-border)] bg-[var(--theme-panel)]"
+                />
+              </div>
+              <div
+                className="max-h-72 overflow-y-auto overscroll-contain p-1"
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
+                {filteredBranchOptions.length > 0 ? (
+                  filteredBranchOptions.map((branch) => (
+                    <DropdownMenuItem
+                      key={branch}
+                      onClick={() => handleSelectTargetBranch(branch)}
+                      className={`cursor-pointer font-mono text-[11px] hover:bg-accent hover:text-accent-foreground${
+                        branch === activeTargetBranch
+                          ? " bg-[var(--theme-panel-hover)] text-[var(--theme-text)]"
+                          : ""
+                      }`}
+                    >
+                      {branch}
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">
+                    No matching branches
+                  </div>
+                )}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
         <span className="truncate text-xs font-medium text-[var(--theme-text-subtle)]">

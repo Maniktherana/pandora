@@ -132,6 +132,10 @@ fn main() {
 
     let pandora_home = git::pandora_home();
     let db = AppDatabase::open(&pandora_home).expect("Failed to open database");
+    // Migrate old per-runtime SQLite DB files into the global app-state.db.
+    if let Err(e) = db.migrate_runtime_dbs(&pandora_home) {
+        eprintln!("Warning: runtime DB migration failed: {e}");
+    }
     let db = Arc::new(db);
 
     tauri::Builder::default()
@@ -186,6 +190,7 @@ fn main() {
             // Project settings
             commands::get_project_settings,
             commands::save_project_settings,
+            commands::set_workspace_target_branch,
             // Workspace commands
             commands::list_workspaces,
             commands::create_workspace,
@@ -214,7 +219,9 @@ fn main() {
             commands::create_workspace_directory,
             commands::scm_git_diff,
             commands::scm_read_git_blob,
+            commands::scm_read_git_compare_blob,
             commands::scm_status,
+            commands::scm_branch_changes,
             commands::scm_line_stats,
             commands::scm_path_line_stats,
             commands::scm_path_line_stats_bulk,
@@ -238,6 +245,7 @@ fn main() {
             commands::pr_check_status,
             commands::pr_write_instruction,
             commands::pr_link,
+            commands::can_archive_workspace,
             commands::archive_workspace,
             commands::restore_workspace,
             commands::copy_into_workspace,

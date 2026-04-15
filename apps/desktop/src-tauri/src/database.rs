@@ -56,6 +56,7 @@ impl AppDatabase {
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
               last_opened_at TEXT,
+              target_branch TEXT,
               FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
@@ -83,6 +84,44 @@ impl AppDatabase {
               updated_at TEXT NOT NULL DEFAULT '',
               FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS slot_definitions (
+              id TEXT PRIMARY KEY,
+              runtime_id TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              name TEXT NOT NULL,
+              autostart INTEGER NOT NULL DEFAULT 0,
+              presentation_mode TEXT NOT NULL DEFAULT 'single',
+              primary_session_def_id TEXT,
+              persisted INTEGER NOT NULL DEFAULT 1,
+              sort_order INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS session_definitions (
+              id TEXT PRIMARY KEY,
+              runtime_id TEXT NOT NULL,
+              slot_id TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              name TEXT NOT NULL,
+              command TEXT NOT NULL,
+              cwd TEXT,
+              port INTEGER,
+              env_overrides TEXT NOT NULL DEFAULT '{}',
+              restart_policy TEXT NOT NULL DEFAULT 'manual',
+              pause_supported INTEGER NOT NULL DEFAULT 0,
+              resume_supported INTEGER NOT NULL DEFAULT 0,
+              FOREIGN KEY(slot_id) REFERENCES slot_definitions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS runtime_metadata (
+              runtime_id TEXT NOT NULL,
+              key TEXT NOT NULL,
+              value TEXT NOT NULL,
+              PRIMARY KEY (runtime_id, key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_slots_runtime ON slot_definitions(runtime_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_runtime ON session_definitions(runtime_id);
             ",
         )
         .map_err(|e| e.to_string())?;
@@ -122,6 +161,27 @@ impl AppDatabase {
             )
             .map_err(|e| e.to_string())?;
         }
+        if !cols.iter().any(|c| c == "deleting_at") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN deleting_at TEXT",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if !cols.iter().any(|c| c == "created_by_pandora") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN created_by_pandora INTEGER NOT NULL DEFAULT 1",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if !cols.iter().any(|c| c == "target_branch") {
+            conn.execute("ALTER TABLE workspaces ADD COLUMN target_branch TEXT", [])
+                .map_err(|e| e.to_string())?;
+        }
+        // Startup sweep: clear stale deleting_at from interrupted operations (crash recovery).
+        conn.execute("UPDATE workspaces SET deleting_at = NULL WHERE deleting_at IS NOT NULL", [])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -201,11 +261,11 @@ impl AppDatabase {
     pub fn load_workspaces(&self, project_id: Option<&str>) -> Vec<WorkspaceRecord> {
         let conn = self.conn.lock().unwrap();
         let sql = if project_id.is_some() {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
-             FROM workspaces WHERE project_id = ?1 ORDER BY created_at DESC"
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state, deleting_at, created_by_pandora, target_branch
+             FROM workspaces WHERE project_id = ?1 AND deleting_at IS NULL ORDER BY created_at DESC"
         } else {
-            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state
-             FROM workspaces ORDER BY created_at DESC"
+            "SELECT id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state, deleting_at, created_by_pandora, target_branch
+             FROM workspaces WHERE deleting_at IS NULL ORDER BY created_at DESC"
         };
 
         let mut stmt = match conn.prepare(sql) {
@@ -237,6 +297,9 @@ impl AppDatabase {
                 pr_url: row.get(14)?,
                 pr_number: row.get(15)?,
                 pr_state: row.get(16)?,
+                deleting_at: row.get(17)?,
+                created_by_pandora: row.get::<_, i32>(18).unwrap_or(1) == 1,
+                target_branch: row.get(19)?,
             })
         };
 
@@ -255,8 +318,8 @@ impl AppDatabase {
     pub fn upsert_workspace(&self, w: &WorkspaceRecord) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            "INSERT INTO workspaces (id, project_id, name, git_branch_name, git_worktree_owner, git_worktree_slug, worktree_path, workspace_context_subpath, workspace_kind, status, failure_message, created_at, updated_at, last_opened_at, pr_url, pr_number, pr_state, deleting_at, created_by_pandora, target_branch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT(id) DO UPDATE SET
                project_id = excluded.project_id,
                name = excluded.name,
@@ -272,7 +335,9 @@ impl AppDatabase {
                last_opened_at = excluded.last_opened_at,
                pr_url = excluded.pr_url,
                pr_number = excluded.pr_number,
-               pr_state = excluded.pr_state",
+               pr_state = excluded.pr_state,
+               created_by_pandora = excluded.created_by_pandora,
+               target_branch = excluded.target_branch",
             params![
                 w.id,
                 w.project_id,
@@ -291,7 +356,24 @@ impl AppDatabase {
                 w.pr_url,
                 w.pr_number,
                 w.pr_state,
+                w.deleting_at,
+                if w.created_by_pandora { 1 } else { 0 },
+                w.target_branch,
             ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_workspace_target_branch(
+        &self,
+        id: &str,
+        target_branch: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET target_branch = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, target_branch, now_iso8601()],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -328,6 +410,26 @@ impl AppDatabase {
         conn.execute(
             "UPDATE workspaces SET worktree_deleted = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, deleted as i32, now_iso8601()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn mark_workspace_deleting(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET deleting_at = ?2 WHERE id = ?1",
+            params![id, now_iso8601()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn clear_workspace_deleting(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET deleting_at = NULL WHERE id = ?1",
+            params![id],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -462,6 +564,165 @@ impl AppDatabase {
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Delete all slot_definitions, session_definitions, and runtime_metadata for a runtime_id.
+    pub fn remove_runtime_data(&self, runtime_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM session_definitions WHERE runtime_id = ?1",
+            params![runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM slot_definitions WHERE runtime_id = ?1",
+            params![runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM runtime_metadata WHERE runtime_id = ?1",
+            params![runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Migrate data from old per-runtime DB files into the global schema.
+    /// Runs once — skips if already migrated.
+    pub fn migrate_runtime_dbs(&self, pandora_home: &str) -> Result<(), String> {
+        if self.load_ui_state("runtime_dbs_migrated").is_some() {
+            return Ok(());
+        }
+
+        let runtime_dir = PathBuf::from(pandora_home).join("runtime");
+        if !runtime_dir.exists() {
+            self.save_ui_state("runtime_dbs_migrated", Some("1"));
+            return Ok(());
+        }
+
+        let entries = std::fs::read_dir(&runtime_dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("runtime-") || !name.ends_with(".db") {
+                continue;
+            }
+            let runtime_id = name
+                .strip_prefix("runtime-")
+                .and_then(|s| s.strip_suffix(".db"))
+                .unwrap_or("")
+                .to_string();
+            if runtime_id.is_empty() {
+                continue;
+            }
+
+            let old_db_path = entry.path();
+            let old_conn = match Connection::open(&old_db_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // Migrate slot_definitions
+            if let Ok(mut stmt) = old_conn.prepare(
+                "SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order FROM slot_definitions",
+            ) {
+                let conn = self.conn.lock().unwrap();
+                let rows: Vec<_> = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i32>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, i32>(6)?,
+                            row.get::<_, i32>(7)?,
+                        ))
+                    })
+                    .map(|r| r.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default();
+                for (id, kind, name, autostart, pres_mode, primary_sid, persisted, sort_order) in rows {
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO slot_definitions (id, runtime_id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![id, runtime_id, kind, name, autostart, pres_mode, primary_sid, persisted, sort_order],
+                    );
+                }
+            }
+
+            // Migrate session_definitions
+            if let Ok(mut stmt) = old_conn.prepare(
+                "SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported FROM session_definitions",
+            ) {
+                let conn = self.conn.lock().unwrap();
+                let rows: Vec<_> = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<i32>>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, i32>(9)?,
+                            row.get::<_, i32>(10)?,
+                        ))
+                    })
+                    .map(|r| r.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default();
+                for (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_sup, resume_sup) in rows {
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO session_definitions (id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        params![id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_sup, resume_sup],
+                    );
+                }
+            }
+
+            // Migrate runtime_metadata
+            if let Ok(mut stmt) = old_conn.prepare("SELECT key, value FROM runtime_metadata") {
+                let conn = self.conn.lock().unwrap();
+                let rows: Vec<_> = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map(|r| r.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default();
+                for (key, value) in rows {
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO runtime_metadata (runtime_id, key, value) VALUES (?1, ?2, ?3)",
+                        params![runtime_id, key, value],
+                    );
+                }
+            }
+
+            drop(old_conn);
+
+            // Remove old DB files
+            let _ = std::fs::remove_file(&old_db_path);
+            let _ = std::fs::remove_file(old_db_path.with_extension("db-wal"));
+            let _ = std::fs::remove_file(old_db_path.with_extension("db-shm"));
+        }
+
+        // Clean up runtime directory if empty
+        if let Ok(mut remaining) = std::fs::read_dir(&runtime_dir) {
+            if remaining.next().is_none() {
+                let _ = std::fs::remove_dir(&runtime_dir);
+            }
+        }
+
+        self.save_ui_state("runtime_dbs_migrated", Some("1"));
+        Ok(())
+    }
+
+    /// Returns the path to the global app-state.db file.
+    pub fn db_path(pandora_home: &str) -> PathBuf {
+        PathBuf::from(pandora_home).join("app").join("app-state.db")
     }
 }
 

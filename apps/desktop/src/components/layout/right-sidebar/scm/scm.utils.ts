@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CheckRun,
+  ScmBranchChange,
   ScmDiffResult,
   ScmGitBlobSource,
   ScmLineStats,
@@ -24,6 +25,13 @@ export function scmGitDiff(
 
 export function scmStatus(worktreePath: string): Promise<ScmStatusEntry[]> {
   return invoke<ScmStatusEntry[]>("scm_status", { worktreePath });
+}
+
+export function scmBranchChanges(
+  worktreePath: string,
+  targetBranch: string,
+): Promise<ScmBranchChange[]> {
+  return invoke<ScmBranchChange[]>("scm_branch_changes", { worktreePath, targetBranch });
 }
 
 export function scmLineStats(worktreePath: string): Promise<ScmLineStats> {
@@ -255,6 +263,20 @@ export function scmReadGitBlob(
   source: ScmGitBlobSource,
 ): Promise<string> {
   return invoke<string>("scm_read_git_blob", { worktreePath, relativePath, source });
+}
+
+export function scmReadGitCompareBlob(
+  worktreePath: string,
+  relativePath: string,
+  targetBranch: string,
+  side: "base" | "head",
+): Promise<string> {
+  return invoke<string>("scm_read_git_compare_blob", {
+    worktreePath,
+    relativePath,
+    targetBranch,
+    side,
+  });
 }
 
 export function scmPush(worktreePath: string): Promise<string> {

@@ -11,7 +11,6 @@ import ErrorBoundary from "@/components/error-boundary";
 import DotGridLoader from "@/components/dot-grid-loader";
 import AppHeader from "@/components/layout/app-header";
 import SettingsPanel from "@/components/settings/settings-panel";
-import ProjectSettingsPanel from "@/components/settings/project-settings-panel";
 import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
@@ -40,7 +39,7 @@ export default function App() {
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const [rightSidebarMode, setRightSidebarMode] = useState<LeftPanelMode>("files");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [projectSettingsProjectId, setProjectSettingsProjectId] = useState<string | null>(null);
+  const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null);
   const bottomPanelRef = useRef<ImperativePanelHandle>(null);
   const workspaceFileTreeSplitRef = useRef<HTMLDivElement>(null);
   const sidebarResizeHandleRef = useRef<HTMLDivElement>(null);
@@ -164,6 +163,7 @@ export default function App() {
 
   const handleOpenSettings = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(null);
+    setSettingsProjectId(null);
     setSettingsOpen(true);
   }, [workspaceCommands]);
 
@@ -175,15 +175,11 @@ export default function App() {
   const handleOpenProjectSettings = useCallback(
     (projectId: string) => {
       workspaceCommands.setLayoutTargetRuntimeId(null);
-      setProjectSettingsProjectId(projectId);
+      setSettingsProjectId(projectId);
+      setSettingsOpen(true);
     },
     [workspaceCommands],
   );
-
-  const handleCloseProjectSettings = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
-    setProjectSettingsProjectId(null);
-  }, [workspaceCommands]);
 
   const handleSelectRightSidebarMode = useCallback(
     (mode: LeftPanelMode) => {
@@ -244,13 +240,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      {sidebarVisible && !settingsOpen && !projectSettingsProjectId && (
+      {sidebarVisible && !settingsOpen && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
           <LeftSidebar
             booting={booting}
             onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)}
             onOpenSettings={handleOpenSettings}
-            onOpenProjectSettings={handleOpenProjectSettings}
           />
           <div
             ref={sidebarResizeHandleRef}
@@ -311,7 +306,7 @@ export default function App() {
       )}
 
       <div
-        className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen || projectSettingsProjectId ? "bg-transparent" : "bg-[var(--theme-bg)]"}`}
+        className={`flex h-full min-w-0 flex-1 flex-col ${settingsOpen ? "bg-transparent" : "bg-[var(--theme-bg)]"}`}
       >
         {settingsOpen ? (
           <ErrorBoundary name="settings">
@@ -320,14 +315,7 @@ export default function App() {
               sidebarWidth={sidebarWidth}
               activeWorkspaceId={selectedWsId ?? null}
               activeWorkspacePath={selectedWs?.status === "ready" ? selectedWs.worktreePath : null}
-            />
-          </ErrorBoundary>
-        ) : projectSettingsProjectId ? (
-          <ErrorBoundary name="project-settings">
-            <ProjectSettingsPanel
-              projectId={projectSettingsProjectId}
-              onClose={handleCloseProjectSettings}
-              sidebarWidth={sidebarWidth}
+              initialProjectId={settingsProjectId}
             />
           </ErrorBoundary>
         ) : (

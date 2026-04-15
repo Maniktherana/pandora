@@ -4,16 +4,20 @@ import { ArrowLeft02Icon, GitBranchIcon, PaintBucketIcon } from "@hugeicons/core
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/shared/utils";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useDesktopView } from "@/hooks/use-desktop-view";
 import AppearanceSettings from "./appearance-settings";
 import GitSettings from "./git-settings";
+import ProjectSettings from "./project-settings";
 
-type Tab = "appearance" | "git";
+type StaticTab = "appearance" | "git";
+type Tab = StaticTab | `project:${string}`;
 
 interface SettingsPanelProps {
   onClose: () => void;
   sidebarWidth: number;
   activeWorkspaceId: string | null;
   activeWorkspacePath: string | null;
+  initialProjectId?: string | null;
 }
 
 export default function SettingsPanel({
@@ -21,16 +25,30 @@ export default function SettingsPanel({
   sidebarWidth,
   activeWorkspaceId,
   activeWorkspacePath,
+  initialProjectId,
 }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("appearance");
+  const [activeTab, setActiveTab] = useState<Tab>(
+    initialProjectId ? `project:${initialProjectId}` : "appearance",
+  );
   const panelRef = useRef<HTMLDivElement>(null);
   const workspaceCommands = useWorkspaceActions();
+  const projects = useDesktopView((view) => view.projects);
+  const activeProjectId = activeTab.startsWith("project:")
+    ? activeTab.slice("project:".length)
+    : null;
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
 
   useEffect(() => {
     panelRef.current?.focus();
   }, []);
 
-  const tabs: { value: Tab; label: string; icon: IconSvgElement }[] = [
+  useEffect(() => {
+    if (initialProjectId) {
+      setActiveTab(`project:${initialProjectId}`);
+    }
+  }, [initialProjectId]);
+
+  const tabs: { value: StaticTab; label: string; icon: IconSvgElement }[] = [
     { value: "appearance", label: "Appearance", icon: PaintBucketIcon },
     { value: "git", label: "Git & Worktrees", icon: GitBranchIcon },
   ];
@@ -88,6 +106,31 @@ export default function SettingsPanel({
               <span>{tab.label}</span>
             </button>
           ))}
+          {projects.length > 0 && (
+            <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--theme-text-faint)]">
+              Projects
+            </div>
+          )}
+          {projects.map((project) => {
+            const value = `project:${project.id}` as const;
+            return (
+              <button
+                key={project.id}
+                onClick={() => setActiveTab(value)}
+                className={cn(
+                  "flex gap-3 h-9 w-full items-center rounded-md px-2.5 text-left text-sm transition-colors",
+                  activeTab === value
+                    ? "bg-[var(--theme-panel-hover)] font-medium text-[var(--theme-text)]"
+                    : "text-[var(--theme-text-subtle)] hover:bg-[var(--theme-panel-hover)]",
+                )}
+              >
+                <span className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded bg-[var(--theme-panel-elevated)] text-[10px] font-bold text-[var(--theme-text)]">
+                  {project.displayName.charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 truncate">{project.displayName}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Sidebar border — same as workspace sidebar resize handle visual */}
@@ -105,6 +148,7 @@ export default function SettingsPanel({
             />
           )}
           {activeTab === "git" && <GitSettings />}
+          {activeProject && <ProjectSettings project={activeProject} />}
         </div>
       </div>
     </div>

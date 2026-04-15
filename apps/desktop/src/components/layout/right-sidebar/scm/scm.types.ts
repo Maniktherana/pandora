@@ -24,6 +24,11 @@ export type ScmPathLineStats = ScmLineStats & {
   path: string;
 };
 
+export type ScmBranchChange = ScmStatusEntry &
+  ScmLineStats & {
+    untracked: false;
+  };
+
 export type TreeScmTone =
   | "added"
   | "modified"

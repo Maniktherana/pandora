@@ -101,6 +101,19 @@ pub fn save_project_settings(
     db.0.upsert_project_settings(&settings)
 }
 
+#[tauri::command]
+pub fn set_workspace_target_branch(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+    target_branch: Option<String>,
+) -> Result<(), String> {
+    let normalized = target_branch
+        .map(|branch| branch.trim().trim_start_matches("origin/").to_string())
+        .filter(|branch| !branch.is_empty() && branch != "origin");
+    db.0
+        .update_workspace_target_branch(&workspace_id, normalized.as_deref())
+}
+
 // ─── Workspace commands ───
 
 #[tauri::command]
@@ -281,6 +294,8 @@ pub async fn remove_workspace(
         }
     }
 
+    // Clean up runtime tables for this workspace.
+    let _ = db.0.remove_runtime_data(&workspace_id);
     db.0.remove_workspace(&workspace_id)?;
     Ok(())
 }
@@ -687,8 +702,32 @@ pub async fn scm_read_git_blob(
 }
 
 #[tauri::command]
+pub async fn scm_read_git_compare_blob(
+    worktree_path: String,
+    relative_path: String,
+    target_branch: String,
+    side: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        git::git_compare_blob_text(&worktree_path, &relative_path, &target_branch, &side)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, String> {
     tokio::task::spawn_blocking(move || git::git_status(&worktree_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scm_branch_changes(
+    worktree_path: String,
+    target_branch: String,
+) -> Result<Vec<git::ScmBranchChange>, String> {
+    tokio::task::spawn_blocking(move || git::git_branch_changes(&worktree_path, &target_branch))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -812,15 +851,17 @@ pub async fn scm_check_runs(
 pub async fn pr_gather_context(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
+    target_branch: Option<String>,
 ) -> Result<git::PrContext, String> {
-    let worktree_path = db
+    let workspace = db
         .0
         .load_workspaces(None)
         .into_iter()
         .find(|w| w.id == workspace_id)
-        .ok_or("Workspace not found")?
-        .worktree_path;
-    tokio::task::spawn_blocking(move || git::gather_pr_context(&worktree_path))
+        .ok_or("Workspace not found")?;
+    let worktree_path = workspace.worktree_path;
+    let target_branch = target_branch.or(workspace.target_branch);
+    tokio::task::spawn_blocking(move || git::gather_pr_context(&worktree_path, target_branch))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -836,6 +877,7 @@ pub async fn header_branch_context(
         .into_iter()
         .find(|w| w.id == workspace_id)
         .ok_or("Workspace not found")?;
+    let target_branch = workspace.target_branch.clone();
     let owner = db
         .0
         .load_projects()
@@ -845,7 +887,7 @@ pub async fn header_branch_context(
         .or_else(|| git::resolve_remote_owner(&workspace.worktree_path));
     let worktree_path = workspace.worktree_path;
     tokio::task::spawn_blocking(move || {
-        git::gather_header_branch_context(&worktree_path, owner)
+        git::gather_header_branch_context(&worktree_path, owner, target_branch)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -991,6 +1033,49 @@ pub async fn open_in_app(path: String, app_id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanArchiveResult {
+    pub can_archive: bool,
+    pub has_uncommitted_changes: bool,
+    pub has_unpushed_commits: bool,
+}
+
+#[tauri::command]
+pub async fn can_archive_workspace(
+    db: tauri::State<'_, DbState>,
+    workspace_id: String,
+) -> Result<CanArchiveResult, String> {
+    let workspaces = db.0.load_workspaces(None);
+    let workspace = workspaces
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or("Workspace not found")?;
+
+    let wt_path = workspace.worktree_path.clone();
+    let (has_uncommitted, has_unpushed) = tokio::task::spawn_blocking(move || {
+        let uncommitted = Command::new("git")
+            .args(["-C", &wt_path, "status", "--porcelain"])
+            .output()
+            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+            .unwrap_or(false);
+        let unpushed = Command::new("git")
+            .args(["-C", &wt_path, "log", "@{u}..HEAD", "--oneline"])
+            .output()
+            .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+            .unwrap_or(false);
+        (uncommitted, unpushed)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(CanArchiveResult {
+        can_archive: true,
+        has_uncommitted_changes: has_uncommitted,
+        has_unpushed_commits: has_unpushed,
+    })
+}
+
 #[tauri::command]
 pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
@@ -1006,8 +1091,39 @@ pub async fn archive_workspace(
         .find(|w| w.id == workspace_id)
         .ok_or("Workspace not found")?;
 
+    // Optimistic UI: mark as deleting so it vanishes from queries immediately.
+    db.0.mark_workspace_deleting(&workspace_id)?;
+
+    let result = archive_workspace_inner(
+        &db, &daemon_state, &workspace, delete_worktree, delete_local_branch, run_teardown,
+    )
+    .await;
+
+    match result {
+        Ok(()) => {
+            // Finalize: clear deleting_at and set status to archived.
+            db.0.clear_workspace_deleting(&workspace_id)?;
+            db.0.update_workspace_status(&workspace_id, "archived")?;
+            Ok(())
+        }
+        Err(e) => {
+            // Restore visibility on failure.
+            let _ = db.0.clear_workspace_deleting(&workspace_id);
+            Err(e)
+        }
+    }
+}
+
+async fn archive_workspace_inner(
+    db: &tauri::State<'_, DbState>,
+    daemon_state: &tauri::State<'_, DaemonState>,
+    workspace: &WorkspaceRecord,
+    delete_worktree: bool,
+    delete_local_branch: bool,
+    run_teardown: bool,
+) -> Result<(), String> {
     // Stop runtime
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
+    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace.id).await;
 
     let projects = db.0.load_projects();
     let project = projects
@@ -1025,7 +1141,7 @@ pub async fn archive_workspace(
                 let worktree_path = workspace.worktree_path.clone();
                 let git_root = proj.git_root_path.clone();
                 let ws_name = workspace.name.clone();
-                let ws_id_clone = workspace_id.clone();
+                let ws_id_clone = workspace.id.clone();
                 tokio::task::spawn_blocking(move || {
                     for script in &scripts {
                         let mut cmd = Command::new("/bin/bash");
@@ -1075,12 +1191,12 @@ pub async fn archive_workspace(
             let ws = workspace.clone();
             let proj_clone = proj.clone();
             tokio::task::spawn_blocking(move || {
-                let _ = git::remove_worktree(&ws, &proj_clone);
+                git::remove_worktree(&ws, &proj_clone)
             })
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())??;
         }
-        db.0.update_worktree_deleted(&workspace_id, true)?;
+        db.0.update_worktree_deleted(&workspace.id, true)?;
     }
 
     // Delete local branch if requested
@@ -1096,8 +1212,6 @@ pub async fn archive_workspace(
         }
     }
 
-    // Mark as archived (keep DB record)
-    db.0.update_workspace_status(&workspace_id, "archived")?;
     Ok(())
 }
 

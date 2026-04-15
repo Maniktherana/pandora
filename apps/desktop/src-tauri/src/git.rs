@@ -366,6 +366,7 @@ pub fn make_linked_workspace(
     existing_workspaces: &[WorkspaceRecord],
 ) -> Result<WorkspaceRecord, String> {
     let branch = current_branch(&project.git_root_path)?;
+    let target_branch = default_branch(&project.git_root_path);
     let identity = generate_linked_workspace_identity(existing_workspaces);
     let now = now_iso8601();
 
@@ -387,6 +388,9 @@ pub fn make_linked_workspace(
         pr_url: None,
         pr_number: None,
         pr_state: None,
+        deleting_at: None,
+        created_by_pandora: true,
+        target_branch: Some(target_branch),
     })
 }
 
@@ -397,6 +401,7 @@ pub fn make_optimistic_workspace(
     let owner = resolve_remote_owner(&project.git_root_path).unwrap_or_else(|| "workspace".into());
     let identity = generate_worktree_identity(project, &owner, existing_workspaces);
     let branch = format!("{}/{}", owner, identity.slug);
+    let target_branch = current_branch(&project.git_root_path).ok();
     let wt_path = worktree_path(&project.id, &owner, &identity.slug);
     let now = now_iso8601();
 
@@ -418,6 +423,9 @@ pub fn make_optimistic_workspace(
         pr_url: None,
         pr_number: None,
         pr_state: None,
+        deleting_at: None,
+        created_by_pandora: true,
+        target_branch,
     })
 }
 
@@ -484,16 +492,73 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
     if workspace.workspace_kind == WorkspaceKind::Linked {
         return Ok(());
     }
-    let _ = run_git(&[
-        "-C",
-        &project.git_root_path,
-        "worktree",
-        "remove",
-        "--force",
-        &workspace.worktree_path,
-    ]);
-    let _ = std::fs::remove_dir_all(&workspace.worktree_path);
-    Ok(())
+
+    // Safety: refuse to delete worktrees not created by pandora.
+    if !workspace.created_by_pandora {
+        return Err(format!(
+            "Refusing to delete worktree '{}': not created by Pandora",
+            workspace.worktree_path
+        ));
+    }
+
+    let wt = std::path::Path::new(&workspace.worktree_path);
+    if !wt.exists() {
+        // Already gone — just prune stale git metadata.
+        let _ = run_git(&["-C", &project.git_root_path, "worktree", "prune"]);
+        return Ok(());
+    }
+
+    // Non-blocking removal: rename to a temp sibling, then prune, then background rm.
+    let parent = wt
+        .parent()
+        .ok_or_else(|| "Cannot determine parent directory for worktree".to_string())?;
+    let temp_name = format!(".pandora-delete-{}", uuid::Uuid::new_v4());
+    let temp_path = parent.join(&temp_name);
+
+    match std::fs::rename(wt, &temp_path) {
+        Ok(()) => {
+            // Prune git worktree metadata (fast, no disk IO on the tree itself).
+            let _ = run_git(&["-C", &project.git_root_path, "worktree", "prune"]);
+
+            // Background rm — non-blocking.
+            let temp_str = temp_path.to_string_lossy().into_owned();
+            std::thread::spawn(move || {
+                let _ = std::process::Command::new("/bin/rm")
+                    .args(["-rf", &temp_str])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            });
+            Ok(())
+        }
+        Err(e) if e.raw_os_error() == Some(18 /* EXDEV */) => {
+            // Cross-filesystem: fall back to synchronous removal.
+            let _ = run_git(&[
+                "-C",
+                &project.git_root_path,
+                "worktree",
+                "remove",
+                "--force",
+                &workspace.worktree_path,
+            ]);
+            let _ = std::fs::remove_dir_all(&workspace.worktree_path);
+            Ok(())
+        }
+        Err(e) => {
+            // Rename failed for another reason — fall back.
+            eprintln!("Worktree rename failed ({}), falling back to synchronous removal", e);
+            let _ = run_git(&[
+                "-C",
+                &project.git_root_path,
+                "worktree",
+                "remove",
+                "--force",
+                &workspace.worktree_path,
+            ]);
+            let _ = std::fs::remove_dir_all(&workspace.worktree_path);
+            Ok(())
+        }
+    }
 }
 
 fn run_git(args: &[&str]) -> Result<String, String> {
@@ -719,6 +784,18 @@ pub struct ScmLineStats {
 #[serde(rename_all = "camelCase")]
 pub struct ScmPathLineStats {
     pub path: String,
+    pub added: u64,
+    pub removed: u64,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmBranchChange {
+    pub path: String,
+    pub orig_path: Option<String>,
+    pub staged_kind: Option<String>,
+    pub worktree_kind: Option<String>,
+    pub untracked: bool,
     pub added: u64,
     pub removed: u64,
 }
@@ -954,6 +1031,76 @@ pub fn git_path_line_stats_bulk(
     Ok(results)
 }
 
+pub fn git_branch_changes(
+    worktree_path: &str,
+    target_branch: &str,
+) -> Result<Vec<ScmBranchChange>, String> {
+    verify_git_worktree(worktree_path)?;
+    let base_ref = compare_ref_for_branch(worktree_path, target_branch);
+    let range = format!("{base_ref}...HEAD");
+
+    let name_status = run_git(&[
+        "-C",
+        worktree_path,
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-status",
+        "-M",
+        &range,
+        "--",
+    ])
+    .unwrap_or_default();
+
+    let stats = parse_numstat_by_path(
+        &run_git(&[
+            "-C",
+            worktree_path,
+            "diff",
+            "--numstat",
+            &range,
+            "--",
+        ])
+        .unwrap_or_default(),
+    );
+    let stats_by_path: std::collections::HashMap<String, ScmPathLineStats> =
+        stats.into_iter().map(|stat| (stat.path.clone(), stat)).collect();
+
+    let mut changes = Vec::new();
+    for line in name_status.lines() {
+        let mut parts = line.split('\t');
+        let Some(status_raw) = parts.next() else {
+            continue;
+        };
+        let status = status_raw.chars().next().unwrap_or('M').to_string();
+        let (orig_path, path) = if status_raw.starts_with('R') || status_raw.starts_with('C') {
+            let Some(orig) = parts.next() else {
+                continue;
+            };
+            let Some(path) = parts.next() else {
+                continue;
+            };
+            (Some(orig.to_string()), path.to_string())
+        } else {
+            let Some(path) = parts.next() else {
+                continue;
+            };
+            (None, path.to_string())
+        };
+        let stat = stats_by_path.get(&path);
+        changes.push(ScmBranchChange {
+            path,
+            orig_path,
+            staged_kind: Some(status),
+            worktree_kind: None,
+            untracked: false,
+            added: stat.map(|s| s.added).unwrap_or(0),
+            removed: stat.map(|s| s.removed).unwrap_or(0),
+        });
+    }
+    Ok(changes)
+}
+
 fn dequote_git_path(raw: &str) -> String {
     let s = raw.trim();
     if !(s.starts_with('"') && s.ends_with('"') && s.len() >= 2) {
@@ -1084,6 +1231,21 @@ pub fn git_read_blob_text(worktree_path: &str, object_spec: &str) -> Result<Stri
     }
     String::from_utf8(bytes)
         .map_err(|_| "File is binary or not valid UTF-8 — use the terminal for a raw diff".into())
+}
+
+pub fn git_compare_blob_text(
+    worktree_path: &str,
+    relative_path: &str,
+    target_branch: &str,
+    side: &str,
+) -> Result<String, String> {
+    sanitize_repo_relative_path(relative_path)?;
+    let object_ref = match side {
+        "base" => compare_ref_for_branch(worktree_path, target_branch),
+        "head" => "HEAD".to_string(),
+        _ => return Err(r#"Invalid side: use "base" or "head""#.into()),
+    };
+    git_read_blob_text(worktree_path, &format!("{object_ref}:{relative_path}"))
 }
 
 pub fn git_status(worktree_path: &str) -> Result<Vec<ScmStatusEntry>, String> {
@@ -1220,7 +1382,7 @@ fn default_branch(worktree_path: &str) -> String {
             return branch.to_string();
         }
     }
-    // Fallback: check if main exists, else master
+    // Fallback: check common local defaults, then the current branch.
     if run_git(&[
         "-C",
         worktree_path,
@@ -1232,7 +1394,35 @@ fn default_branch(worktree_path: &str) -> String {
     {
         return "main".into();
     }
-    "master".into()
+    if run_git(&[
+        "-C",
+        worktree_path,
+        "rev-parse",
+        "--verify",
+        "refs/heads/master",
+    ])
+    .is_ok()
+    {
+        return "master".into();
+    }
+    current_branch(worktree_path).unwrap_or_else(|_| "main".into())
+}
+
+fn normalize_target_branch(raw: &str) -> Option<String> {
+    let branch = normalize_branch_name(raw)?;
+    if branch == "origin" {
+        return None;
+    }
+    Some(branch)
+}
+
+fn compare_ref_for_branch(worktree_path: &str, branch: &str) -> String {
+    let normalized = normalize_target_branch(branch).unwrap_or_else(|| default_branch(worktree_path));
+    let remote_ref = format!("refs/remotes/origin/{normalized}");
+    if run_git(&["-C", worktree_path, "rev-parse", "--verify", &remote_ref]).is_ok() {
+        return format!("origin/{normalized}");
+    }
+    normalized
 }
 
 fn normalize_branch_name(raw: &str) -> Option<String> {
@@ -1281,22 +1471,28 @@ fn list_available_branches(
     if !default_target_branch.trim().is_empty() {
         branches.insert(default_target_branch.trim().to_string());
     }
-    branches.insert("main".to_string());
 
     Ok(branches.into_iter().collect())
 }
 
-pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
+pub fn gather_pr_context(
+    worktree_path: &str,
+    target_branch: Option<String>,
+) -> Result<PrContext, String> {
     verify_git_worktree(worktree_path)?;
     let branch_name = current_branch(worktree_path)?;
-    let base_branch = default_branch(worktree_path);
+    let base_branch = target_branch
+        .as_deref()
+        .and_then(normalize_target_branch)
+        .unwrap_or_else(|| default_branch(worktree_path));
+    let base_ref = compare_ref_for_branch(worktree_path, &base_branch);
     let is_default_branch = branch_name == base_branch;
 
     let commit_log = run_git(&[
         "-C",
         worktree_path,
         "log",
-        &format!("{}..HEAD", base_branch),
+        &format!("{}..HEAD", base_ref),
         "--oneline",
     ])
     .unwrap_or_default()
@@ -1309,7 +1505,7 @@ pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
         "-C",
         worktree_path,
         "diff",
-        &format!("{}...HEAD", base_branch),
+        &format!("{}...HEAD", base_ref),
         "--stat",
         "--stat-count=50",
     ])
@@ -1330,10 +1526,14 @@ pub fn gather_pr_context(worktree_path: &str) -> Result<PrContext, String> {
 pub fn gather_header_branch_context(
     worktree_path: &str,
     owner: Option<String>,
+    target_branch: Option<String>,
 ) -> Result<HeaderBranchContext, String> {
     verify_git_worktree(worktree_path)?;
     let current_branch = current_branch(worktree_path)?;
-    let default_target_branch = "main".to_string();
+    let default_target_branch = target_branch
+        .as_deref()
+        .and_then(normalize_target_branch)
+        .unwrap_or_else(|| default_branch(worktree_path));
     let available_branches = list_available_branches(worktree_path, &default_target_branch)?;
 
     Ok(HeaderBranchContext {

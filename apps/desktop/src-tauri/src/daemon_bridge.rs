@@ -247,6 +247,7 @@ fn start_daemon_runtime(
                 ])
                 .env("PANDORA_PARENT_PID", pid.to_string())
                 .env("PANDORA_HOME", &pandora_home)
+                .env("PANDORA_DB_PATH", crate::database::AppDatabase::db_path(&pandora_home).to_string_lossy().as_ref())
                 .spawn()
             {
                 Ok((mut rx, child)) => {

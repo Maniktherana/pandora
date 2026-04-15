@@ -65,6 +65,7 @@ export default function DiffViewer({
   wrapLines: controlledWrapLines,
   reloadKey = 0,
   metrics,
+  targetBranch,
   onStatsChange,
 }: {
   workspaceRoot: string;
@@ -78,6 +79,7 @@ export default function DiffViewer({
   wrapLines?: boolean;
   reloadKey?: number;
   metrics?: VirtualFileMetrics;
+  targetBranch?: string | null;
   onStatsChange?: (stats: DiffViewerStats) => void;
 }) {
   const staged = source === "staged";
@@ -103,8 +105,8 @@ export default function DiffViewer({
   }, []);
 
   const diffQuery = useQuery({
-    queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source),
-    queryFn: () => fetchDiffContents(workspaceRoot, relativePath, source),
+    queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source, targetBranch),
+    queryFn: () => fetchDiffContents(workspaceRoot, relativePath, source, targetBranch),
     enabled: isActive,
     staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     gcTime: DIFF_CONTENTS_GC_TIME_MS,

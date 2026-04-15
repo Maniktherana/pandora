@@ -99,6 +99,9 @@ pub struct WorkspaceRecord {
     pub pr_url: Option<String>,
     pub pr_number: Option<i64>,
     pub pr_state: Option<String>,
+    pub deleting_at: Option<String>,
+    pub created_by_pandora: bool,
+    pub target_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

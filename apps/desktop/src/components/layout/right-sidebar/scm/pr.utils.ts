@@ -112,8 +112,11 @@ export function composePrInstruction(ctx: PrContext, hasUncommittedChanges: bool
   return lines.join("\n");
 }
 
-export async function gatherPrContext(workspaceId: string): Promise<PrContext> {
-  return invoke<PrContext>("pr_gather_context", { workspaceId });
+export async function gatherPrContext(
+  workspaceId: string,
+  targetBranch?: string | null,
+): Promise<PrContext> {
+  return invoke<PrContext>("pr_gather_context", { workspaceId, targetBranch });
 }
 
 export async function linkPr(workspaceId: string, prUrl: string, prNumber: number): Promise<void> {

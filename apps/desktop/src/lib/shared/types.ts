@@ -170,6 +170,9 @@ export interface WorkspaceRecord {
   prUrl: string | null;
   prNumber: number | null;
   prState: PrState | null;
+  deletingAt: string | null;
+  createdByPandora: boolean;
+  targetBranch: string | null;
 }
 
 export interface ProjectSettings {
@@ -185,7 +188,7 @@ export interface ProjectSettings {
 
 export type LayoutAxis = "horizontal" | "vertical";
 
-export type DiffSource = "working" | "staged";
+export type DiffSource = "working" | "staged" | "branch";
 
 export type PaneTab =
   | { kind: "terminal"; slotId: string }

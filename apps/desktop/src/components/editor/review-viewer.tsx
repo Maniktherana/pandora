@@ -10,7 +10,7 @@ import {
   type CSSProperties,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react";
 import PierreWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -23,7 +23,7 @@ import {
   PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
-import type { DiffSource, PrContext } from "@/lib/shared/types";
+import type { DiffSource, HeaderBranchContext } from "@/lib/shared/types";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ import {
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import {
   decorationForScmEntry,
+  scmBranchChanges,
   scmDiscardTracked,
   scmDiscardUntracked,
   scmStage,
@@ -50,6 +51,7 @@ import {
 } from "@/components/layout/right-sidebar/scm/scm.utils";
 import type {
   ScmLineStats,
+  ScmBranchChange,
   ScmStatusEntry,
   TreeScmDecoration,
 } from "@/components/layout/right-sidebar/scm/scm.types";
@@ -62,6 +64,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
 import { useReviewNavigationStore } from "@/state/review-navigation-store";
+import {
+  formatTargetBranch,
+  resolveWorkspaceTargetBranch,
+  WORKSPACE_TARGET_BRANCH_EVENT,
+  type WorkspaceTargetBranchEventDetail,
+} from "@/components/layout/right-sidebar/scm/target-branch";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
@@ -131,6 +139,7 @@ function hasUnstaged(entry: ScmStatusEntry): boolean {
 }
 
 function sourceForMode(mode: ReviewMode): DiffSource | null {
+  if (mode === "branch") return "branch";
   if (mode === "staged") return "staged";
   if (mode === "unstaged") return "working";
   return null;
@@ -202,6 +211,7 @@ type ReviewFileEntryProps = {
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
+  targetBranch?: string | null;
   isFirst: boolean;
   onToggle: (path: string, nextOpen: boolean) => void;
   onOpenFile: (path: string) => void;
@@ -217,6 +227,7 @@ type ReviewDiffBodyProps = {
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
+  targetBranch?: string | null;
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({
@@ -227,6 +238,7 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
   diffLayout,
   wrapLines,
   reloadKey,
+  targetBranch,
 }: ReviewDiffBodyProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [shouldMountDiff, setShouldMountDiff] = useState(false);
@@ -274,6 +286,7 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
           diffStyle={diffLayout}
           wrapLines={wrapLines}
           reloadKey={reloadKey}
+          targetBranch={targetBranch}
           metrics={REVIEW_DIFF_METRICS}
         />
       ) : (
@@ -300,6 +313,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   diffLayout,
   wrapLines,
   reloadKey,
+  targetBranch,
   isFirst,
   onToggle,
   onOpenFile,
@@ -334,40 +348,42 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
             <span>{fileName}</span>
           </span>
         </button>
-        <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity group-hover/review-card:pointer-events-auto group-hover/review-card:opacity-100">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
-            title="Open file"
-            onClick={() => onOpenFile(entry.path)}
-          >
-            <HugeiconsIcon icon={FilePlusIcon} strokeWidth={1.5} className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-warning)]"
-            title={mode === "staged" ? "Unstage" : "Revert"}
-            onClick={() => onRevert(entry)}
-            disabled={busy}
-          >
-            <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.5} className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
-            title="Stage"
-            onClick={() => onStage(entry)}
-            disabled={busy || !canStage}
-          >
-            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={1.5} className="size-3.5" />
-          </Button>
-        </div>
+        {mode !== "branch" ? (
+          <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity group-hover/review-card:pointer-events-auto group-hover/review-card:opacity-100">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
+              title="Open file"
+              onClick={() => onOpenFile(entry.path)}
+            >
+              <HugeiconsIcon icon={FilePlusIcon} strokeWidth={1.5} className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-warning)]"
+              title={mode === "staged" ? "Unstage" : "Revert"}
+              onClick={() => onRevert(entry)}
+              disabled={busy}
+            >
+              <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.5} className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-[var(--theme-text-subtle)] hover:text-[var(--theme-text)]"
+              title="Stage"
+              onClick={() => onStage(entry)}
+              disabled={busy || !canStage}
+            >
+              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={1.5} className="size-3.5" />
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-none items-center gap-1.5 whitespace-nowrap text-[11px]">
           {decoration.badge ? (
             <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="shrink-0" />
@@ -400,6 +416,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
           diffLayout={diffLayout}
           wrapLines={wrapLines}
           reloadKey={reloadKey}
+          targetBranch={targetBranch}
         />
       ) : null}
     </section>
@@ -418,12 +435,20 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
+  const [targetBranch, setTargetBranch] = useState<string | null>(workspace?.targetBranch ?? null);
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const reviewNavigationRequest = useReviewNavigationStore(
     (state) => state.requestByWorkspaceId[workspaceId] ?? null,
   );
   const clearReviewNavigation = useReviewNavigationStore((state) => state.clearReviewNavigation);
+  const { data: branchEntriesData = [], refetch: refetchBranchEntries } = useQuery({
+    queryKey: ["scm-branch-changes", workspaceRoot, targetBranch],
+    queryFn: () => scmBranchChanges(workspaceRoot, targetBranch!),
+    enabled: Boolean(workspaceRoot && targetBranch),
+    staleTime: 5_000,
+    gcTime: 300_000,
+  });
 
   useEffect(() => {
     if (!workspace || workspace.status !== "ready") {
@@ -431,12 +456,14 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       return;
     }
     let cancelled = false;
-    invoke<PrContext>("pr_gather_context", { workspaceId: workspace.id })
+    invoke<HeaderBranchContext>("header_branch_context", { workspaceId: workspace.id })
       .then((ctx) => {
         if (!cancelled) {
+          const resolvedTarget = resolveWorkspaceTargetBranch(ctx, workspace.id);
+          setTargetBranch(resolvedTarget);
           setBaseBranchLabel({
             source: workspace.gitBranchName,
-            target: `origin/${ctx.baseBranch}`,
+            target: formatTargetBranch(resolvedTarget),
           });
         }
       })
@@ -453,16 +480,32 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     };
   }, [workspace]);
 
+  useEffect(() => {
+    const handleTargetBranchChange = (event: Event) => {
+      const customEvent = event as CustomEvent<WorkspaceTargetBranchEventDetail>;
+      if (customEvent.detail.workspaceId !== workspaceId) return;
+      setTargetBranch(customEvent.detail.targetBranch);
+      if (workspace) {
+        setBaseBranchLabel({
+          source: workspace.gitBranchName,
+          target: formatTargetBranch(customEvent.detail.targetBranch),
+        });
+      }
+    };
+    window.addEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
+    return () => window.removeEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
+  }, [workspace, workspaceId]);
+
   const filteredEntries = useMemo(() => {
     switch (mode) {
       case "staged":
         return entries.filter(hasStaged);
       case "branch":
-        return [] as ScmStatusEntry[];
+        return branchEntriesData;
       default:
         return entries.filter(hasUnstaged);
     }
-  }, [entries, mode]);
+  }, [branchEntriesData, entries, mode]);
 
   const unstagedCount = useMemo(() => entries.filter(hasUnstaged).length, [entries]);
   const stagedCount = useMemo(() => entries.filter(hasStaged).length, [entries]);
@@ -485,17 +528,26 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     statPaths,
     activeSource === "staged",
     untrackedPaths,
-    { enabled: activeSource !== null },
+    { enabled: activeSource !== null && activeSource !== "branch" },
   );
   const statsByKey = useMemo(
-    () =>
-      Object.fromEntries(
+    () => {
+      if (activeSource === "branch") {
+        return Object.fromEntries(
+          (filteredEntries as ScmBranchChange[]).map((entry) => [
+            statsKey(entry.path, "branch"),
+            { added: entry.added, removed: entry.removed },
+          ]),
+        );
+      }
+      return Object.fromEntries(
         bulkStats.map((stat) => [
           statsKey(stat.path, activeSource === "staged" ? "staged" : "working"),
           stat,
         ]),
-      ),
-    [activeSource, bulkStats],
+      );
+    },
+    [activeSource, bulkStats, filteredEntries],
   );
   const decorationByPath = useMemo(
     () =>
@@ -531,16 +583,18 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         workspaceRoot,
         reviewNavigationRequest.path,
         reviewNavigationRequest.source,
+        targetBranch,
       ),
       queryFn: () =>
         fetchDiffContents(
           workspaceRoot,
           reviewNavigationRequest.path,
           reviewNavigationRequest.source,
+          targetBranch,
         ),
       staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     });
-  }, [queryClient, reviewNavigationRequest, workspaceRoot]);
+  }, [queryClient, reviewNavigationRequest, targetBranch, workspaceRoot]);
 
   useEffect(() => {
     if (!reviewNavigationRequest || entriesData == null) return;
@@ -611,7 +665,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
 
       schedule(() => {
         if (cancelled) return;
-        const queryKey = diffContentsQueryKey(workspaceRoot, nextPath, activeSource);
+        const queryKey = diffContentsQueryKey(workspaceRoot, nextPath, activeSource, targetBranch);
         const queryState = queryClient.getQueryState(queryKey);
         if (queryState?.data != null && !queryState.isInvalidated) {
           runWorker();
@@ -620,7 +674,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         void queryClient
           .prefetchQuery({
             queryKey,
-            queryFn: () => fetchDiffContents(workspaceRoot, nextPath, activeSource),
+            queryFn: () => fetchDiffContents(workspaceRoot, nextPath, activeSource, targetBranch),
             staleTime: DIFF_CONTENTS_STALE_TIME_MS,
           })
           .finally(() => {
@@ -636,7 +690,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeSource, prefetchPathKey, queryClient, reloadKey, workspaceRoot]);
+  }, [activeSource, prefetchPathKey, queryClient, reloadKey, targetBranch, workspaceRoot]);
 
   const allCollapsed =
     filteredEntries.length > 0 &&
@@ -644,9 +698,12 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
 
   const refreshAll = useCallback(async () => {
     await refetch();
+    if (targetBranch) {
+      await refetchBranchEntries();
+    }
     await queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
     setReloadKey((value) => value + 1);
-  }, [queryClient, refetch, workspaceRoot]);
+  }, [queryClient, refetch, refetchBranchEntries, targetBranch, workspaceRoot]);
 
   const runEntryAction = useCallback(
     async (path: string, fn: () => Promise<void>) => {
@@ -837,11 +894,11 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           </div>
         </div>
 
-        {mode === "branch" || entriesData == null || filteredEntries.length === 0 ? (
+        {entriesData == null || filteredEntries.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {mode === "branch" ? (
+            {mode === "branch" && !targetBranch ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
-                Branch review is not wired yet.
+                Pick a target branch in Source Control to compare this branch.
               </div>
             ) : entriesData == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
@@ -849,7 +906,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               </div>
             ) : (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
-                No {mode === "staged" ? "staged" : "unstaged"} changes to review.
+                No {mode === "branch" ? "branch" : mode === "staged" ? "staged" : "unstaged"} changes to review.
               </div>
             )}
           </div>
@@ -878,6 +935,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
                   diffLayout={diffLayout}
                   wrapLines={wrapLines}
                   reloadKey={reloadKey}
+                  targetBranch={targetBranch}
                   isFirst={index === 0}
                   onToggle={handleToggleEntry}
                   onOpenFile={handleOpenFile}
