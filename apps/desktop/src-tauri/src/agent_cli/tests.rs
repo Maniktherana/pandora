@@ -1,5 +1,7 @@
 use super::claude::ensure_claude_hooks_in_home;
-use super::codex::{ensure_codex_home_from_user, ensure_codex_notify_in_home, notify_item_matches_wrapper};
+use super::codex::{
+    ensure_codex_home_from_user, ensure_codex_notify_in_home, notify_item_matches_wrapper,
+};
 use super::constants::*;
 use super::cursor::ensure_cursor_hooks_in_home;
 use super::gemini::ensure_gemini_hooks_in_home;
@@ -97,11 +99,9 @@ fn claude_merge_preserves_existing_hooks_and_is_idempotent() {
         .and_then(Value::as_array)
         .expect("Notification array");
     assert_eq!(notification.len(), 2);
-    assert!(notification.iter().all(|entry| is_pandora_agent_entry(
-        entry,
-        &helper,
-        "claude-code"
-    )));
+    assert!(notification
+        .iter()
+        .all(|entry| is_pandora_agent_entry(entry, &helper, "claude-code")));
 }
 
 #[test]

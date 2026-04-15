@@ -529,7 +529,10 @@ impl SurfaceRegistry {
         let registry = Arc::clone(self);
         let sid = surface_id.to_string();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(FLUSH_RESCHEDULE_DELAY_MS)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(
+                FLUSH_RESCHEDULE_DELAY_MS,
+            ))
+            .await;
             tokio::task::spawn_blocking(move || {
                 registry.flush_surface_output(&sid);
             });
@@ -549,9 +552,7 @@ impl SurfaceRegistry {
             let ghostty_surface = match inner.surfaces.get(surface_id) {
                 Some(surface) => surface.ghostty_surface,
                 None => {
-                    output_queue
-                        .flush_scheduled
-                        .store(false, Ordering::Release);
+                    output_queue.flush_scheduled.store(false, Ordering::Release);
                     return;
                 }
             };
@@ -561,9 +562,7 @@ impl SurfaceRegistry {
         let merged = {
             let mut queue = output_queue.queue.lock().unwrap();
             if queue.is_empty() {
-                output_queue
-                    .flush_scheduled
-                    .store(false, Ordering::Release);
+                output_queue.flush_scheduled.store(false, Ordering::Release);
                 return;
             }
 
@@ -597,9 +596,7 @@ impl SurfaceRegistry {
 
             let has_more = !queue.is_empty();
             if !has_more {
-                output_queue
-                    .flush_scheduled
-                    .store(false, Ordering::Release);
+                output_queue.flush_scheduled.store(false, Ordering::Release);
             }
 
             (buf, has_more)
@@ -1075,7 +1072,6 @@ impl SurfaceRegistry {
             surface.visible = visible;
             surface.focused = focused;
         }
-
 
         tlog!(
             "UPDATE",

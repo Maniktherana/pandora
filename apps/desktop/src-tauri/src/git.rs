@@ -233,6 +233,33 @@ fn build_workspace_slug(parts: &[&str]) -> String {
     parts.join("-")
 }
 
+fn build_branch_name(owner: &str, slug: &str) -> String {
+    if owner.trim().is_empty() {
+        slug.to_string()
+    } else {
+        format!("{owner}/{slug}")
+    }
+}
+
+fn normalize_branch_prefix(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('/')
+        .split('/')
+        .map(slugify)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn display_path_slug(raw: &str, fallback: &str) -> String {
+    let slug = slugify(raw);
+    if slug.is_empty() {
+        fallback.to_string()
+    } else {
+        slug
+    }
+}
+
 fn existing_workspace_names(existing_workspaces: &[WorkspaceRecord]) -> BTreeSet<String> {
     existing_workspaces
         .iter()
@@ -309,6 +336,7 @@ fn generate_linked_workspace_identity(
 fn generate_worktree_identity(
     project: &ProjectRecord,
     owner: &str,
+    settings: Option<&ProjectSettingsRow>,
     existing_workspaces: &[WorkspaceRecord],
 ) -> WorkspaceIdentity {
     let mut rng = rand::thread_rng();
@@ -322,10 +350,10 @@ fn generate_worktree_identity(
         if taken_slugs.contains(slug) {
             return false;
         }
-        if Path::new(&worktree_path(&project.id, owner, slug)).exists() {
+        if Path::new(&worktree_path(project, slug, settings)).exists() {
             return false;
         }
-        let branch = format!("{}/{}", owner, slug);
+        let branch = build_branch_name(owner, slug);
         !local_branch_exists(&project.git_root_path, &branch)
     })
 }
@@ -340,14 +368,81 @@ pub fn pandora_home() -> String {
     format!("{}/.pandora", home)
 }
 
-pub fn worktree_path(project_id: &str, owner: &str, slug: &str) -> String {
-    PathBuf::from(pandora_home())
-        .join("workspaces")
-        .join(project_id)
-        .join(owner)
-        .join(slug)
+fn expand_home(path: &str) -> PathBuf {
+    if path == "~" {
+        return user_home();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return user_home().join(rest);
+    }
+    PathBuf::from(path)
+}
+
+fn user_home() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+}
+
+fn worktree_root(settings: Option<&ProjectSettingsRow>) -> PathBuf {
+    if let Some(root) = settings
+        .and_then(|settings| settings.worktree_root.as_deref())
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+    {
+        return expand_home(root);
+    }
+
+    user_home().join("workspaces")
+}
+
+pub fn worktree_path(
+    project: &ProjectRecord,
+    slug: &str,
+    settings: Option<&ProjectSettingsRow>,
+) -> String {
+    worktree_root(settings)
+        .join(display_path_slug(&project.display_name, "project"))
+        .join(display_path_slug(slug, "workspace"))
         .to_string_lossy()
         .to_string()
+}
+
+fn unique_slug_for_rename(
+    project: &ProjectRecord,
+    workspace: &WorkspaceRecord,
+    requested_name: &str,
+    settings: Option<&ProjectSettingsRow>,
+    existing_workspaces: &[WorkspaceRecord],
+) -> String {
+    let base = display_path_slug(requested_name, "workspace");
+    let taken_slugs: BTreeSet<String> = existing_workspaces
+        .iter()
+        .filter(|entry| entry.id != workspace.id)
+        .map(|entry| entry.git_worktree_slug.clone())
+        .collect();
+
+    for suffix in 0..10_000 {
+        let candidate = if suffix == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{suffix}")
+        };
+        if taken_slugs.contains(&candidate) {
+            continue;
+        }
+        let candidate_path = worktree_path(project, &candidate, settings);
+        if Path::new(&candidate_path).exists() && candidate_path != workspace.worktree_path {
+            continue;
+        }
+        let candidate_branch = build_branch_name(&workspace.git_worktree_owner, &candidate);
+        if candidate_branch != workspace.git_branch_name
+            && local_branch_exists(&project.git_root_path, &candidate_branch)
+        {
+            continue;
+        }
+        return candidate;
+    }
+
+    format!("{base}-{}", uuid::Uuid::new_v4())
 }
 
 pub fn current_branch(git_root_path: &str) -> Result<String, String> {
@@ -396,13 +491,17 @@ pub fn make_linked_workspace(
 
 pub fn make_optimistic_workspace(
     project: &ProjectRecord,
+    settings: Option<&ProjectSettingsRow>,
     existing_workspaces: &[WorkspaceRecord],
+    branch_prefix: Option<String>,
 ) -> Result<WorkspaceRecord, String> {
-    let owner = resolve_remote_owner(&project.git_root_path).unwrap_or_else(|| "workspace".into());
-    let identity = generate_worktree_identity(project, &owner, existing_workspaces);
-    let branch = format!("{}/{}", owner, identity.slug);
+    let owner = branch_prefix
+        .map(|prefix| normalize_branch_prefix(&prefix))
+        .unwrap_or_else(|| resolve_remote_owner(&project.git_root_path).unwrap_or_default());
+    let identity = generate_worktree_identity(project, &owner, settings, existing_workspaces);
+    let branch = build_branch_name(&owner, &identity.slug);
     let target_branch = current_branch(&project.git_root_path).ok();
-    let wt_path = worktree_path(&project.id, &owner, &identity.slug);
+    let wt_path = worktree_path(project, &identity.slug, settings);
     let now = now_iso8601();
 
     Ok(WorkspaceRecord {
@@ -433,6 +532,10 @@ pub fn create_worktree(
     workspace: &WorkspaceRecord,
     project: &ProjectRecord,
 ) -> Result<WorkspaceRecord, String> {
+    if let Some(parent) = Path::new(&workspace.worktree_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
     run_git(&[
         "-C",
         &project.git_root_path,
@@ -453,6 +556,7 @@ pub fn create_worktree(
 pub fn retry_worktree(
     workspace: &WorkspaceRecord,
     project: &ProjectRecord,
+    settings: Option<&ProjectSettingsRow>,
     existing_workspaces: &[WorkspaceRecord],
 ) -> Result<WorkspaceRecord, String> {
     if workspace.workspace_kind != WorkspaceKind::Worktree {
@@ -462,9 +566,12 @@ pub fn retry_worktree(
     let _ = std::fs::remove_dir_all(&workspace.worktree_path);
 
     let owner = &workspace.git_worktree_owner;
-    let identity = generate_worktree_identity(project, owner, existing_workspaces);
-    let new_path = worktree_path(&project.id, owner, &identity.slug);
-    let new_branch = format!("{}/{}", owner, identity.slug);
+    let identity = generate_worktree_identity(project, owner, settings, existing_workspaces);
+    let new_path = worktree_path(project, &identity.slug, settings);
+    let new_branch = build_branch_name(owner, &identity.slug);
+    if let Some(parent) = Path::new(&new_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
 
     run_git(&[
         "-C",
@@ -486,6 +593,88 @@ pub fn retry_worktree(
     refreshed.failure_message = None;
     refreshed.updated_at = now_iso8601();
     Ok(refreshed)
+}
+
+pub fn rename_workspace(
+    workspace: &WorkspaceRecord,
+    project: &ProjectRecord,
+    settings: Option<&ProjectSettingsRow>,
+    existing_workspaces: &[WorkspaceRecord],
+    new_name: &str,
+) -> Result<WorkspaceRecord, String> {
+    let normalized_name = new_name.trim();
+    if normalized_name.is_empty() {
+        return Err("Workspace name cannot be empty.".into());
+    }
+
+    let mut renamed = workspace.clone();
+    let new_slug = unique_slug_for_rename(
+        project,
+        workspace,
+        normalized_name,
+        settings,
+        existing_workspaces,
+    );
+
+    if workspace.workspace_kind == WorkspaceKind::Worktree {
+        let new_path = worktree_path(project, &new_slug, settings);
+        let new_branch = build_branch_name(&workspace.git_worktree_owner, &new_slug);
+        let current_branch = current_branch(&workspace.worktree_path)?;
+        if new_branch != current_branch && local_branch_exists(&project.git_root_path, &new_branch)
+        {
+            return Err(format!(
+                "Cannot rename workspace because branch '{new_branch}' already exists."
+            ));
+        }
+
+        let mut moved_path = false;
+        if workspace.worktree_path != new_path {
+            if !Path::new(&workspace.worktree_path).exists() {
+                return Err(format!(
+                    "Cannot rename worktree because the path does not exist: {}",
+                    workspace.worktree_path
+                ));
+            }
+            if let Some(parent) = Path::new(&new_path).parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            run_git(&[
+                "-C",
+                &project.git_root_path,
+                "worktree",
+                "move",
+                &workspace.worktree_path,
+                &new_path,
+            ])?;
+            renamed.worktree_path = new_path;
+            moved_path = true;
+        }
+
+        if new_branch != current_branch {
+            if let Err(error) =
+                run_git(&["-C", &renamed.worktree_path, "branch", "-m", &new_branch])
+            {
+                if moved_path {
+                    let _ = run_git(&[
+                        "-C",
+                        &project.git_root_path,
+                        "worktree",
+                        "move",
+                        &renamed.worktree_path,
+                        &workspace.worktree_path,
+                    ]);
+                }
+                return Err(error);
+            }
+        }
+
+        renamed.git_branch_name = new_branch;
+    }
+
+    renamed.name = normalized_name.to_string();
+    renamed.git_worktree_slug = new_slug;
+    renamed.updated_at = now_iso8601();
+    Ok(renamed)
 }
 
 pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> Result<(), String> {
@@ -546,7 +735,10 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
         }
         Err(e) => {
             // Rename failed for another reason — fall back.
-            eprintln!("Worktree rename failed ({}), falling back to synchronous removal", e);
+            eprintln!(
+                "Worktree rename failed ({}), falling back to synchronous removal",
+                e
+            );
             let _ = run_git(&[
                 "-C",
                 &project.git_root_path,
@@ -559,6 +751,189 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
             Ok(())
         }
     }
+}
+
+fn run_git_in_dir(worktree_path: &str, args: &[&str]) -> Result<String, String> {
+    let mut git_args = Vec::with_capacity(args.len() + 2);
+    git_args.push("-C");
+    git_args.push(worktree_path);
+    git_args.extend_from_slice(args);
+    run_git(&git_args)
+}
+
+fn remote_ref_exists(worktree_path: &str, remote_ref: &str) -> bool {
+    let ref_name = format!("refs/remotes/{remote_ref}");
+    run_git_in_dir(worktree_path, &["rev-parse", "--verify", &ref_name]).is_ok()
+}
+
+fn branch_upstream(worktree_path: &str, branch: &str) -> Option<String> {
+    let upstream_spec = format!("{branch}@{{u}}");
+    run_git_in_dir(
+        worktree_path,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &upstream_spec,
+        ],
+    )
+    .ok()
+    .map(|out| out.trim().to_string())
+    .filter(|out| !out.is_empty())
+}
+
+fn restore_source_ref(worktree_path: &str, branch: &str) -> Result<String, String> {
+    let _ = run_git_in_dir(worktree_path, &["fetch", "--all", "--prune"]);
+    if let Some(upstream) = branch_upstream(worktree_path, branch) {
+        if remote_ref_exists(worktree_path, &upstream) {
+            return Ok(upstream);
+        }
+    }
+
+    let origin_ref = format!("origin/{branch}");
+    if remote_ref_exists(worktree_path, &origin_ref) {
+        return Ok(origin_ref);
+    }
+
+    Err(format!("Push branch '{branch}' before archiving."))
+}
+
+pub fn archive_safety(workspace: &WorkspaceRecord, _project: &ProjectRecord) -> ArchiveSafety {
+    if workspace.workspace_kind == WorkspaceKind::Linked {
+        return ArchiveSafety {
+            can_archive: true,
+            message: None,
+            has_uncommitted_changes: false,
+            has_untracked_files: false,
+            has_unpushed_commits: false,
+            has_remote_branch: true,
+        };
+    }
+
+    if !workspace.created_by_pandora {
+        return ArchiveSafety {
+            can_archive: false,
+            message: Some("Pandora can only archive worktrees it created.".into()),
+            has_uncommitted_changes: false,
+            has_untracked_files: false,
+            has_unpushed_commits: false,
+            has_remote_branch: false,
+        };
+    }
+
+    let status = run_git_in_dir(
+        &workspace.worktree_path,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )
+    .unwrap_or_default();
+    let has_untracked_files = status.lines().any(|line| line.starts_with("??"));
+    let has_uncommitted_changes = status.lines().any(|line| !line.starts_with("??"));
+    if has_uncommitted_changes || has_untracked_files {
+        return ArchiveSafety {
+            can_archive: false,
+            message: Some("Commit, discard, or stash changes before archiving.".into()),
+            has_uncommitted_changes,
+            has_untracked_files,
+            has_unpushed_commits: false,
+            has_remote_branch: false,
+        };
+    }
+
+    let branch =
+        current_branch(&workspace.worktree_path).unwrap_or_else(|_| workspace.git_branch_name.clone());
+    if branch != workspace.git_branch_name {
+        return ArchiveSafety {
+            can_archive: false,
+            message: Some(format!(
+                "Workspace is on branch '{branch}', but Pandora expected '{}'. Rename or refresh the workspace before archiving.",
+                workspace.git_branch_name
+            )),
+            has_uncommitted_changes: false,
+            has_untracked_files: false,
+            has_unpushed_commits: false,
+            has_remote_branch: false,
+        };
+    }
+    let remote_ref = match restore_source_ref(&workspace.worktree_path, &branch) {
+        Ok(remote_ref) => remote_ref,
+        Err(message) => {
+            return ArchiveSafety {
+                can_archive: false,
+                message: Some(message),
+                has_uncommitted_changes: false,
+                has_untracked_files: false,
+                has_unpushed_commits: false,
+                has_remote_branch: false,
+            };
+        }
+    };
+
+    let ahead = run_git_in_dir(
+        &workspace.worktree_path,
+        &["rev-list", "--count", &format!("{remote_ref}..HEAD")],
+    )
+    .ok()
+    .and_then(|out| out.trim().parse::<u64>().ok())
+    .unwrap_or(0);
+    if ahead > 0 {
+        return ArchiveSafety {
+            can_archive: false,
+            message: Some("Push commits before archiving.".into()),
+            has_uncommitted_changes: false,
+            has_untracked_files: false,
+            has_unpushed_commits: true,
+            has_remote_branch: true,
+        };
+    }
+
+    ArchiveSafety {
+        can_archive: true,
+        message: None,
+        has_uncommitted_changes: false,
+        has_untracked_files: false,
+        has_unpushed_commits: false,
+        has_remote_branch: true,
+    }
+}
+
+pub fn recreate_worktree_from_remote(
+    workspace: &WorkspaceRecord,
+    project: &ProjectRecord,
+) -> Result<(), String> {
+    if let Some(parent) = Path::new(&workspace.worktree_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let source_ref = restore_source_ref(&project.git_root_path, &workspace.git_branch_name)?;
+    if local_branch_exists(&project.git_root_path, &workspace.git_branch_name) {
+        run_git(&[
+            "-C",
+            &project.git_root_path,
+            "worktree",
+            "add",
+            &workspace.worktree_path,
+            &workspace.git_branch_name,
+        ])?;
+        run_git(&[
+            "-C",
+            &workspace.worktree_path,
+            "merge",
+            "--ff-only",
+            &source_ref,
+        ])?;
+    } else {
+        run_git(&[
+            "-C",
+            &project.git_root_path,
+            "worktree",
+            "add",
+            "-b",
+            &workspace.git_branch_name,
+            &workspace.worktree_path,
+            &source_ref,
+        ])?;
+    }
+    Ok(())
 }
 
 fn run_git(args: &[&str]) -> Result<String, String> {
@@ -798,6 +1173,16 @@ pub struct ScmBranchChange {
     pub untracked: bool,
     pub added: u64,
     pub removed: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchiveSafety {
+    pub can_archive: bool,
+    pub message: Option<String>,
+    pub has_uncommitted_changes: bool,
+    pub has_untracked_files: bool,
+    pub has_unpushed_commits: bool,
+    pub has_remote_branch: bool,
 }
 
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -1053,18 +1438,12 @@ pub fn git_branch_changes(
     .unwrap_or_default();
 
     let stats = parse_numstat_by_path(
-        &run_git(&[
-            "-C",
-            worktree_path,
-            "diff",
-            "--numstat",
-            &range,
-            "--",
-        ])
-        .unwrap_or_default(),
+        &run_git(&["-C", worktree_path, "diff", "--numstat", &range, "--"]).unwrap_or_default(),
     );
-    let stats_by_path: std::collections::HashMap<String, ScmPathLineStats> =
-        stats.into_iter().map(|stat| (stat.path.clone(), stat)).collect();
+    let stats_by_path: std::collections::HashMap<String, ScmPathLineStats> = stats
+        .into_iter()
+        .map(|stat| (stat.path.clone(), stat))
+        .collect();
 
     let mut changes = Vec::new();
     for line in name_status.lines() {
@@ -1417,7 +1796,8 @@ fn normalize_target_branch(raw: &str) -> Option<String> {
 }
 
 fn compare_ref_for_branch(worktree_path: &str, branch: &str) -> String {
-    let normalized = normalize_target_branch(branch).unwrap_or_else(|| default_branch(worktree_path));
+    let normalized =
+        normalize_target_branch(branch).unwrap_or_else(|| default_branch(worktree_path));
     let remote_ref = format!("refs/remotes/origin/{normalized}");
     if run_git(&["-C", worktree_path, "rev-parse", "--verify", &remote_ref]).is_ok() {
         return format!("origin/{normalized}");
@@ -1586,11 +1966,6 @@ pub fn gh_pr_status(worktree_path: &str, pr_number: i64) -> Result<GhPrInfo, Str
     Ok(GhPrInfo { state })
 }
 
-pub fn delete_local_branch(git_root: &str, branch_name: &str) -> Result<(), String> {
-    run_git(&["-C", git_root, "branch", "-D", branch_name])?;
-    Ok(())
-}
-
 pub fn git_push(worktree_path: &str) -> Result<String, String> {
     verify_git_worktree(worktree_path)?;
     run_git(&["-C", worktree_path, "push", "-u", "origin", "HEAD"])
@@ -1713,7 +2088,10 @@ fn parse_owner_repo(url: &str) -> Result<(String, String), String> {
             return Ok((parts[0].to_string(), parts[1].to_string()));
         }
     }
-    Err(format!("Could not parse owner/repo from remote URL: {}", url))
+    Err(format!(
+        "Could not parse owner/repo from remote URL: {}",
+        url
+    ))
 }
 
 pub fn git_commit_message(worktree_path: &str, message: &str) -> Result<(), String> {

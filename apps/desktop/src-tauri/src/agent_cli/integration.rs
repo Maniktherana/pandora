@@ -58,12 +58,7 @@ pub fn ensure_agent_cli_integration() -> Result<(), String> {
     fs::write(&opencode_plugin, build_opencode_plugin(&event_script))
         .map_err(|error| error.to_string())?;
     ensure_claude_hooks(&helper_script)?;
-    ensure_codex_home(
-        &codex_home,
-        &codex_wrapper,
-        &codex_next,
-        &event_script,
-    )?;
+    ensure_codex_home(&codex_home, &codex_wrapper, &codex_next, &event_script)?;
     ensure_gemini_hooks(&event_script)?;
     ensure_cursor_hooks(&event_script)?;
     Ok(())

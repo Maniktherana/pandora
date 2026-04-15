@@ -162,11 +162,8 @@ impl AppDatabase {
             .map_err(|e| e.to_string())?;
         }
         if !cols.iter().any(|c| c == "deleting_at") {
-            conn.execute(
-                "ALTER TABLE workspaces ADD COLUMN deleting_at TEXT",
-                [],
-            )
-            .map_err(|e| e.to_string())?;
+            conn.execute("ALTER TABLE workspaces ADD COLUMN deleting_at TEXT", [])
+                .map_err(|e| e.to_string())?;
         }
         if !cols.iter().any(|c| c == "created_by_pandora") {
             conn.execute(
@@ -180,8 +177,11 @@ impl AppDatabase {
                 .map_err(|e| e.to_string())?;
         }
         // Startup sweep: clear stale deleting_at from interrupted operations (crash recovery).
-        conn.execute("UPDATE workspaces SET deleting_at = NULL WHERE deleting_at IS NOT NULL", [])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE workspaces SET deleting_at = NULL WHERE deleting_at IS NOT NULL",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 

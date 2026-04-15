@@ -111,8 +111,7 @@ pub fn start_tick_timer(app_handle: tauri::AppHandle) {
     let app_usize = app_ptr as usize;
 
     tauri::async_runtime::spawn(async move {
-        let mut interval =
-            tokio::time::interval(tokio::time::Duration::from_millis(8));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(8));
         loop {
             interval.tick().await;
             let _ = app_handle.run_on_main_thread(move || unsafe {

@@ -102,7 +102,11 @@ pub(super) fn ensure_codex_notify_in_home(
     wrapper_path: &Path,
     next_script: &Path,
 ) -> Result<(), String> {
-    ensure_codex_notify_config(&home.join(super::constants::CODEX_CONFIG_PATH), wrapper_path, next_script)
+    ensure_codex_notify_config(
+        &home.join(super::constants::CODEX_CONFIG_PATH),
+        wrapper_path,
+        next_script,
+    )
 }
 
 pub(super) fn ensure_codex_notify_config(

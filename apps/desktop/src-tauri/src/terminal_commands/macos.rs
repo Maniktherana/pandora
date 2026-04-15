@@ -51,16 +51,15 @@ pub fn terminal_surface_create(
     window
         .run_on_main_thread(move || {
             registry.set_window(ns_window as *mut _);
-            let _ =
-                tx.send(registry.create_surface(
-                    surface_id,
-                    workspace_id,
-                    session_id,
-                    rect,
-                    app,
-                    font_size,
-                    overlay_exempt,
-                ));
+            let _ = tx.send(registry.create_surface(
+                surface_id,
+                workspace_id,
+                session_id,
+                rect,
+                app,
+                font_size,
+                overlay_exempt,
+            ));
         })
         .map_err(|e| e.to_string())?;
     let dispatch_us = t0.elapsed().as_micros();

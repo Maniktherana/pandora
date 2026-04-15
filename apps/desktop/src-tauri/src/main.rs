@@ -195,6 +195,7 @@ fn main() {
             commands::list_workspaces,
             commands::create_workspace,
             commands::retry_workspace,
+            commands::rename_workspace,
             commands::remove_workspace,
             commands::mark_workspace_opened,
             // Selection

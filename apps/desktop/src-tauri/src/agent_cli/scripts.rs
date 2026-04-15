@@ -294,7 +294,10 @@ module.exports = {{
 "#,
         event_script = format!(
             "\"{}\"",
-            event_script.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+            event_script
+                .to_string_lossy()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
         ),
     )
 }

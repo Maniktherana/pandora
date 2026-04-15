@@ -129,10 +129,10 @@ pub struct ProjectSettingsRow {
     pub project_id: String,
     pub default_branch: String,
     pub worktree_root: Option<String>,
-    pub setup_scripts: String,     // JSON array string
-    pub run_scripts: String,       // JSON array string
-    pub teardown_scripts: String,  // JSON array string
-    pub env_vars: String,          // JSON object string
+    pub setup_scripts: String,    // JSON array string
+    pub run_scripts: String,      // JSON array string
+    pub teardown_scripts: String, // JSON array string
+    pub env_vars: String,         // JSON object string
     pub auto_run_setup: bool,
     pub updated_at: String,
 }

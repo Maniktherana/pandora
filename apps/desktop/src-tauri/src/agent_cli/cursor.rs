@@ -11,10 +11,7 @@ pub(super) fn ensure_cursor_hooks(event_script: &Path) -> Result<(), String> {
     ensure_cursor_hooks_in_home(&user_home(), event_script)
 }
 
-pub(super) fn ensure_cursor_hooks_in_home(
-    home: &Path,
-    event_script: &Path,
-) -> Result<(), String> {
+pub(super) fn ensure_cursor_hooks_in_home(home: &Path, event_script: &Path) -> Result<(), String> {
     let hooks_path = home.join(CURSOR_HOOKS_PATH);
     if let Some(parent) = hooks_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
