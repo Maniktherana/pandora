@@ -66,11 +66,7 @@ const LETTER_COLS = 5;
 const LETTER_ROWS = 7;
 const LETTER_GAP = 2; // columns of gap between letters
 
-const DOT_COLORS = [
-  "var(--theme-text)",
-  "var(--theme-text-subtle)",
-  "var(--theme-text-muted)",
-];
+const DOT_COLORS = ["var(--theme-text)", "var(--theme-text-subtle)", "var(--theme-text-muted)"];
 
 function DotMatrixTitle() {
   // Build full grid: each letter is 5 cols wide, with LETTER_GAP columns between
@@ -190,9 +186,7 @@ export default function WelcomeScreen() {
         />
       </div>
 
-      <p className="text-xs text-[var(--theme-text-faint)]">
-        ctrl+shift+P to open command palette
-      </p>
+      <p className="text-xs text-[var(--theme-text-faint)]">ctrl+shift+P to open command palette</p>
     </div>
   );
 }

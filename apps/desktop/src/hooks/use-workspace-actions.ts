@@ -61,6 +61,12 @@ export function useWorkspaceActions() {
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) => service.retryWorkspace(workspaceId)),
         ),
+      renameWorkspace: (workspaceId: string, name: string) =>
+        run(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.renameWorkspace(workspaceId, name),
+          ),
+        ),
       removeWorkspace: (workspaceId: string) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>

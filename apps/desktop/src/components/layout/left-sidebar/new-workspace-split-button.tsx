@@ -1,7 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ExternalDriveIcon, SplitIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
 
 type NewWorkspaceSplitButtonProps = {

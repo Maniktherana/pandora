@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowRight01Icon, ExternalDriveIcon, SplitIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  ExternalDriveIcon,
+  SplitIcon,
+} from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDesktopView } from "@/hooks/use-desktop-view";
@@ -23,13 +28,11 @@ export function ProjectRow({ project }: ProjectRowProps) {
     [allWorkspaces, project.id],
   );
   const workspaces = useMemo(
-    () =>
-      projectWorkspaces.filter((workspace) => workspace.status !== "archived"),
+    () => projectWorkspaces.filter((workspace) => workspace.status !== "archived"),
     [projectWorkspaces],
   );
   const archivedWorkspaces = useMemo(
-    () =>
-      projectWorkspaces.filter((workspace) => workspace.status === "archived"),
+    () => projectWorkspaces.filter((workspace) => workspace.status === "archived"),
     [projectWorkspaces],
   );
   const [lastWorkspaceKind, setLastWorkspaceKind] = useState<"worktree" | "linked">("linked");
@@ -76,7 +79,9 @@ export function ProjectRow({ project }: ProjectRowProps) {
           >
             <Tooltip>
               <TooltipTrigger
-                render={<Button type="button" variant="ghost" size="icon-sm" aria-label="New Worktree" />}
+                render={
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="New Worktree" />
+                }
                 onClick={createWorktree}
               >
                 <HugeiconsIcon icon={SplitIcon} strokeWidth={1.5} className="size-4" />
@@ -86,7 +91,12 @@ export function ProjectRow({ project }: ProjectRowProps) {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label="New Local Workspace" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="New Local Workspace"
+                  />
                 }
                 onClick={createLinked}
               >

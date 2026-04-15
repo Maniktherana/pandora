@@ -11,15 +11,8 @@ export const PopoverCreateHandle: typeof PopoverPrimitive.createHandle =
 export function Popover<Payload = unknown>(
   props: PopoverPrimitive.Root.Props<Payload>,
 ): React.ReactElement {
-  const {
-    defaultOpen,
-    onOpenChange,
-    open: openProp,
-    ...rest
-  } = props;
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
-    defaultOpen ?? false,
-  );
+  const { defaultOpen, onOpenChange, open: openProp, ...rest } = props;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const open = openProp ?? uncontrolledOpen;
 
   const handleOpenChange = React.useCallback<
@@ -34,13 +27,7 @@ export function Popover<Payload = unknown>(
     [onOpenChange, openProp],
   );
 
-  return (
-    <PopoverPrimitive.Root
-      {...rest}
-      open={open}
-      onOpenChange={handleOpenChange}
-    />
-  );
+  return <PopoverPrimitive.Root {...rest} open={open} onOpenChange={handleOpenChange} />;
 }
 
 export function PopoverTrigger({
@@ -49,11 +36,7 @@ export function PopoverTrigger({
   ...props
 }: PopoverPrimitive.Trigger.Props): React.ReactElement {
   return (
-    <PopoverPrimitive.Trigger
-      className={className}
-      data-slot="popover-trigger"
-      {...props}
-    >
+    <PopoverPrimitive.Trigger className={className} data-slot="popover-trigger" {...props}>
       {children}
     </PopoverPrimitive.Trigger>
   );
@@ -120,9 +103,7 @@ export function PopoverPopup({
   );
 }
 
-export function PopoverClose({
-  ...props
-}: PopoverPrimitive.Close.Props): React.ReactElement {
+export function PopoverClose({ ...props }: PopoverPrimitive.Close.Props): React.ReactElement {
   return <PopoverPrimitive.Close data-slot="popover-close" {...props} />;
 }
 

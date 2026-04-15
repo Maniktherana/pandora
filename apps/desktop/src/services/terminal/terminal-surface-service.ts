@@ -47,9 +47,7 @@ export interface TerminalSurfaceServiceApi {
   readonly upsertSurface: (
     input: ManagedSurfaceRegistration,
   ) => Effect.Effect<void, NativeSurfaceError>;
-  readonly setAllSurfaceFontSizes: (
-    fontSize: number,
-  ) => Effect.Effect<void, NativeSurfaceError>;
+  readonly setAllSurfaceFontSizes: (fontSize: number) => Effect.Effect<void, NativeSurfaceError>;
   readonly parkSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeSurface: (surfaceId: string) => Effect.Effect<void, NativeSurfaceError>;
   readonly removeWorkspaceSurfaces: (
@@ -173,10 +171,8 @@ export const TerminalSurfaceServiceLive = Layer.effect(
     };
 
     const isWebOverlayActive = () => Object.values(webOverlayDepth).some((depth) => depth > 0);
-    const shouldDeferForOverlay = (
-      entry: ManagedSurfaceEntry,
-      ignoreOverlay: boolean,
-    ) => isWebOverlayActive() && !ignoreOverlay && !entry.overlayExempt;
+    const shouldDeferForOverlay = (entry: ManagedSurfaceEntry, ignoreOverlay: boolean) =>
+      isWebOverlayActive() && !ignoreOverlay && !entry.overlayExempt;
 
     const buildPayload = (entry: ManagedSurfaceEntry) => {
       if (!entry.anchorElement) {
@@ -372,7 +368,10 @@ export const TerminalSurfaceServiceLive = Layer.effect(
       const queued = webOcclusionQueue.then(() =>
         invoke("terminal_surfaces_set_web_occlusion_rects", { rects }),
       );
-      webOcclusionQueue = queued.then(() => undefined, () => undefined);
+      webOcclusionQueue = queued.then(
+        () => undefined,
+        () => undefined,
+      );
       await queued;
     };
 

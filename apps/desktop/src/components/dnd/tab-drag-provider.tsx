@@ -25,9 +25,7 @@ export function TabDragProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!dragState) return;
     void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (manager) =>
-        manager.beginWebOverlay("opaque"),
-      ).pipe(
+      Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay("opaque")).pipe(
         Effect.catchAll(() => Effect.void),
       ),
     );

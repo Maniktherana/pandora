@@ -71,7 +71,8 @@ export function ProjectTab({
           "border-t border-[var(--theme-border)]": !isFirst,
           "border-b border-[var(--theme-border)]": isLast,
           "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]": active,
-          "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]": !active,
+          "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]":
+            !active,
           "opacity-30": isBeingDragged,
         },
       )}

@@ -238,13 +238,13 @@ export default function WorkspaceTabBar({
               }
               slotsMap={slotsMap}
               sessionsMap={sessionsMap}
-            displayMap={displayMap}
-            terminalAgentStatus={
-              tab.kind === "terminal"
-                ? (runtime?.terminalAgentStatusBySlotId?.[tab.slotId] ?? "idle")
-                : "idle"
-            }
-            onPointerDown={handlePointerDown}
+              displayMap={displayMap}
+              terminalAgentStatus={
+                tab.kind === "terminal"
+                  ? (runtime?.terminalAgentStatusBySlotId?.[tab.slotId] ?? "idle")
+                  : "idle"
+              }
+              onPointerDown={handlePointerDown}
               onPointerUp={handlePointerUp}
               onCloseDiffTab={closeDiffTab}
               onCloseTerminalTab={closeTerminalTab}

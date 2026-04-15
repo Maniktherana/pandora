@@ -6,9 +6,7 @@ export const SETTINGS_PREVIEW_SLOT_ID_PREFIX = "__settings_preview_slot__:";
 export const SETTINGS_PREVIEW_SESSION_DEF_ID_PREFIX = "__settings_preview_session_def__:";
 
 export function isSettingsPreviewSlot(slot: Pick<SlotState, "id" | "name">): boolean {
-  return (
-    slot.id.startsWith(SETTINGS_PREVIEW_SLOT_ID_PREFIX) || slot.name === SETTINGS_PREVIEW_NAME
-  );
+  return slot.id.startsWith(SETTINGS_PREVIEW_SLOT_ID_PREFIX) || slot.name === SETTINGS_PREVIEW_NAME;
 }
 
 export function isSettingsPreviewSession(

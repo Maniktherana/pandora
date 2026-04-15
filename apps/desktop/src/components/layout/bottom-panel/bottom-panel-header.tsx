@@ -46,7 +46,8 @@ export function BottomPanelHeader({
                 "relative z-10 h-full rounded-none px-3 text-xs after:z-20 after:h-[2px] group-data-horizontal/tabs:after:bottom-0",
                 {
                   "bg-[var(--theme-bg)] text-[var(--theme-text)]": tab === id,
-                  "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]": tab !== id,
+                  "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]":
+                    tab !== id,
                 },
               )}
             >
@@ -100,8 +101,8 @@ export function BottomPanelHeader({
           <SplitSquareHorizontal className="h-3.5 w-3.5" />
         </button>
       ) : null}
-      
-       <button
+
+      <button
         type="button"
         title="Collapse bottom panel"
         onClick={onCollapse}

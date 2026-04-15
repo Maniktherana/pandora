@@ -53,11 +53,14 @@ function useSystemFonts() {
     if (!("queryLocalFonts" in window)) return;
     void (async () => {
       try {
-        const localFonts = (await (window as Window & {
-          queryLocalFonts?: () => Promise<Array<{ family: string }>>;
-        }).queryLocalFonts?.()) ?? [];
-        const families = [...new Set(localFonts.map((font) => font.family))].sort(
-          (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
+        const localFonts =
+          (await (
+            window as Window & {
+              queryLocalFonts?: () => Promise<Array<{ family: string }>>;
+            }
+          ).queryLocalFonts?.()) ?? [];
+        const families = [...new Set(localFonts.map((font) => font.family))].sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base" }),
         );
         setFonts(families);
       } catch {}
@@ -66,13 +69,7 @@ function useSystemFonts() {
   return fonts;
 }
 
-function FontSizeStepper({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
+function FontSizeStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex items-center gap-0 rounded-md border border-[var(--theme-border)]">
       <Button
@@ -141,7 +138,9 @@ function FontSelect({
         </SelectTrigger>
         <SelectContent>
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -165,7 +164,9 @@ function FontSelect({
                     onClick={() => onCustomChange(f)}
                     className={cn(
                       "block w-full rounded px-2 py-1 text-left text-xs hover:bg-[var(--theme-panel-hover)]",
-                      customValue === f ? "text-[var(--theme-text)]" : "text-[var(--theme-text-subtle)]",
+                      customValue === f
+                        ? "text-[var(--theme-text)]"
+                        : "text-[var(--theme-text-subtle)]",
                     )}
                     style={{ fontFamily: f }}
                   >
@@ -213,17 +214,29 @@ export default function AppearanceSettings({
   }, [selectedThemeId]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--theme-font-sans", getFontFamily(uiFontFamily, uiFontCustom));
+    document.documentElement.style.setProperty(
+      "--theme-font-sans",
+      getFontFamily(uiFontFamily, uiFontCustom),
+    );
   }, [uiFontFamily, uiFontCustom]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--theme-font-mono", getMonoFont(monoFontFamily, monoFontCustom));
+    document.documentElement.style.setProperty(
+      "--theme-font-mono",
+      getMonoFont(monoFontFamily, monoFontCustom),
+    );
     document.documentElement.style.setProperty("--theme-font-editor-size", `${editorFontSize}px`);
   }, [monoFontFamily, monoFontCustom, editorFontSize]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--theme-font-terminal", getTerminalFont(terminalFontFamily, terminalFontCustom));
-    document.documentElement.style.setProperty("--theme-font-terminal-size", `${terminalFontSize}px`);
+    document.documentElement.style.setProperty(
+      "--theme-font-terminal",
+      getTerminalFont(terminalFontFamily, terminalFontCustom),
+    );
+    document.documentElement.style.setProperty(
+      "--theme-font-terminal-size",
+      `${terminalFontSize}px`,
+    );
   }, [terminalFontFamily, terminalFontCustom, terminalFontSize]);
 
   return (
@@ -274,11 +287,18 @@ export default function AppearanceSettings({
           options={MONO_FONT_OPTIONS}
           customValue={monoFontCustom}
           onCustomChange={(val) => setMonoFont("custom", val)}
-          systemFonts={systemFonts?.filter((f) => /mono|code|consol|menlo|courier|fira|hack|iosevka|jetbrains|source|inconsolata/i.test(f))}
+          systemFonts={systemFonts?.filter((f) =>
+            /mono|code|consol|menlo|courier|fira|hack|iosevka|jetbrains|source|inconsolata/i.test(
+              f,
+            ),
+          )}
           fontSize={editorFontSize}
           onFontSizeChange={setEditorFontSize}
         />
-        <EditorFontPreview fontFamily={getMonoFont(monoFontFamily, monoFontCustom)} fontSize={editorFontSize} />
+        <EditorFontPreview
+          fontFamily={getMonoFont(monoFontFamily, monoFontCustom)}
+          fontSize={editorFontSize}
+        />
       </section>
 
       {/* Terminal Font */}
@@ -291,7 +311,9 @@ export default function AppearanceSettings({
           options={TERMINAL_FONT_OPTIONS}
           customValue={terminalFontCustom}
           onCustomChange={(val) => setTerminalFont("custom", val)}
-          systemFonts={systemFonts?.filter((f) => /mono|code|consol|menlo|courier|fira|hack|iosevka|jetbrains|source|nerd|term/i.test(f))}
+          systemFonts={systemFonts?.filter((f) =>
+            /mono|code|consol|menlo|courier|fira|hack|iosevka|jetbrains|source|nerd|term/i.test(f),
+          )}
           fontSize={terminalFontSize}
           onFontSizeChange={setTerminalFontSize}
         />

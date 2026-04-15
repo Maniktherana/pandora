@@ -67,7 +67,17 @@ export default function TerminalSurface({
       .catch((error) => {
         console.error("Failed to register native terminal surface:", error);
       });
-  }, [anchorElement, focused, handleFocus, overlayExempt, runtime, sessionID, surfaceId, visible, workspaceId]);
+  }, [
+    anchorElement,
+    focused,
+    handleFocus,
+    overlayExempt,
+    runtime,
+    sessionID,
+    surfaceId,
+    visible,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!sessionID) return;

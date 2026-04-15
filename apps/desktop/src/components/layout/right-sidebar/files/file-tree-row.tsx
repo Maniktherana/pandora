@@ -3,7 +3,13 @@ import { cn } from "@/lib/shared/utils";
 import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
-import { TREE_ROW_HEIGHT_PX, TREE_ROW_INDENT_PX, TREE_ROW_PADDING_LEFT_PX, type FileTreeRowHandle, type TreeRowKind } from "./files.types";
+import {
+  TREE_ROW_HEIGHT_PX,
+  TREE_ROW_INDENT_PX,
+  TREE_ROW_PADDING_LEFT_PX,
+  type FileTreeRowHandle,
+  type TreeRowKind,
+} from "./files.types";
 
 type FileTreeRowProps = {
   depth: number;
@@ -81,7 +87,10 @@ export const FileTreeRow = React.memo(function FileTreeRow({
         data-tree-row-kind={rowKind}
         data-tree-parent-path={parentRelPath}
         className={rowClassName}
-        style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX, height: TREE_ROW_HEIGHT_PX }}
+        style={{
+          paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX,
+          height: TREE_ROW_HEIGHT_PX,
+        }}
         onPointerDown={(event) => onPointerDown?.(event, handle)}
         onClickCapture={onClickCapture}
         onClick={onOpen}
@@ -100,7 +109,10 @@ export const FileTreeRow = React.memo(function FileTreeRow({
       data-tree-row-kind={rowKind}
       data-tree-parent-path={parentRelPath}
       className={rowClassName}
-      style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX, height: TREE_ROW_HEIGHT_PX }}
+      style={{
+        paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX,
+        height: TREE_ROW_HEIGHT_PX,
+      }}
       onPointerDown={(event) => onPointerDown?.(event, handle)}
       onClickCapture={onClickCapture}
     >

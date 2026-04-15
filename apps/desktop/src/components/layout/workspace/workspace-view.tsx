@@ -161,9 +161,8 @@ function PaneView({
   const terminalSlotHasRenderableSession = (slotId: string) => {
     const slot = slotsMap[slotId];
     const sessionForSlot =
-      Object.values(sessionsMap).find(
-        (s) => s.slotID === slotId && s.status === "running",
-      ) ?? (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
+      Object.values(sessionsMap).find((s) => s.slotID === slotId && s.status === "running") ??
+      (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
     const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
     return sessionId != null;
   };
@@ -220,8 +219,8 @@ function PaneView({
             relativePath={
               leaf.tabs[leaf.selectedIndex]?.kind === "editor"
                 ? (leaf.tabs[leaf.selectedIndex] as { path: string }).path
-                : (leaf.tabs.find((t) => t.kind === "editor") as { path: string } | undefined)
-                    ?.path ?? null
+                : ((leaf.tabs.find((t) => t.kind === "editor") as { path: string } | undefined)
+                    ?.path ?? null)
             }
             isVisible={leaf.tabs[leaf.selectedIndex]?.kind === "editor"}
           />
@@ -496,9 +495,7 @@ export function WorkspaceRuntimeView({
 function EmptyWorkspaceState() {
   const workspace = useDesktopView((view) => view.selectedWorkspace);
   const project = useDesktopView((view) => view.selectedProject);
-  const booting = useUiPreferencesView(
-    (view) => !view.sidebarHydrated || !view.fileTreeHydrated,
-  );
+  const booting = useUiPreferencesView((view) => !view.sidebarHydrated || !view.fileTreeHydrated);
   const workspaceCommands = useWorkspaceActions();
   const handleRetryWorkspace = useCallback(() => {
     if (!workspace) return;
@@ -514,7 +511,12 @@ function EmptyWorkspaceState() {
       return (
         <div className="flex items-center justify-center h-full text-[var(--theme-text-faint)]">
           <div className="text-center">
-            <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+            <DotGridLoader
+              variant="default"
+              gridSize={5}
+              sizeClassName="h-8 w-8"
+              className="opacity-90"
+            />
           </div>
         </div>
       );
@@ -638,11 +640,7 @@ export default memo(function WorkspaceView() {
     return <WorkspaceRuntimeLoading />;
   }
 
-  if (
-    runtime.connectionState !== "connected" ||
-    runtime.layoutLoading ||
-    !runtime.layoutLoaded
-  ) {
+  if (runtime.connectionState !== "connected" || runtime.layoutLoading || !runtime.layoutLoaded) {
     return <WorkspaceRuntimeLoading />;
   }
 

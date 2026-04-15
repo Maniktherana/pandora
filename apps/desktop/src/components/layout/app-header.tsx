@@ -43,8 +43,7 @@ export default memo(function AppHeader({
   onSelectRightSidebarMode,
 }: AppHeaderProps) {
   const showBranchLabel =
-    selectedWorkspace != null &&
-    selectedWorkspace.gitBranchName !== selectedWorkspace.name;
+    selectedWorkspace != null && selectedWorkspace.gitBranchName !== selectedWorkspace.name;
 
   return (
     <div className="h-10 flex items-center shrink-0 border-b border-[var(--theme-border)] bg-[var(--theme-bg)]">
@@ -107,7 +106,8 @@ export default memo(function AppHeader({
             onClick={onToggleBottomPanel}
             className={cn(
               "h-7 w-7 rounded-sm border border-transparent px-0",
-              bottomPanelOpen && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]",
+              bottomPanelOpen &&
+                "bg-[var(--theme-panel-hover)] text-[var(--theme-text)] hover:bg-[var(--theme-panel-hover)]",
             )}
             title="Toggle terminal panel (Ctrl+`)"
           >

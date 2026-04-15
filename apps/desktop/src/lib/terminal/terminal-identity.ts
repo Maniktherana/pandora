@@ -1,8 +1,4 @@
-import type {
-  SessionState,
-  SlotState,
-  TerminalDisplayState,
-} from "@/lib/shared/types";
+import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 
 const TERMINAL_LABEL = "Terminal";
 

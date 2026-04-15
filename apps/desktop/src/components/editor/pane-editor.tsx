@@ -121,8 +121,7 @@ export default function PaneEditor({
   // Safety net: if model was created before content loaded from disk, push content in.
   // Subscribes to a boolean (not the string) so it only re-renders once per file load.
   const isContentLoaded = useEditorStore(
-    (s) =>
-      !relativePath || s.bufferByWorkspace[workspaceId]?.[relativePath] !== undefined,
+    (s) => !relativePath || s.bufferByWorkspace[workspaceId]?.[relativePath] !== undefined,
   );
   useEffect(() => {
     if (!isContentLoaded || !relativePath) return;
@@ -130,8 +129,7 @@ export default function PaneEditor({
     if (!editor) return;
     const model = editor.getModel();
     if (!model || model.getValueLength() > 0) return;
-    const content =
-      useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath] ?? "";
+    const content = useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath] ?? "";
     if (content) model.setValue(content);
   }, [isContentLoaded, workspaceId, relativePath]);
 

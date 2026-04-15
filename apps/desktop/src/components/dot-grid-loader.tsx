@@ -1,30 +1,39 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { cn } from '@/lib/shared/utils';
+import React, { useEffect, useMemo, useRef } from "react";
+import { cn } from "@/lib/shared/utils";
 
 const regularCells = [
-  { delay: 'd-0', color: 'var(--theme-text)' },
-  { delay: 'd-1', color: 'color-mix(in oklab, var(--theme-text) 85%, var(--theme-text-subtle))' },
-  { delay: 'd-2', color: 'color-mix(in oklab, var(--theme-text) 70%, var(--theme-text-subtle))' },
-  { delay: 'd-1', color: 'color-mix(in oklab, var(--theme-text) 55%, var(--theme-text-subtle))' },
-  { delay: 'd-2', color: 'color-mix(in oklab, var(--theme-text) 40%, var(--theme-text-subtle))' },
-  { delay: 'd-2', color: 'color-mix(in oklab, var(--theme-text-subtle) 85%, var(--theme-text-muted))' },
-  { delay: 'd-3', color: 'color-mix(in oklab, var(--theme-text-subtle) 65%, var(--theme-text-muted))' },
-  { delay: 'd-3', color: 'color-mix(in oklab, var(--theme-text-subtle) 45%, var(--theme-text-muted))' },
-  { delay: 'd-4', color: 'var(--theme-text-muted)' },
+  { delay: "d-0", color: "var(--theme-text)" },
+  { delay: "d-1", color: "color-mix(in oklab, var(--theme-text) 85%, var(--theme-text-subtle))" },
+  { delay: "d-2", color: "color-mix(in oklab, var(--theme-text) 70%, var(--theme-text-subtle))" },
+  { delay: "d-1", color: "color-mix(in oklab, var(--theme-text) 55%, var(--theme-text-subtle))" },
+  { delay: "d-2", color: "color-mix(in oklab, var(--theme-text) 40%, var(--theme-text-subtle))" },
+  {
+    delay: "d-2",
+    color: "color-mix(in oklab, var(--theme-text-subtle) 85%, var(--theme-text-muted))",
+  },
+  {
+    delay: "d-3",
+    color: "color-mix(in oklab, var(--theme-text-subtle) 65%, var(--theme-text-muted))",
+  },
+  {
+    delay: "d-3",
+    color: "color-mix(in oklab, var(--theme-text-subtle) 45%, var(--theme-text-muted))",
+  },
+  { delay: "d-4", color: "var(--theme-text-muted)" },
 ];
 
 const ARROW_ALPHAS = [1.0, 0.35];
 const EXPAND_ALPHAS = [1.0, 0.5, 0.15];
 
-type ArrowDirection = 'left' | 'right' | 'up' | 'down';
+type ArrowDirection = "left" | "right" | "up" | "down";
 
 function getArrowBand(idx: number, size: 3 | 5, dir: ArrowDirection): number {
   const row = Math.floor(idx / size);
   const col = idx % size;
   const center = (size - 1) / 2;
-  if (dir === 'left') return (size - 1 - col) + Math.abs(row - center);
-  if (dir === 'right') return col + Math.abs(row - center);
-  if (dir === 'up') return (size - 1 - row) + Math.abs(col - center);
+  if (dir === "left") return size - 1 - col + Math.abs(row - center);
+  if (dir === "right") return col + Math.abs(row - center);
+  if (dir === "up") return size - 1 - row + Math.abs(col - center);
   return row + Math.abs(col - center);
 }
 
@@ -55,20 +64,31 @@ function colorForBrightnessLevel(level: number, totalLevels: number): string {
   return regularCells[colorIdx]?.color ?? regularCells[0]!.color;
 }
 
-function getDefaultRippleCellStyle(idx: number, gridSize: 3 | 5, totalCells: number): React.CSSProperties {
+function getDefaultRippleCellStyle(
+  idx: number,
+  gridSize: 3 | 5,
+  totalCells: number,
+): React.CSSProperties {
   const row = Math.floor(idx / gridSize);
   const col = idx % gridSize;
   const diagonalBand = row + col;
   const maxBand = (gridSize - 1) * 2;
   const colorIdx = Math.round((idx * (regularCells.length - 1)) / Math.max(1, totalCells - 1));
   return {
-    '--cell-color': regularCells[colorIdx]?.color ?? regularCells[0]!.color,
+    "--cell-color": regularCells[colorIdx]?.color ?? regularCells[0]!.color,
     animationDelay: `${Math.round((diagonalBand * 4) / Math.max(1, maxBand)) * 100}ms`,
   } as React.CSSProperties;
 }
 
 type DotGridLoaderProps = {
-  variant?: 'default' | 'spinner' | 'expand' | 'arrow-up' | 'arrow-down' | 'arrow-left' | 'arrow-right';
+  variant?:
+    | "default"
+    | "spinner"
+    | "expand"
+    | "arrow-up"
+    | "arrow-down"
+    | "arrow-left"
+    | "arrow-right";
   gridSize?: 3 | 5;
   sizeClassName?: string;
   className?: string;
@@ -77,9 +97,9 @@ type DotGridLoaderProps = {
 };
 
 const DotGridLoader = ({
-  variant = 'default',
+  variant = "default",
   gridSize = 3,
-  sizeClassName = 'h-3.5 w-3.5',
+  sizeClassName = "h-3.5 w-3.5",
   className,
   cellGapPx = 1,
   cellRadiusPx = 0,
@@ -88,20 +108,20 @@ const DotGridLoader = ({
   const spinnerHeadRef = useRef(0);
   const expandStepRef = useRef(0);
   const arrowStepRef = useRef(0);
-  const isSpinner = variant === 'spinner';
-  const isExpand = variant === 'expand';
+  const isSpinner = variant === "spinner";
+  const isExpand = variant === "expand";
   const totalCells = gridSize * gridSize;
   const spinnerBorder = useMemo(() => getPerimeterIndices(gridSize), [gridSize]);
   const spinnerTrail = Math.min(4, Math.max(2, Math.floor(spinnerBorder.length / 3)));
   const arrowDirection: ArrowDirection | null =
-    variant === 'arrow-left'
-      ? 'left'
-      : variant === 'arrow-right'
-        ? 'right'
-        : variant === 'arrow-up'
-          ? 'up'
-          : variant === 'arrow-down'
-            ? 'down'
+    variant === "arrow-left"
+      ? "left"
+      : variant === "arrow-right"
+        ? "right"
+        : variant === "arrow-up"
+          ? "up"
+          : variant === "arrow-down"
+            ? "down"
             : null;
   const isArrow = arrowDirection !== null;
 
@@ -110,17 +130,20 @@ const DotGridLoader = ({
     const id = setInterval(() => {
       const head = spinnerHeadRef.current;
       spinnerBorder.forEach((idx, i) => {
-        const dist = ((head - i) % spinnerBorder.length + spinnerBorder.length) % spinnerBorder.length;
+        const dist =
+          (((head - i) % spinnerBorder.length) + spinnerBorder.length) % spinnerBorder.length;
         const el = cellRefs.current[idx];
         if (!el) return;
         if (dist < spinnerTrail) {
           const alpha = 1 - dist / spinnerTrail;
-          const colorIdx = Math.round((i * (regularCells.length - 1)) / Math.max(1, spinnerBorder.length - 1));
+          const colorIdx = Math.round(
+            (i * (regularCells.length - 1)) / Math.max(1, spinnerBorder.length - 1),
+          );
           el.style.backgroundColor = regularCells[colorIdx]?.color ?? regularCells[0]!.color;
           el.style.opacity = alpha.toFixed(2);
         } else {
-          el.style.backgroundColor = 'transparent';
-          el.style.opacity = '0';
+          el.style.backgroundColor = "transparent";
+          el.style.opacity = "0";
         }
       });
       spinnerHeadRef.current = (head + 1) % spinnerBorder.length;
@@ -144,8 +167,8 @@ const DotGridLoader = ({
           el.style.backgroundColor = cellColors[i]!;
           el.style.opacity = `${EXPAND_ALPHAS[behind]!}`;
         } else {
-          el.style.backgroundColor = 'transparent';
-          el.style.opacity = '0';
+          el.style.backgroundColor = "transparent";
+          el.style.opacity = "0";
         }
       }
       expandStepRef.current = (step + 1) % total;
@@ -155,7 +178,9 @@ const DotGridLoader = ({
 
   useEffect(() => {
     if (!isArrow) return;
-    const bands = Array.from({ length: totalCells }, (_, i) => getArrowBand(i, gridSize, arrowDirection));
+    const bands = Array.from({ length: totalCells }, (_, i) =>
+      getArrowBand(i, gridSize, arrowDirection),
+    );
     const total = Math.max(...bands) + ARROW_ALPHAS.length + 2;
     const id = setInterval(() => {
       const step = arrowStepRef.current;
@@ -167,8 +192,8 @@ const DotGridLoader = ({
           el.style.backgroundColor = colorForBrightnessLevel(behind, ARROW_ALPHAS.length);
           el.style.opacity = `${ARROW_ALPHAS[behind]!}`;
         } else {
-          el.style.backgroundColor = 'transparent';
-          el.style.opacity = '0';
+          el.style.backgroundColor = "transparent";
+          el.style.opacity = "0";
         }
       }
       arrowStepRef.current = (step + 1) % total;
@@ -179,15 +204,15 @@ const DotGridLoader = ({
   return (
     <div
       className={cn(
-        'dot-grid-loader',
-        (isSpinner || isExpand || isArrow) && 'rounded-[12px]',
+        "dot-grid-loader",
+        (isSpinner || isExpand || isArrow) && "rounded-[12px]",
         sizeClassName,
         className,
       )}
       style={
         {
-          '--dot-grid-gap': `${cellGapPx}px`,
-          '--dot-grid-cell-radius': `${cellRadiusPx}px`,
+          "--dot-grid-gap": `${cellGapPx}px`,
+          "--dot-grid-cell-radius": `${cellRadiusPx}px`,
           gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
         } as React.CSSProperties
       }
@@ -201,9 +226,9 @@ const DotGridLoader = ({
             }}
             className="dot-grid-loader-cell"
             style={{
-              backgroundColor: 'transparent',
+              backgroundColor: "transparent",
               opacity: 0,
-              transition: 'background-color 60ms linear, opacity 60ms linear',
+              transition: "background-color 60ms linear, opacity 60ms linear",
             }}
           />
         ) : (

@@ -7,9 +7,7 @@ import { cn } from "@/lib/shared/utils";
 import { Separator } from "@/components/ui/separator";
 
 type InputOTPSize = "default" | "lg";
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
-  ? Omit<T, K>
-  : never;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export type InputOTPProps = DistributiveOmit<
   React.ComponentProps<typeof OTPInput>,

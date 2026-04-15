@@ -1,4 +1,8 @@
-import type { DesktopView, UiPreferencesView, WorkspaceView } from "@/state/desktop-view-projections";
+import type {
+  DesktopView,
+  UiPreferencesView,
+  WorkspaceView,
+} from "@/state/desktop-view-projections";
 import { buildWorkspaceView } from "@/state/desktop-view-projections";
 import { useDesktopViewStore } from "@/state/desktop-view-store";
 import { useRuntimeStore } from "@/state/runtime-store";

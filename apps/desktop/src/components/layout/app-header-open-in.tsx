@@ -33,11 +33,16 @@ export default memo(function OpenInDropdown({ worktreePath, workspaceName }: Ope
   const { data: editors } = useAvailableEditors();
   const [menuOpen, setMenuOpen] = useState(false);
   const [defaultAppId, setDefaultAppId] = useState<string>(() => {
-    try { return localStorage.getItem(STORAGE_KEY) ?? "finder"; } catch { return "finder"; }
+    try {
+      return localStorage.getItem(STORAGE_KEY) ?? "finder";
+    } catch {
+      return "finder";
+    }
   });
 
   const grouped = useMemo(() => {
-    if (!editors) return { finder: [] as EditorInfo[], ide: [] as EditorInfo[], terminal: [] as EditorInfo[] };
+    if (!editors)
+      return { finder: [] as EditorInfo[], ide: [] as EditorInfo[], terminal: [] as EditorInfo[] };
     return {
       finder: editors.filter((e) => e.category === "finder"),
       ide: editors.filter((e) => e.category === "ide"),
@@ -58,7 +63,9 @@ export default memo(function OpenInDropdown({ worktreePath, workspaceName }: Ope
       invoke("open_in_app", { path: worktreePath, appId }).catch(() => {});
       if (appId !== "copy_path") {
         setDefaultAppId(appId);
-        try { localStorage.setItem(STORAGE_KEY, appId); } catch {}
+        try {
+          localStorage.setItem(STORAGE_KEY, appId);
+        } catch {}
       }
       setMenuOpen(false);
     },
@@ -121,7 +128,13 @@ export default memo(function OpenInDropdown({ worktreePath, workspaceName }: Ope
         </div>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent side="bottom" align="start" sideOffset={4} className="min-w-52" onKeyDown={handleMenuKeyDown}>
+      <DropdownMenuContent
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        className="min-w-52"
+        onKeyDown={handleMenuKeyDown}
+      >
         {grouped.finder.map((editor) => {
           index += 1;
           const shortcut = index;

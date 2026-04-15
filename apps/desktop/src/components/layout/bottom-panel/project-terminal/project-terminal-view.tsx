@@ -75,7 +75,15 @@ function ProjectTerminalAnchorSlot({
       focused: isVisible && ownsNativeFocus && isFocused,
       onFocus: handleFocus,
     });
-  }, [handleFocus, isFocused, isVisible, ownsNativeFocus, registerTerminalAnchor, sessionId, workspaceId]);
+  }, [
+    handleFocus,
+    isFocused,
+    isVisible,
+    ownsNativeFocus,
+    registerTerminalAnchor,
+    sessionId,
+    workspaceId,
+  ]);
 
   // Unregister only on unmount / session or context change — visibility updates go through the effect above.
   useLayoutEffect(() => {
@@ -123,10 +131,9 @@ function TerminalPane({
       data-bottom-terminal-pane-id={slot?.id ?? ""}
       data-bottom-terminal-runtime-id={workspaceId}
       data-bottom-terminal-group-id={groupId}
-      className={cn(
-        "relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950",
-        { "ring-1 ring-neutral-700/60": active },
-      )}
+      className={cn("relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950", {
+        "ring-1 ring-neutral-700/60": active,
+      })}
       style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
       onPointerDownCapture={() => {
         if (visible) projectTerminalCommands.focusProjectTerminal(workspaceId, slot?.id ?? null);
@@ -154,9 +161,7 @@ function ResizableTerminalGroup({ children }: { children: ReactNode }) {
     <ResizablePanelGroup direction="horizontal">
       {childArray.map((child, index) => (
         <div key={index} className="contents">
-          {index > 0 && (
-            <TerminalResizeHandle direction="horizontal" onDragging={setIsResizing} />
-          )}
+          {index > 0 && <TerminalResizeHandle direction="horizontal" onDragging={setIsResizing} />}
           {child}
         </div>
       ))}

@@ -48,10 +48,7 @@ export function PortsTabContent() {
   const runtimeState = useRuntimeStore((s) => s.runtimeState);
   const workspaces = useDesktopView((v) => v.workspaces);
 
-  const rows = useMemo(
-    () => buildPortRows(runtimeState, workspaces),
-    [runtimeState, workspaces],
-  );
+  const rows = useMemo(() => buildPortRows(runtimeState, workspaces), [runtimeState, workspaces]);
 
   if (rows.length === 0) {
     return (

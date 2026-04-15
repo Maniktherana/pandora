@@ -70,7 +70,10 @@ export function TreeRenameInput({
   return (
     <div
       className="flex min-w-0 w-full items-center gap-2 rounded-md pr-2 text-xs"
-      style={{ paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX, height: TREE_ROW_HEIGHT_PX }}
+      style={{
+        paddingLeft: TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX,
+        height: TREE_ROW_HEIGHT_PX,
+      }}
     >
       <HugeiconsIcon
         icon={kind === "directory" ? Folder01Icon : File01Icon}

@@ -39,7 +39,9 @@ export function FileTreeToolbar({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" variant="ghost" size="icon-xs" aria-label="New folder" />}
+              render={
+                <Button type="button" variant="ghost" size="icon-xs" aria-label="New folder" />
+              }
               onClick={onCreateFolder}
             >
               <HugeiconsIcon icon={FolderAddIcon} strokeWidth={1.5} className="size-3.5" />
@@ -49,7 +51,12 @@ export function FileTreeToolbar({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button type="button" variant="ghost" size="icon-xs" aria-label="Refresh explorer" />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Refresh explorer"
+                />
               }
               onClick={onRefreshExplorer}
             >
@@ -59,7 +66,9 @@ export function FileTreeToolbar({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" variant="ghost" size="icon-xs" aria-label="Collapse all" />}
+              render={
+                <Button type="button" variant="ghost" size="icon-xs" aria-label="Collapse all" />
+              }
               onClick={onCollapseAll}
             >
               <HugeiconsIcon icon={CollapseIcon} strokeWidth={1.5} className="size-3.5" />

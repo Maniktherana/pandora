@@ -18,13 +18,22 @@ function SidebarBootLoader() {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4">
       <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
-        <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+        <DotGridLoader
+          variant="default"
+          gridSize={5}
+          sizeClassName="h-8 w-8"
+          className="opacity-90"
+        />
       </div>
     </div>
   );
 }
 
-export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings }: LeftSidebarProps) {
+export default memo(function LeftSidebar({
+  booting,
+  onCollapse,
+  onOpenSettings,
+}: LeftSidebarProps) {
   const projects = useDesktopView((view) => view.projects);
   const workspaceCommands = useWorkspaceActions();
 
@@ -90,12 +99,7 @@ export default memo(function LeftSidebar({ booting, onCollapse, onOpenSettings }
       </div>
 
       <div className="flex h-10 items-center px-3">
-        <Button
-          onClick={onOpenSettings}
-          variant="ghost"
-          size="icon-sm"
-          title="Settings (Cmd+,)"
-        >
+        <Button onClick={onOpenSettings} variant="ghost" size="icon-sm" title="Settings (Cmd+,)">
           <HugeiconsIcon icon={Settings03Icon} strokeWidth={1.5} className="size-4" />
         </Button>
       </div>

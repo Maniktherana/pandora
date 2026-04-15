@@ -17,14 +17,12 @@ function defaultSettings(projectId: string): ProjectSettingsType {
     runScripts: [],
     teardownScripts: [],
     envVars: {},
-    autoRunSetup: false,
+    autoRunSetup: true,
   };
 }
 
 export default function ProjectSettings({ project }: ProjectSettingsProps) {
-  const [settings, setSettings] = useState<ProjectSettingsType>(() =>
-    defaultSettings(project.id),
-  );
+  const [settings, setSettings] = useState<ProjectSettingsType>(() => defaultSettings(project.id));
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load settings on mount / project change
@@ -45,15 +43,12 @@ export default function ProjectSettings({ project }: ProjectSettingsProps) {
   }, [project.id]);
 
   // Debounced save
-  const save = useCallback(
-    (next: ProjectSettingsType) => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        invoke("save_project_settings", { settings: next }).catch(() => {});
-      }, 600);
-    },
-    [],
-  );
+  const save = useCallback((next: ProjectSettingsType) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      invoke("save_project_settings", { settings: next }).catch(() => {});
+    }, 600);
+  }, []);
 
   const update = useCallback(
     (patch: Partial<ProjectSettingsType>) => {
@@ -91,23 +86,13 @@ export default function ProjectSettings({ project }: ProjectSettingsProps) {
       {/* Configuration */}
       <section className="border-t border-[var(--theme-border)] pt-6 space-y-4">
         <div>
-          <h2 className="text-sm font-medium text-[var(--theme-text)]">Default branch</h2>
+          <h2 className="text-sm font-medium text-[var(--theme-text)]">Worktree location</h2>
           <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-            Branch used as the base for new worktrees.
-          </p>
-        </div>
-        <Input
-          value={settings.defaultBranch}
-          onChange={(e) => update({ defaultBranch: (e.target as HTMLInputElement).value })}
-          placeholder="e.g., main"
-          className="w-56"
-          size="sm"
-        />
-
-        <div className="pt-2">
-          <h2 className="text-sm font-medium text-[var(--theme-text)]">Worktree root</h2>
-          <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-            Custom directory for worktree storage.
+            New worktrees are stored as{" "}
+            <span className="font-mono text-[var(--theme-text-muted)]">
+              root/{project.displayName}/workspace
+            </span>
+            . Renaming a worktree also moves it to this layout.
           </p>
         </div>
         <Input
@@ -116,10 +101,11 @@ export default function ProjectSettings({ project }: ProjectSettingsProps) {
             const val = (e.target as HTMLInputElement).value;
             update({ worktreeRoot: val || null });
           }}
-          placeholder="Custom worktree directory"
-          className="w-56"
+          placeholder="~/workspaces"
+          className="w-full max-w-md font-mono"
           size="sm"
         />
+        <p className="text-xs text-[var(--theme-text-faint)]">Leave empty to use ~/workspaces.</p>
       </section>
 
       {/* Scripts */}

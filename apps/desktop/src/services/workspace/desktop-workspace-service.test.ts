@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { findNearestWorkspaceInProject, shouldAutoOpenTerminalSlot } from "./desktop-workspace-service";
+import {
+  findNearestWorkspaceInProject,
+  shouldAutoOpenTerminalSlot,
+} from "./desktop-workspace-service";
 
 describe("shouldAutoOpenTerminalSlot", () => {
   test("returns true for terminal slots that have defs but no running sessions", () => {
@@ -121,10 +124,7 @@ describe("findNearestWorkspaceInProject", () => {
 
   test("returns null when no other visible workspace exists in the project", () => {
     expect(
-      findNearestWorkspaceInProject(
-        [{ id: "a", projectId: "project-1", status: "ready" }],
-        "a",
-      ),
+      findNearestWorkspaceInProject([{ id: "a", projectId: "project-1", status: "ready" }], "a"),
     ).toBeNull();
   });
 });

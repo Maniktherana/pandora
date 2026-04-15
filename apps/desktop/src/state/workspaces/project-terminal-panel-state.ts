@@ -60,7 +60,12 @@ export function reconcileProjectTerminalPanelState(
     return getEarliestGroupSlotOrder(left, slotOrder) - getEarliestGroupSlotOrder(right, slotOrder);
   });
   const activeGroupIndex =
-    activeGroupId == null ? 0 : Math.max(0, groups.findIndex((group) => group.id === activeGroupId));
+    activeGroupId == null
+      ? 0
+      : Math.max(
+          0,
+          groups.findIndex((group) => group.id === activeGroupId),
+        );
 
   return {
     ...terminalPanel,

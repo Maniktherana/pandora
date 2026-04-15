@@ -50,16 +50,12 @@ export function ChecksPanel({ worktreePath }: ChecksPanelProps) {
 
   if (error) {
     return (
-      <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">
-        Failed to load checks
-      </div>
+      <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Failed to load checks</div>
     );
   }
 
   if (!checkRuns || checkRuns.length === 0) {
-    return (
-      <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">No checks found</div>
-    );
+    return <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">No checks found</div>;
   }
 
   return (

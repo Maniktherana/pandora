@@ -397,9 +397,7 @@ export default function App() {
                     <div
                       className="relative h-full shrink-0"
                       style={{ width: rightSidebarWidth }}
-                      onPointerDownCapture={() =>
-                        workspaceCommands.setLayoutTargetRuntimeId(null)
-                      }
+                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
                     >
                       <div
                         ref={rightSidebarResizeHandleRef}

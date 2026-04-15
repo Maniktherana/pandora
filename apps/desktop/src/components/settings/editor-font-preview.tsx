@@ -1,9 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import {
-  MONACO_THEME_ID,
-  pandoraMonacoBeforeMount,
-} from "@/components/editor/monaco-pandora";
+import { MONACO_THEME_ID, pandoraMonacoBeforeMount } from "@/components/editor/monaco-pandora";
 import { cn } from "@/lib/shared/utils";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 
@@ -135,18 +132,21 @@ export default function EditorFontPreview({ fontFamily, fontSize = 13 }: EditorF
   const lineHeight = Math.round(fontSize * 1.6);
   const workspaceCommands = useWorkspaceActions();
 
-  const handleMount: OnMount = useCallback((editor) => {
-    // Auto-size to content
-    const contentHeight = editor.getContentHeight();
-    setEditorHeight(contentHeight);
-    editor.onDidContentSizeChange(() => {
-      setEditorHeight(editor.getContentHeight());
-    });
-    editor.onDidFocusEditorWidget(() => {
-      workspaceCommands.setLayoutTargetRuntimeId(null);
-      workspaceCommands.setNavigationArea("workspace");
-    });
-  }, [workspaceCommands]);
+  const handleMount: OnMount = useCallback(
+    (editor) => {
+      // Auto-size to content
+      const contentHeight = editor.getContentHeight();
+      setEditorHeight(contentHeight);
+      editor.onDidContentSizeChange(() => {
+        setEditorHeight(editor.getContentHeight());
+      });
+      editor.onDidFocusEditorWidget(() => {
+        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setNavigationArea("workspace");
+      });
+    },
+    [workspaceCommands],
+  );
 
   const options = useMemo(
     () => ({
@@ -154,7 +154,11 @@ export default function EditorFontPreview({ fontFamily, fontSize = 13 }: EditorF
       domReadOnly: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      scrollbar: { vertical: "hidden" as const, horizontal: "hidden" as const, handleMouseWheel: false },
+      scrollbar: {
+        vertical: "hidden" as const,
+        horizontal: "hidden" as const,
+        handleMouseWheel: false,
+      },
       fontFamily,
       fontSize,
       lineHeight,
@@ -202,7 +206,10 @@ export default function EditorFontPreview({ fontFamily, fontSize = 13 }: EditorF
           onMount={handleMount}
           options={options}
           loading={
-            <div className="flex items-center justify-center text-xs text-[var(--theme-text-subtle)]" style={{ height: 300 }}>
+            <div
+              className="flex items-center justify-center text-xs text-[var(--theme-text-subtle)]"
+              style={{ height: 300 }}
+            >
               Loading...
             </div>
           }

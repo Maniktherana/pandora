@@ -3,7 +3,12 @@ import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, FilePlusIcon, GitCompareIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  FilePlusIcon,
+  GitCompareIcon,
+  Refresh01Icon,
+} from "@hugeicons/core-free-icons";
 import { GitPullRequest } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -154,7 +159,10 @@ export default function WorkspaceChangesPanel({
     const currentBranch = branchContext?.currentBranch ?? "";
     const options = Array.from(new Set(branchContext?.availableBranches ?? []));
     return options
-      .filter((branch) => branch && branch !== "origin" && (branch === "main" || branch !== currentBranch))
+      .filter(
+        (branch) =>
+          branch && branch !== "origin" && (branch === "main" || branch !== currentBranch),
+      )
       .sort((a, b) => {
         if (a === "main") return -1;
         if (b === "main") return 1;
@@ -486,11 +494,7 @@ export default function WorkspaceChangesPanel({
               <span className="truncate font-mono text-[11px]">
                 {formatTargetBranch(activeTargetBranch)}
               </span>
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                strokeWidth={1.8}
-                className="size-3 shrink-0"
-              />
+              <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} className="size-3 shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64 min-w-64 p-0">
               <div className="border-b border-[var(--theme-border)] p-1">
@@ -635,7 +639,9 @@ export default function WorkspaceChangesPanel({
             }}
           >
             {entries === null && (
-              <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">Loading changes…</div>
+              <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">
+                Loading changes…
+              </div>
             )}
             {entries && entries.length === 0 && (
               <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">No changes</div>

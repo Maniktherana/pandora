@@ -1,12 +1,7 @@
 import type { CSSProperties } from "react";
 import type { editor } from "monaco-editor";
 import { hexRgbAa, mixHex } from "./theme-color-utils";
-import type {
-  CodeEditorTheme,
-  ReactUiTheme,
-  ScmUiTheme,
-  WorkspaceTheme,
-} from "./theme.types";
+import type { CodeEditorTheme, ReactUiTheme, ScmUiTheme, WorkspaceTheme } from "./theme.types";
 
 export function deriveChromeTiers(ui: Pick<ReactUiTheme, "background" | "text" | "border">) {
   const { background: bg, text, border } = ui;
@@ -18,9 +13,7 @@ export function deriveChromeTiers(ui: Pick<ReactUiTheme, "background" | "text" |
   };
 }
 
-export function defaultScmTheme(
-  ui: Pick<ReactUiTheme, "interactive" | "info">,
-): ScmUiTheme {
+export function defaultScmTheme(ui: Pick<ReactUiTheme, "interactive" | "info">): ScmUiTheme {
   return {
     added: "#D0FDC6",
     modified: "#F9E38D",

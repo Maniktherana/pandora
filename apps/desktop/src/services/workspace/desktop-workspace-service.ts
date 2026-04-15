@@ -93,6 +93,11 @@ import {
 import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
+type CanArchiveWorkspaceResult = {
+  canArchive: boolean;
+  message: string | null;
+};
+
 export interface WorkspaceSessionService {
   readonly workspaceId: string;
   readonly commands: {
@@ -235,6 +240,10 @@ export interface DesktopWorkspaceServiceApi {
     workspaceKind?: WorkspaceKind,
   ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly retryWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
+  readonly renameWorkspace: (
+    workspaceId: string,
+    name: string,
+  ) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly removeWorkspace: (workspaceId: string) => Effect.Effect<void, WorkspaceSelectionError>;
   readonly markWorkspaceOpened: (
     workspaceId: string,
@@ -470,10 +479,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     let selectionTargetWorkspaceID: string | null = null;
     let selectionSettleFiber: Fiber.RuntimeFiber<void, never> | null = null;
 
-    const runLoggedBackgroundEffect = (
-      effect: Effect.Effect<void, unknown>,
-      label: string,
-    ) =>
+    const runLoggedBackgroundEffect = (effect: Effect.Effect<void, unknown>, label: string) =>
       Effect.runFork(
         effect.pipe(
           Effect.catchAll((error) =>
@@ -486,7 +492,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
 
     const applyAppState = (appState: AppState) => {
       desktopStateSnapshot.projects = structuredClone(appState.projects).sort(compareCreatedAtDesc);
-      desktopStateSnapshot.workspaces = structuredClone(appState.workspaces).sort(compareCreatedAtDesc);
+      desktopStateSnapshot.workspaces = structuredClone(appState.workspaces).sort(
+        compareCreatedAtDesc,
+      );
       desktopStateSnapshot.selectedProjectID = appState.selectedProjectId;
       desktopStateSnapshot.selectedWorkspaceID = appState.selectedWorkspaceId;
       selectionTargetWorkspaceID = appState.selectedWorkspaceId;
@@ -531,8 +539,7 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
     const getVisibleSidebarWorkspaces = () =>
       desktopStateSnapshot.projects.flatMap((project) =>
         desktopStateSnapshot.workspaces.filter(
-          (workspace) =>
-            workspace.projectId === project.id && workspace.status !== "archived",
+          (workspace) => workspace.projectId === project.id && workspace.status !== "archived",
         ),
       );
 
@@ -1383,7 +1390,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             break;
           case "session_closed":
             yield* mutateRuntimeState(event.workspaceId, (runtime) => {
-              const session = runtime.sessions.find((candidate) => candidate.id === event.sessionID);
+              const session = runtime.sessions.find(
+                (candidate) => candidate.id === event.sessionID,
+              );
               if (session) {
                 clearEphemeralTerminalAgentStatus(runtime, session.slotID);
               }
@@ -1539,7 +1548,9 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             }
             publishDesktopNow();
             if (autoCreatedWorkspaceId) {
-              const ws = desktopStateSnapshot.workspaces.find((w) => w.id === autoCreatedWorkspaceId);
+              const ws = desktopStateSnapshot.workspaces.find(
+                (w) => w.id === autoCreatedWorkspaceId,
+              );
               if (ws?.status === "ready") {
                 startSelectionSettle(ws);
               }
@@ -1707,10 +1718,25 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       archiveWorkspace: (workspaceId) =>
         Effect.gen(function* () {
-          const workspace = desktopStateSnapshot.workspaces.find((entry) => entry.id === workspaceId);
+          const workspace = desktopStateSnapshot.workspaces.find(
+            (entry) => entry.id === workspaceId,
+          );
           if (!workspace) {
             return yield* Effect.fail(
               workspaceSelectionError(new Error("Workspace not found"), workspaceId),
+            );
+          }
+
+          const preflight = yield* Effect.tryPromise({
+            try: () => invoke<CanArchiveWorkspaceResult>("can_archive_workspace", { workspaceId }),
+            catch: (cause) => workspaceSelectionError(cause, workspaceId),
+          });
+          if (!preflight.canArchive) {
+            return yield* Effect.fail(
+              workspaceSelectionError(
+                new Error(preflight.message ?? "Workspace is not safe to archive."),
+                workspaceId,
+              ),
             );
           }
 
@@ -1724,9 +1750,13 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             .pipe(Effect.orElseSucceed(() => undefined));
           yield* updateDesktopState(
             (state) => {
-              state.workspaces = replaceWorkspaceRecord(state.workspaces, workspaceId, (current) => {
-                current.status = "archived";
-              });
+              state.workspaces = replaceWorkspaceRecord(
+                state.workspaces,
+                workspaceId,
+                (current) => {
+                  current.status = "archived";
+                },
+              );
               if (state.layoutTargetRuntimeId === workspaceId) {
                 state.layoutTargetRuntimeId = null;
               }
@@ -1753,16 +1783,28 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
               catch: (cause) => workspaceSelectionError(cause, workspaceId),
             }).pipe(Effect.orElseSucceed(() => undefined));
           }
-          const { archiveDeletesWorktree, deleteLocalBranchOnArchive, runTeardownOnArchive } = useSettingsStore.getState();
+          const { runTeardownOnArchive } = useSettingsStore.getState();
           yield* Effect.tryPromise({
-            try: () => invoke("archive_workspace", {
-              workspaceId,
-              deleteWorktree: archiveDeletesWorktree,
-              deleteLocalBranch: deleteLocalBranchOnArchive,
-              runTeardown: runTeardownOnArchive,
-            }),
+            try: () =>
+              invoke("archive_workspace", {
+                workspaceId,
+                runTeardown: runTeardownOnArchive,
+              }),
             catch: (cause) => cause,
-          });
+          }).pipe(
+            Effect.catchAll((cause) =>
+              Effect.gen(function* () {
+                const appState = yield* Effect.tryPromise({
+                  try: () => invoke<AppState>("load_app_state"),
+                  catch: () => null,
+                }).pipe(Effect.orElseSucceed(() => null));
+                if (appState) {
+                  applyAppState(appState);
+                }
+                return yield* Effect.fail(cause);
+              }),
+            ),
+          );
         }).pipe(
           Effect.mapError((cause) =>
             cause instanceof WorkspaceSelectionError
@@ -1774,9 +1816,13 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         Effect.gen(function* () {
           yield* updateDesktopState(
             (state) => {
-              state.workspaces = replaceWorkspaceRecord(state.workspaces, workspaceId, (workspace) => {
-                workspace.status = "ready";
-              });
+              state.workspaces = replaceWorkspaceRecord(
+                state.workspaces,
+                workspaceId,
+                (workspace) => {
+                  workspace.status = "ready";
+                },
+              );
             },
             { sync: true },
           );
@@ -1883,11 +1929,21 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
         ),
       createWorkspace: (projectId, workspaceKind) =>
         Effect.gen(function* () {
+          const { branchPrefixMode, branchPrefixCustom } = useSettingsStore.getState();
+          const branchPrefix =
+            branchPrefixMode === "none"
+              ? ""
+              : branchPrefixMode === "custom"
+                ? branchPrefixCustom
+                : undefined;
           const created = yield* Effect.tryPromise({
             try: () =>
               invoke<WorkspaceRecord>("create_workspace", {
                 projectId,
                 ...(workspaceKind != null ? { workspaceKind } : {}),
+                ...(workspaceKind !== "linked" && branchPrefix !== undefined
+                  ? { branchPrefix }
+                  : {}),
               }),
             catch: (cause) => workspaceSelectionError(cause),
           });
@@ -1912,6 +1968,47 @@ export const DesktopWorkspaceServiceLive = Layer.scoped(
             },
             catch: (cause) => workspaceSelectionError(cause, workspaceId),
           });
+        }),
+      renameWorkspace: (workspaceId, name) =>
+        Effect.gen(function* () {
+          const workspace = desktopStateSnapshot.workspaces.find(
+            (entry) => entry.id === workspaceId,
+          );
+          if (!workspace) {
+            return yield* Effect.fail(
+              workspaceSelectionError(new Error("Workspace not found"), workspaceId),
+            );
+          }
+
+          if (workspace.workspaceKind === "worktree") {
+            yield* terminalSurfaceService
+              .removeWorkspaceSurfaces(workspaceId)
+              .pipe(Effect.orElseSucceed(() => undefined));
+            yield* clearRuntimeTerminalStartupTracking(workspaceId);
+            yield* Effect.sync(() => {
+              interruptWorkspaceStartup(startupSet, workspaceId);
+              delete desktopStateSnapshot.runtimes[workspaceId];
+              scheduleRuntimePublish();
+            });
+          }
+
+          const renamed = yield* Effect.tryPromise({
+            try: () => invoke<WorkspaceRecord>("rename_workspace", { workspaceId, name }),
+            catch: (cause) => workspaceSelectionError(cause, workspaceId),
+          });
+
+          yield* Effect.sync(() => {
+            patchWorkspaceRecord(renamed);
+          });
+
+          if (
+            renamed.id === desktopStateSnapshot.selectedWorkspaceID &&
+            renamed.status === "ready"
+          ) {
+            yield* Effect.sync(() => {
+              startSelectionSettle(renamed);
+            });
+          }
         }),
       removeWorkspace: (workspaceId) =>
         Effect.gen(function* () {

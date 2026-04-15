@@ -38,10 +38,7 @@ async function sendRuntimeMessage(workspaceId: string, message: ClientMessage) {
 
 function ensureSettingsPreviewTerminal(workspacePath: string) {
   const workspaceId = SETTINGS_PREVIEW_RUNTIME_ID;
-  if (
-    settingsPreviewState.runtimeId === workspaceId &&
-    settingsPreviewState.sessionId
-  ) {
+  if (settingsPreviewState.runtimeId === workspaceId && settingsPreviewState.sessionId) {
     return Promise.resolve({
       runtimeId: workspaceId,
       sessionId: settingsPreviewState.sessionId,
@@ -295,13 +292,20 @@ export default function TerminalFontPreview({
         className={`flex ${SETTINGS_PREVIEW_HEIGHT_CLASS} w-full items-center justify-center rounded-lg border border-[var(--theme-border)]`}
         style={{ background: "var(--theme-terminal-bg, var(--theme-bg))" }}
       >
-        <DotGridLoader variant="default" gridSize={5} sizeClassName="h-6 w-6" className="opacity-60" />
+        <DotGridLoader
+          variant="default"
+          gridSize={5}
+          sizeClassName="h-6 w-6"
+          className="opacity-60"
+        />
       </div>
     );
   }
 
   return (
-    <div className={`${SETTINGS_PREVIEW_HEIGHT_CLASS} w-full overflow-hidden rounded-lg border border-[var(--theme-border)]`}>
+    <div
+      className={`${SETTINGS_PREVIEW_HEIGHT_CLASS} w-full overflow-hidden rounded-lg border border-[var(--theme-border)]`}
+    >
       <TerminalSurface
         sessionID={sessionId}
         workspaceId={previewRuntimeId ?? SETTINGS_PREVIEW_RUNTIME_ID}

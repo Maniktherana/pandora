@@ -1,8 +1,5 @@
 import { create } from "zustand";
-import {
-  emptyRuntimeStateView,
-  type RuntimeStateView,
-} from "@/state/desktop-view-projections";
+import { emptyRuntimeStateView, type RuntimeStateView } from "@/state/desktop-view-projections";
 
 interface RuntimeStoreState {
   runtimeState: RuntimeStateView;

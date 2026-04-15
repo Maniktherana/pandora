@@ -123,8 +123,7 @@ export default function DiffViewer({
   const error = diffQuery.error ? String(diffQuery.error) : null;
 
   const noDiff = !loading && !error && original === modified;
-  const diffStyle: PierreDiffStyle =
-    controlledDiffStyle ?? (sideBySide ? "split" : "unified");
+  const diffStyle: PierreDiffStyle = controlledDiffStyle ?? (sideBySide ? "split" : "unified");
   const wrapLines = controlledWrapLines ?? storedWrapLines;
   const isLarge = Math.max(original.length, modified.length) > 500_000;
 
@@ -231,9 +230,7 @@ export default function DiffViewer({
             </span>
           )}
           <ToggleGroup
-            value={
-              diffStyle === "split" || diffStyle === "unified" ? [diffStyle] : []
-            }
+            value={diffStyle === "split" || diffStyle === "unified" ? [diffStyle] : []}
             onValueChange={(values) => {
               const value = values[0];
               if (typeof value !== "string" || controlledDiffStyle) return;

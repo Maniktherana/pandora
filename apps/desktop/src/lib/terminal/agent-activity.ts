@@ -138,20 +138,14 @@ export function rebuildTerminalAgentStatuses(
   }
 }
 
-export function clearEphemeralTerminalAgentStatus(
-  runtime: WorkspaceRuntimeState,
-  slotId: string,
-) {
+export function clearEphemeralTerminalAgentStatus(runtime: WorkspaceRuntimeState, slotId: string) {
   const current = runtime.terminalAgentStatusBySlotId?.[slotId] ?? "idle";
   if (current === "working" || current === "permission") {
     runtime.terminalAgentStatusBySlotId[slotId] = "idle";
   }
 }
 
-export function acknowledgeTerminalAgentStatus(
-  runtime: WorkspaceRuntimeState,
-  slotId: string,
-) {
+export function acknowledgeTerminalAgentStatus(runtime: WorkspaceRuntimeState, slotId: string) {
   runtime.terminalAgentStatusBySlotId[slotId] = acknowledgedTerminalAgentStatus(
     runtime.terminalAgentStatusBySlotId?.[slotId],
   );

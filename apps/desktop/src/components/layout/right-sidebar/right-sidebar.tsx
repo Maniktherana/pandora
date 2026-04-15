@@ -51,10 +51,7 @@ import { FileTreeToolbar } from "./files/file-tree-toolbar";
 import { TreeCreateInput } from "./files/tree-create-input";
 import { TreeRenameInput } from "./files/tree-rename-input";
 import { TreeDragOverlay } from "./files/tree-drag-overlay";
-import {
-  fileTreeQueryKey,
-  useWorkspaceDirectoryQuery,
-} from "./files/files-queries";
+import { fileTreeQueryKey, useWorkspaceDirectoryQuery } from "./files/files-queries";
 import { useScmStatusQuery } from "./scm/scm-queries";
 import {
   ContextMenu,
@@ -136,7 +133,12 @@ function RightSidebarPanelLoader() {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4">
       <div className="flex flex-col items-center text-center text-[var(--theme-text-faint)]">
-        <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
+        <DotGridLoader
+          variant="default"
+          gridSize={5}
+          sizeClassName="h-8 w-8"
+          className="opacity-90"
+        />
       </div>
     </div>
   );
@@ -283,30 +285,33 @@ export default memo(function RightSidebar({
     [],
   );
 
-  const computeDropTargetFromTreeElement = useCallback((element: Element | null): TreeDropTarget => {
-    const body = treeBodyRef.current;
-    if (!body || !element || !body.contains(element)) {
-      return { mode: "root", targetRelPath: null };
-    }
+  const computeDropTargetFromTreeElement = useCallback(
+    (element: Element | null): TreeDropTarget => {
+      const body = treeBodyRef.current;
+      if (!body || !element || !body.contains(element)) {
+        return { mode: "root", targetRelPath: null };
+      }
 
-    const row = element.closest<HTMLElement>(TREE_ROW_SELECTOR);
-    if (!row || !body.contains(row)) {
-      return { mode: "root", targetRelPath: null };
-    }
+      const row = element.closest<HTMLElement>(TREE_ROW_SELECTOR);
+      if (!row || !body.contains(row)) {
+        return { mode: "root", targetRelPath: null };
+      }
 
-    const relPath = row.dataset.treeRowPath ?? null;
-    const rowKind = row.dataset.treeRowKind as TreeRowKind | undefined;
-    const parentRelPath = row.dataset.treeParentPath ?? "";
-    if (!relPath || !rowKind) {
-      return { mode: "root", targetRelPath: null };
-    }
+      const relPath = row.dataset.treeRowPath ?? null;
+      const rowKind = row.dataset.treeRowKind as TreeRowKind | undefined;
+      const parentRelPath = row.dataset.treeParentPath ?? "";
+      if (!relPath || !rowKind) {
+        return { mode: "root", targetRelPath: null };
+      }
 
-    if (rowKind === "directory") {
-      return { mode: "directory", targetRelPath: relPath };
-    }
+      if (rowKind === "directory") {
+        return { mode: "directory", targetRelPath: relPath };
+      }
 
-    return { mode: "directory", targetRelPath: parentRelPath };
-  }, []);
+      return { mode: "directory", targetRelPath: parentRelPath };
+    },
+    [],
+  );
 
   const computeDropTargetFromPoint = useCallback(
     (clientX: number, clientY: number): TreeDropTarget | null => {
@@ -769,10 +774,7 @@ export default memo(function RightSidebar({
 
         if (payload.type === "over") {
           const pointer = toPointer(payload.position);
-          setExternalDragTarget(
-            computeDropTargetFromPoint(pointer.x, pointer.y),
-            pointer,
-          );
+          setExternalDragTarget(computeDropTargetFromPoint(pointer.x, pointer.y), pointer);
           return;
         }
 
@@ -1093,11 +1095,7 @@ export default memo(function RightSidebar({
     const cm = contextMenuActionRef.current;
     if (!cm) return;
     const destDir =
-      cm.kind === "directory"
-        ? cm.relPath
-        : cm.kind === "root"
-          ? ""
-          : getParentRelPath(cm.relPath);
+      cm.kind === "directory" ? cm.relPath : cm.kind === "root" ? "" : getParentRelPath(cm.relPath);
     void invoke<string[]>("read_clipboard_file_paths")
       .then((clipPaths) => {
         if (clipPaths.length > 0) {
@@ -1150,10 +1148,7 @@ export default memo(function RightSidebar({
             onRefreshExplorer={refreshTree}
             onCollapseAll={handleCollapseAll}
           />
-          <ContextMenu
-            open={contextMenu !== null}
-            onOpenChange={handleContextMenuOpenChange}
-          >
+          <ContextMenu open={contextMenu !== null} onOpenChange={handleContextMenuOpenChange}>
             <ContextMenuTrigger
               className="relative min-h-0 flex-1"
               onContextMenuCapture={handleTreeContextMenuCapture}
@@ -1170,7 +1165,9 @@ export default memo(function RightSidebar({
                 onDragLeave={handleTreeDragLeave}
                 onDrop={handleTreeDrop}
               >
-                {rootEntries === null && rootEntriesQuery.isFetching ? <RightSidebarPanelLoader /> : null}
+                {rootEntries === null && rootEntriesQuery.isFetching ? (
+                  <RightSidebarPanelLoader />
+                ) : null}
                 {rootError ? (
                   <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
                 ) : null}
@@ -1264,7 +1261,9 @@ export default memo(function RightSidebar({
                                 const absPath = ctx.relPath
                                   ? `${workspaceRoot}/${ctx.relPath}`
                                   : workspaceRoot;
-                                invoke("open_in_app", { path: absPath, appId: editor.id }).catch(() => {});
+                                invoke("open_in_app", { path: absPath, appId: editor.id }).catch(
+                                  () => {},
+                                );
                               }}
                             >
                               {editor.displayName}
@@ -1276,19 +1275,13 @@ export default memo(function RightSidebar({
                     <ContextMenuItem onClick={handleContextMenuCopyRelativePath}>
                       Copy Relative Path
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={handleContextMenuCopyPath}>
-                      Copy Path
-                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleContextMenuCopyPath}>Copy Path</ContextMenuItem>
                     <ContextMenuSeparator />
-                    <ContextMenuItem onClick={handleContextMenuCopy}>
-                      Copy
-                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleContextMenuCopy}>Copy</ContextMenuItem>
                     <ContextMenuItem onClick={handleRenameEntry}>Rename</ContextMenuItem>
                   </>
                 ) : null}
-                <ContextMenuItem onClick={handleContextMenuPaste}>
-                  Paste
-                </ContextMenuItem>
+                <ContextMenuItem onClick={handleContextMenuPaste}>Paste</ContextMenuItem>
                 {contextMenu.kind !== "root" ? (
                   <>
                     <ContextMenuSeparator />

@@ -1,15 +1,9 @@
 import type * as React from "react";
 import { cn } from "@/lib/shared/utils";
 
-export function Table({
-  className,
-  ...props
-}: React.ComponentProps<"table">): React.ReactElement {
+export function Table({ className, ...props }: React.ComponentProps<"table">): React.ReactElement {
   return (
-    <div
-      className="relative w-full overflow-x-auto"
-      data-slot="table-container"
-    >
+    <div className="relative w-full overflow-x-auto" data-slot="table-container">
       <table
         className={cn(
           "w-full caption-bottom in-data-[slot=frame]:border-separate in-data-[slot=frame]:border-spacing-0 text-sm",
@@ -70,10 +64,7 @@ export function TableFooter({
   );
 }
 
-export function TableRow({
-  className,
-  ...props
-}: React.ComponentProps<"tr">): React.ReactElement {
+export function TableRow({ className, ...props }: React.ComponentProps<"tr">): React.ReactElement {
   return (
     <tr
       className={cn(
@@ -86,10 +77,7 @@ export function TableRow({
   );
 }
 
-export function TableHead({
-  className,
-  ...props
-}: React.ComponentProps<"th">): React.ReactElement {
+export function TableHead({ className, ...props }: React.ComponentProps<"th">): React.ReactElement {
   return (
     <th
       className={cn(
@@ -102,10 +90,7 @@ export function TableHead({
   );
 }
 
-export function TableCell({
-  className,
-  ...props
-}: React.ComponentProps<"td">): React.ReactElement {
+export function TableCell({ className, ...props }: React.ComponentProps<"td">): React.ReactElement {
   return (
     <td
       className={cn(
@@ -124,10 +109,7 @@ export function TableCaption({
 }: React.ComponentProps<"caption">): React.ReactElement {
   return (
     <caption
-      className={cn(
-        "in-data-[slot=frame]:my-4 mt-4 text-muted-foreground text-sm",
-        className,
-      )}
+      className={cn("in-data-[slot=frame]:my-4 mt-4 text-muted-foreground text-sm", className)}
       data-slot="table-caption"
       {...props}
     />

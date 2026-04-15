@@ -22,8 +22,7 @@ export const toggleVariants = cva(
         default: "border-transparent",
         outline:
           "border-input bg-background not-dark:bg-clip-padding shadow-xs/5 not-disabled:not-active:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-input/32 dark:data-pressed:bg-input dark:hover:bg-input/64 dark:not-disabled:not-active:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)] dark:not-disabled:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/2%)] [:disabled,:active,[data-pressed]]:shadow-none",
-        diff:
-          "border-transparent bg-[var(--theme-panel-elevated)] text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] data-pressed:bg-[var(--theme-panel-hover)] data-pressed:text-[var(--theme-text)]",
+        diff: "border-transparent bg-[var(--theme-panel-elevated)] text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] data-pressed:bg-[var(--theme-panel-hover)] data-pressed:text-[var(--theme-text)]",
       },
     },
   },
@@ -34,8 +33,7 @@ export function Toggle({
   variant,
   size,
   ...props
-}: TogglePrimitive.Props &
-  VariantProps<typeof toggleVariants>): React.ReactElement {
+}: TogglePrimitive.Props & VariantProps<typeof toggleVariants>): React.ReactElement {
   return (
     <TogglePrimitive
       className={cn(toggleVariants({ className, size, variant }))}

@@ -13,15 +13,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 export function Sheet<Payload = unknown>(
   props: SheetPrimitive.Root.Props<Payload>,
 ): React.ReactElement {
-  const {
-    defaultOpen,
-    onOpenChange,
-    open: openProp,
-    ...rest
-  } = props;
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
-    defaultOpen ?? false,
-  );
+  const { defaultOpen, onOpenChange, open: openProp, ...rest } = props;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const open = openProp ?? uncontrolledOpen;
   useNativeTerminalOverlay(open ? "semi-transparent" : null);
 
@@ -37,26 +30,16 @@ export function Sheet<Payload = unknown>(
     [onOpenChange, openProp],
   );
 
-  return (
-    <SheetPrimitive.Root
-      {...rest}
-      open={open}
-      onOpenChange={handleOpenChange}
-    />
-  );
+  return <SheetPrimitive.Root {...rest} open={open} onOpenChange={handleOpenChange} />;
 }
 
 export const SheetPortal: typeof SheetPrimitive.Portal = SheetPrimitive.Portal;
 
-export function SheetTrigger(
-  props: SheetPrimitive.Trigger.Props,
-): React.ReactElement {
+export function SheetTrigger(props: SheetPrimitive.Trigger.Props): React.ReactElement {
   return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
 }
 
-export function SheetClose(
-  props: SheetPrimitive.Close.Props,
-): React.ReactElement {
+export function SheetClose(props: SheetPrimitive.Close.Props): React.ReactElement {
   return <SheetPrimitive.Close data-slot="sheet-close" {...props} />;
 }
 
@@ -209,10 +192,7 @@ export function SheetTitle({
 }: SheetPrimitive.Title.Props): React.ReactElement {
   return (
     <SheetPrimitive.Title
-      className={cn(
-        "font-heading font-semibold text-xl leading-none",
-        className,
-      )}
+      className={cn("font-heading font-semibold text-xl leading-none", className)}
       data-slot="sheet-title"
       {...props}
     />
@@ -259,8 +239,4 @@ export function SheetPanel({
   );
 }
 
-export {
-  SheetPrimitive,
-  SheetBackdrop as SheetOverlay,
-  SheetPopup as SheetContent,
-};
+export { SheetPrimitive, SheetBackdrop as SheetOverlay, SheetPopup as SheetContent };

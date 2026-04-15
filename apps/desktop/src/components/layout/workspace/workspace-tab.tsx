@@ -175,7 +175,9 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
   const label = tabLabel(tab, slotsMap, sessionsMap, displayMap);
   const scmDecoration =
     tab.kind === "editor" || tab.kind === "diff"
-      ? (scmEntry ? decorationForScmEntry(scmEntry) : null)
+      ? scmEntry
+        ? decorationForScmEntry(scmEntry)
+        : null
       : null;
 
   return (

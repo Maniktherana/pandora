@@ -195,7 +195,9 @@ export default function ProjectTerminalSidebar({
                     onRenameClick={handleRenameClick}
                     onCloseClick={handleCloseClick}
                     onRenameValueChange={(value) => {
-                      setRenameState((prev) => (prev && prev.slotId === row.slotId ? { ...prev, value } : prev));
+                      setRenameState((prev) =>
+                        prev && prev.slotId === row.slotId ? { ...prev, value } : prev,
+                      );
                     }}
                     onRenameSubmit={submitRename}
                     onRenameCancel={() => setRenameState(null)}

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type BranchPrefixMode = "github-username" | "custom" | "none";
+export type ArchivePushBehavior = "ask" | "always";
 export type FontOption =
   | "system-default"
   | "segoe-ui"
@@ -42,6 +43,7 @@ export interface SettingsStore {
   branchPrefixCustom: string;
   deleteLocalBranchOnArchive: boolean;
   archiveOnMerge: boolean;
+  archivePushBehavior: ArchivePushBehavior;
 
   // Scripts
   runTeardownOnArchive: boolean;
@@ -61,6 +63,7 @@ export interface SettingsStore {
   setBranchPrefixMode: (mode: BranchPrefixMode, custom?: string) => void;
   setDeleteLocalBranchOnArchive: (value: boolean) => void;
   setArchiveOnMerge: (value: boolean) => void;
+  setArchivePushBehavior: (value: ArchivePushBehavior) => void;
   setRunTeardownOnArchive: (value: boolean) => void;
 }
 
@@ -126,6 +129,7 @@ export const useSettingsStore = create<SettingsStore>()(
       branchPrefixCustom: "",
       deleteLocalBranchOnArchive: false,
       archiveOnMerge: false,
+      archivePushBehavior: "ask",
       runTeardownOnArchive: true,
 
       setTheme: (themeId: string) => set({ selectedThemeId: themeId }),
@@ -150,6 +154,7 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ branchPrefixMode: mode, branchPrefixCustom: custom }),
       setDeleteLocalBranchOnArchive: (value: boolean) => set({ deleteLocalBranchOnArchive: value }),
       setArchiveOnMerge: (value: boolean) => set({ archiveOnMerge: value }),
+      setArchivePushBehavior: (value: ArchivePushBehavior) => set({ archivePushBehavior: value }),
       setRunTeardownOnArchive: (value: boolean) => set({ runTeardownOnArchive: value }),
     }),
     {

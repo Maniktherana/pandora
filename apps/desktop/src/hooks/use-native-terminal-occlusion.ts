@@ -12,12 +12,7 @@ const OCCLUSION_EXIT_HOLD_MS = 260;
 function rectsEqual(a: SurfaceRect | null, b: SurfaceRect | null) {
   if (a === b) return true;
   if (!a || !b) return false;
-  return (
-    a.x === b.x &&
-    a.y === b.y &&
-    a.width === b.width &&
-    a.height === b.height
-  );
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 function measureOcclusionRect(element: HTMLElement, padding: number): SurfaceRect | null {

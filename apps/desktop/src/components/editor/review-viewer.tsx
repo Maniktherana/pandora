@@ -493,7 +493,8 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       }
     };
     window.addEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
-    return () => window.removeEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
+    return () =>
+      window.removeEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
   }, [workspace, workspaceId]);
 
   const filteredEntries = useMemo(() => {
@@ -530,25 +531,22 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     untrackedPaths,
     { enabled: activeSource !== null && activeSource !== "branch" },
   );
-  const statsByKey = useMemo(
-    () => {
-      if (activeSource === "branch") {
-        return Object.fromEntries(
-          (filteredEntries as ScmBranchChange[]).map((entry) => [
-            statsKey(entry.path, "branch"),
-            { added: entry.added, removed: entry.removed },
-          ]),
-        );
-      }
+  const statsByKey = useMemo(() => {
+    if (activeSource === "branch") {
       return Object.fromEntries(
-        bulkStats.map((stat) => [
-          statsKey(stat.path, activeSource === "staged" ? "staged" : "working"),
-          stat,
+        (filteredEntries as ScmBranchChange[]).map((entry) => [
+          statsKey(entry.path, "branch"),
+          { added: entry.added, removed: entry.removed },
         ]),
       );
-    },
-    [activeSource, bulkStats, filteredEntries],
-  );
+    }
+    return Object.fromEntries(
+      bulkStats.map((stat) => [
+        statsKey(stat.path, activeSource === "staged" ? "staged" : "working"),
+        stat,
+      ]),
+    );
+  }, [activeSource, bulkStats, filteredEntries]);
   const decorationByPath = useMemo(
     () =>
       Object.fromEntries(
@@ -906,7 +904,8 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               </div>
             ) : (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
-                No {mode === "branch" ? "branch" : mode === "staged" ? "staged" : "unstaged"} changes to review.
+                No {mode === "branch" ? "branch" : mode === "staged" ? "staged" : "unstaged"}{" "}
+                changes to review.
               </div>
             )}
           </div>

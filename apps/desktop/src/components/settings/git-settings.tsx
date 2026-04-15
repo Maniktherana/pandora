@@ -1,18 +1,16 @@
-import { useSettingsStore, type BranchPrefixMode } from "@/state/settings-store";
+import { useSettingsStore } from "@/state/settings-store";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 
 export default function GitSettings() {
   const branchPrefixMode = useSettingsStore((s) => s.branchPrefixMode);
   const branchPrefixCustom = useSettingsStore((s) => s.branchPrefixCustom);
-  const deleteLocalBranchOnArchive = useSettingsStore((s) => s.deleteLocalBranchOnArchive);
-  const archiveDeletesWorktree = useSettingsStore((s) => s.archiveDeletesWorktree);
   const archiveOnMerge = useSettingsStore((s) => s.archiveOnMerge);
+  const archivePushBehavior = useSettingsStore((s) => s.archivePushBehavior);
   const runTeardownOnArchive = useSettingsStore((s) => s.runTeardownOnArchive);
   const setBranchPrefixMode = useSettingsStore((s) => s.setBranchPrefixMode);
-  const setDeleteLocalBranchOnArchive = useSettingsStore((s) => s.setDeleteLocalBranchOnArchive);
-  const setArchiveDeletesWorktree = useSettingsStore((s) => s.setArchiveDeletesWorktree);
   const setArchiveOnMerge = useSettingsStore((s) => s.setArchiveOnMerge);
+  const setArchivePushBehavior = useSettingsStore((s) => s.setArchivePushBehavior);
   const setRunTeardownOnArchive = useSettingsStore((s) => s.setRunTeardownOnArchive);
 
   return (
@@ -29,47 +27,43 @@ export default function GitSettings() {
         </div>
         <div className="space-y-2 pl-1">
           <label className="flex items-center gap-3 cursor-pointer">
-            <input type="radio" name="branch-prefix" checked={branchPrefixMode === "github-username"} onChange={() => setBranchPrefixMode("github-username")} className="h-3.5 w-3.5 accent-[var(--theme-interactive)]" />
-            <span className="text-sm text-[var(--theme-text)]">GitHub username (Maniktherana)</span>
+            <input
+              type="radio"
+              name="branch-prefix"
+              checked={branchPrefixMode === "github-username"}
+              onChange={() => setBranchPrefixMode("github-username")}
+              className="h-3.5 w-3.5 accent-[var(--theme-interactive)]"
+            />
+            <span className="text-sm text-[var(--theme-text)]">GitHub username</span>
           </label>
           <label className="flex items-center gap-3 cursor-pointer">
-            <input type="radio" name="branch-prefix" checked={branchPrefixMode === "custom"} onChange={() => setBranchPrefixMode("custom", branchPrefixCustom)} className="h-3.5 w-3.5 accent-[var(--theme-interactive)]" />
+            <input
+              type="radio"
+              name="branch-prefix"
+              checked={branchPrefixMode === "custom"}
+              onChange={() => setBranchPrefixMode("custom", branchPrefixCustom)}
+              className="h-3.5 w-3.5 accent-[var(--theme-interactive)]"
+            />
             <span className="text-sm text-[var(--theme-text)]">Custom</span>
           </label>
           {branchPrefixMode === "custom" && (
-            <Input placeholder="Enter prefix" value={branchPrefixCustom} onChange={(e) => setBranchPrefixMode("custom", e.target.value)} className="ml-7 w-56" />
+            <Input
+              placeholder="Enter prefix"
+              value={branchPrefixCustom}
+              onChange={(e) => setBranchPrefixMode("custom", e.target.value)}
+              className="ml-7 w-56"
+            />
           )}
           <label className="flex items-center gap-3 cursor-pointer">
-            <input type="radio" name="branch-prefix" checked={branchPrefixMode === "none"} onChange={() => setBranchPrefixMode("none")} className="h-3.5 w-3.5 accent-[var(--theme-interactive)]" />
+            <input
+              type="radio"
+              name="branch-prefix"
+              checked={branchPrefixMode === "none"}
+              onChange={() => setBranchPrefixMode("none")}
+              className="h-3.5 w-3.5 accent-[var(--theme-interactive)]"
+            />
             <span className="text-sm text-[var(--theme-text)]">None</span>
           </label>
-        </div>
-      </section>
-
-      {/* Delete worktree on archive */}
-      <section className="border-t border-[var(--theme-border)] pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">Delete worktree on archive</h2>
-            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-              Permanently delete the git worktree folder when archiving. Cannot be undone.
-            </p>
-          </div>
-          <Switch checked={archiveDeletesWorktree} onCheckedChange={setArchiveDeletesWorktree} />
-        </div>
-      </section>
-
-      {/* Delete Branch on Archive */}
-      <section className="border-t border-[var(--theme-border)] pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">Delete branch on archive</h2>
-            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-              Delete the local branch when archiving a workspace.
-              To delete the remote branch, configure it on GitHub.
-            </p>
-          </div>
-          <Switch checked={deleteLocalBranchOnArchive} onCheckedChange={setDeleteLocalBranchOnArchive} />
         </div>
       </section>
 
@@ -85,11 +79,30 @@ export default function GitSettings() {
           <Switch checked={archiveOnMerge} onCheckedChange={setArchiveOnMerge} />
         </div>
       </section>
+      <section className="border-t border-[var(--theme-border)] pt-6">
+        <div className="flex items-start justify-between">
+          <div className="flex-1 pr-6">
+            <h2 className="text-sm font-medium text-[var(--theme-text)]">
+              Automatically push before archiving
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
+              When a branch needs to be pushed first, push it before archiving so restore stays
+              remote-safe.
+            </p>
+          </div>
+          <Switch
+            checked={archivePushBehavior === "always"}
+            onCheckedChange={(checked) => setArchivePushBehavior(checked ? "always" : "ask")}
+          />
+        </div>
+      </section>
       {/* Run teardown on archive */}
       <section className="border-t border-[var(--theme-border)] pt-6">
         <div className="flex items-start justify-between">
           <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">Run teardown scripts on archive</h2>
+            <h2 className="text-sm font-medium text-[var(--theme-text)]">
+              Run teardown scripts on archive
+            </h2>
             <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
               Execute teardown scripts before archiving a workspace.
             </p>
