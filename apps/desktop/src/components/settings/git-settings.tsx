@@ -1,17 +1,10 @@
 import { useSettingsStore } from "@/state/settings-store";
-import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 
 export default function GitSettings() {
   const branchPrefixMode = useSettingsStore((s) => s.branchPrefixMode);
   const branchPrefixCustom = useSettingsStore((s) => s.branchPrefixCustom);
-  const archiveOnMerge = useSettingsStore((s) => s.archiveOnMerge);
-  const archivePushBehavior = useSettingsStore((s) => s.archivePushBehavior);
-  const runTeardownOnArchive = useSettingsStore((s) => s.runTeardownOnArchive);
   const setBranchPrefixMode = useSettingsStore((s) => s.setBranchPrefixMode);
-  const setArchiveOnMerge = useSettingsStore((s) => s.setArchiveOnMerge);
-  const setArchivePushBehavior = useSettingsStore((s) => s.setArchivePushBehavior);
-  const setRunTeardownOnArchive = useSettingsStore((s) => s.setRunTeardownOnArchive);
 
   return (
     <div className="space-y-8">
@@ -64,50 +57,6 @@ export default function GitSettings() {
             />
             <span className="text-sm text-[var(--theme-text)]">None</span>
           </label>
-        </div>
-      </section>
-
-      {/* Archive on Merge */}
-      <section className="border-t border-[var(--theme-border)] pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">Archive on merge</h2>
-            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-              Automatically archive a workspace after merging its PR.
-            </p>
-          </div>
-          <Switch checked={archiveOnMerge} onCheckedChange={setArchiveOnMerge} />
-        </div>
-      </section>
-      <section className="border-t border-[var(--theme-border)] pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">
-              Automatically push before archiving
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-              When a branch needs to be pushed first, push it before archiving so restore stays
-              remote-safe.
-            </p>
-          </div>
-          <Switch
-            checked={archivePushBehavior === "always"}
-            onCheckedChange={(checked) => setArchivePushBehavior(checked ? "always" : "ask")}
-          />
-        </div>
-      </section>
-      {/* Run teardown on archive */}
-      <section className="border-t border-[var(--theme-border)] pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 pr-6">
-            <h2 className="text-sm font-medium text-[var(--theme-text)]">
-              Run teardown scripts on archive
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--theme-text-subtle)]">
-              Execute teardown scripts before archiving a workspace.
-            </p>
-          </div>
-          <Switch checked={runTeardownOnArchive} onCheckedChange={setRunTeardownOnArchive} />
         </div>
       </section>
     </div>

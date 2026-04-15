@@ -123,10 +123,6 @@ export async function linkPr(workspaceId: string, prUrl: string, prNumber: numbe
   return invoke("pr_link", { workspaceId, prUrl, prNumber });
 }
 
-export async function archiveWorkspace(workspaceId: string): Promise<void> {
-  return invoke("archive_workspace", { workspaceId });
-}
-
 /**
  * Regex to detect GitHub PR URLs in terminal output.
  * Matches: https://github.com/owner/repo/pull/123

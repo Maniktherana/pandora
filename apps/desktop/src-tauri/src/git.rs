@@ -722,7 +722,7 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
         }
         Err(e) if e.raw_os_error() == Some(18 /* EXDEV */) => {
             // Cross-filesystem: fall back to synchronous removal.
-            let _ = run_git(&[
+            let git_remove_result = run_git(&[
                 "-C",
                 &project.git_root_path,
                 "worktree",
@@ -730,7 +730,18 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
                 "--force",
                 &workspace.worktree_path,
             ]);
-            let _ = std::fs::remove_dir_all(&workspace.worktree_path);
+            let fs_remove_result = std::fs::remove_dir_all(&workspace.worktree_path);
+            if wt.exists() {
+                return Err(format!(
+                    "Failed to delete worktree '{}': git remove error: {}; fs remove error: {}",
+                    workspace.worktree_path,
+                    git_remove_result.err().unwrap_or_else(|| "none".into()),
+                    fs_remove_result
+                        .err()
+                        .map(|err| err.to_string())
+                        .unwrap_or_else(|| "none".into())
+                ));
+            }
             Ok(())
         }
         Err(e) => {
@@ -739,7 +750,7 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
                 "Worktree rename failed ({}), falling back to synchronous removal",
                 e
             );
-            let _ = run_git(&[
+            let git_remove_result = run_git(&[
                 "-C",
                 &project.git_root_path,
                 "worktree",
@@ -747,7 +758,18 @@ pub fn remove_worktree(workspace: &WorkspaceRecord, project: &ProjectRecord) -> 
                 "--force",
                 &workspace.worktree_path,
             ]);
-            let _ = std::fs::remove_dir_all(&workspace.worktree_path);
+            let fs_remove_result = std::fs::remove_dir_all(&workspace.worktree_path);
+            if wt.exists() {
+                return Err(format!(
+                    "Failed to delete worktree '{}': git remove error: {}; fs remove error: {}",
+                    workspace.worktree_path,
+                    git_remove_result.err().unwrap_or_else(|| "none".into()),
+                    fs_remove_result
+                        .err()
+                        .map(|err| err.to_string())
+                        .unwrap_or_else(|| "none".into())
+                ));
+            }
             Ok(())
         }
     }
@@ -839,8 +861,8 @@ pub fn archive_safety(workspace: &WorkspaceRecord, _project: &ProjectRecord) -> 
         };
     }
 
-    let branch =
-        current_branch(&workspace.worktree_path).unwrap_or_else(|_| workspace.git_branch_name.clone());
+    let branch = current_branch(&workspace.worktree_path)
+        .unwrap_or_else(|_| workspace.git_branch_name.clone());
     if branch != workspace.git_branch_name {
         return ArchiveSafety {
             can_archive: false,

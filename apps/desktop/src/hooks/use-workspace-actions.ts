@@ -6,7 +6,7 @@ import type { DesktopViewStateSnapshot } from "@/state/desktop-view-projections"
 import { useDesktopEffectRunner } from "./use-bootstrap-desktop";
 
 export function useWorkspaceActions() {
-  const { run } = useDesktopEffectRunner();
+  const { run, runPromise } = useDesktopEffectRunner();
 
   return useMemo(
     () => ({
@@ -67,12 +67,6 @@ export function useWorkspaceActions() {
             service.renameWorkspace(workspaceId, name),
           ),
         ),
-      removeWorkspace: (workspaceId: string) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.removeWorkspace(workspaceId),
-          ),
-        ),
       updateWorkspacePrState: (workspaceId: string, prState: string) =>
         run(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
@@ -85,21 +79,27 @@ export function useWorkspaceActions() {
             service.setPrAwaiting(workspaceId, awaiting),
           ),
         ),
-      archiveWorkspace: (workspaceId: string) =>
-        run(
+      archiveWorkspace: (workspaceId: string, options?: { deleteWorktree?: boolean }) =>
+        runPromise(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.archiveWorkspace(workspaceId),
+            service.archiveWorkspace(workspaceId, options),
           ),
         ),
       restoreWorkspace: (workspaceId: string) =>
-        run(
+        runPromise(
           Effect.flatMap(DesktopWorkspaceService, (service) =>
             service.restoreWorkspace(workspaceId),
+          ),
+        ),
+      removeWorkspace: (workspaceId: string) =>
+        runPromise(
+          Effect.flatMap(DesktopWorkspaceService, (service) =>
+            service.removeWorkspace(workspaceId),
           ),
         ),
       connectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.connect())),
       disconnectDaemon: () => run(Effect.flatMap(DaemonGateway, (gateway) => gateway.disconnect())),
     }),
-    [run],
+    [run, runPromise],
   );
 }

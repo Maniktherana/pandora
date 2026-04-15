@@ -346,11 +346,9 @@ pub async fn remove_workspace(
     if workspace.workspace_kind == WorkspaceKind::Worktree {
         if let Some(project) = project {
             let ws = workspace.clone();
-            tokio::task::spawn_blocking(move || {
-                let _ = git::remove_worktree(&ws, &project);
-            })
-            .await
-            .map_err(|e| e.to_string())?;
+            tokio::task::spawn_blocking(move || git::remove_worktree(&ws, &project))
+                .await
+                .map_err(|e| e.to_string())??;
         }
     }
 
@@ -1104,6 +1102,7 @@ pub struct CanArchiveResult {
 pub async fn can_archive_workspace(
     db: tauri::State<'_, DbState>,
     workspace_id: String,
+    _delete_worktree: Option<bool>,
 ) -> Result<CanArchiveResult, String> {
     let workspaces = db.0.load_workspaces(None);
     let workspace = workspaces
@@ -1111,12 +1110,11 @@ pub async fn can_archive_workspace(
         .find(|w| w.id == workspace_id)
         .ok_or("Workspace not found")?;
 
-    let project = db
-        .0
-        .load_projects()
-        .into_iter()
-        .find(|p| p.id == workspace.project_id)
-        .ok_or("Project not found")?;
+    let project =
+        db.0.load_projects()
+            .into_iter()
+            .find(|p| p.id == workspace.project_id)
+            .ok_or("Project not found")?;
 
     let safety = tokio::task::spawn_blocking(move || git::archive_safety(&workspace, &project))
         .await
@@ -1137,6 +1135,7 @@ pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
     daemon_state: tauri::State<'_, DaemonState>,
     workspace_id: String,
+    delete_worktree: Option<bool>,
     run_teardown: Option<bool>,
 ) -> Result<(), String> {
     let workspaces = db.0.load_workspaces(None);
@@ -1148,8 +1147,14 @@ pub async fn archive_workspace(
     // Optimistic UI: mark as deleting so it vanishes from queries immediately.
     db.0.mark_workspace_deleting(&workspace_id)?;
 
-    let result =
-        archive_workspace_inner(&db, &daemon_state, &workspace, run_teardown.unwrap_or(true)).await;
+    let result = archive_workspace_inner(
+        &db,
+        &daemon_state,
+        &workspace,
+        delete_worktree.unwrap_or(false),
+        run_teardown.unwrap_or(true),
+    )
+    .await;
 
     match result {
         Ok(()) => {
@@ -1170,13 +1175,31 @@ async fn archive_workspace_inner(
     db: &tauri::State<'_, DbState>,
     daemon_state: &tauri::State<'_, DaemonState>,
     workspace: &WorkspaceRecord,
+    delete_worktree: bool,
     run_teardown: bool,
 ) -> Result<(), String> {
-    // Stop runtime
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace.id).await;
-
     let projects = db.0.load_projects();
     let project = projects.into_iter().find(|p| p.id == workspace.project_id);
+
+    if workspace.workspace_kind == WorkspaceKind::Worktree {
+        if let Some(ref proj) = project {
+            let safety_workspace = workspace.clone();
+            let safety_project = proj.clone();
+            let safety = tokio::task::spawn_blocking(move || {
+                git::archive_safety(&safety_workspace, &safety_project)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            if !safety.can_archive {
+                return Err(safety
+                    .message
+                    .unwrap_or_else(|| "Workspace is not safe to archive.".into()));
+            }
+        }
+    }
+
+    // Stop runtime
+    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace.id).await;
 
     // Run teardown scripts if requested
     if run_teardown {
@@ -1233,22 +1256,8 @@ async fn archive_workspace_inner(
         }
     }
 
-    // Archive reclaims disk space for Pandora-created worktrees. Linked workspaces are metadata-only.
-    if workspace.workspace_kind == WorkspaceKind::Worktree {
+    if delete_worktree && workspace.workspace_kind == WorkspaceKind::Worktree {
         if let Some(ref proj) = project {
-            let safety_workspace = workspace.clone();
-            let safety_project = proj.clone();
-            let safety = tokio::task::spawn_blocking(move || {
-                git::archive_safety(&safety_workspace, &safety_project)
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-            if !safety.can_archive {
-                return Err(safety
-                    .message
-                    .unwrap_or_else(|| "Workspace is not safe to archive.".into()));
-            }
-
             let ws = workspace.clone();
             let proj_clone = proj.clone();
             tokio::task::spawn_blocking(move || git::remove_worktree(&ws, &proj_clone))

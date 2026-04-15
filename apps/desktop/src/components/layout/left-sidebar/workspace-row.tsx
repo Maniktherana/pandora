@@ -1,22 +1,18 @@
 import { memo, useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Archive03Icon,
   ExternalDriveIcon,
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
   GitPullRequestIcon,
-  Refresh01Icon,
   SplitIcon,
   Clock01Icon,
 } from "@hugeicons/core-free-icons";
 import { open } from "@tauri-apps/plugin-shell";
-import { invoke } from "@tauri-apps/api/core";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -32,12 +28,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/preview-card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/preview-card";
 import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
-import type { WorkspaceRecord } from "@/lib/shared/types";
-import { useSettingsStore } from "@/state/settings-store";
+import type { WorkspaceRecord, WorkspaceRuntimeState } from "@/lib/shared/types";
 import {
   useScmLineStatsQuery,
   useScmStatusQuery,
@@ -47,7 +42,6 @@ import {
   isTerminalAgentAttentionStatus,
   workspaceTerminalAgentStatus,
 } from "@/lib/terminal/agent-activity";
-import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 
 function selectAgentStatus(runtime: WorkspaceRuntimeState | null) {
   return workspaceTerminalAgentStatus(runtime);
@@ -61,25 +55,14 @@ type WorkspaceRowProps = {
   workspace: WorkspaceRecord;
 };
 
-type CanArchiveResult = {
-  canArchive: boolean;
-  message: string | null;
-  hasUncommittedChanges: boolean;
-  hasUntrackedFiles: boolean;
-  hasUnpushedCommits: boolean;
-  hasRemoteBranch: boolean;
-};
-
 function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const navigationArea = useDesktopView((view) => view.navigationArea);
   const workspaceCommands = useWorkspaceActions();
-  const archivePushBehavior = useSettingsStore((s) => s.archivePushBehavior);
-  const setArchivePushBehavior = useSettingsStore((s) => s.setArchivePushBehavior);
   const [renameValue, setRenameValue] = useState<string | null>(null);
-  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  const [archiveBusy, setArchiveBusy] = useState(false);
-  const [rememberArchiveChoice, setRememberArchiveChoice] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
   const agentStatus = useRuntimeState(workspace.id, selectAgentStatus);
   const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
     enabled: workspace.status === "ready",
@@ -91,6 +74,8 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
   const isFailed = workspace.status === "failed";
+  const isArchived = workspace.status === "archived";
+  const isPending = pendingAction !== null;
   const addedCount = scmCounts?.added ?? 0;
   const removedCount = scmCounts?.removed ?? 0;
   const filesChanged = scmStatus?.length ?? 0;
@@ -98,6 +83,9 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;
   const prState = workspace.prState as string | null;
+  const hasChanges = addedCount > 0 || removedCount > 0;
+  const isRenaming = renameValue !== null;
+
   const stateIcon = useMemo(() => {
     if (prState === "open") {
       return { icon: GitPullRequestIcon, className: "text-green-400" };
@@ -117,11 +105,34 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
     return { icon: SplitIcon, className: "text-[var(--theme-text-subtle)]" };
   }, [prState, workspace.workspaceKind]);
 
-  const hasChanges = addedCount > 0 || removedCount > 0;
-  const isRenaming = renameValue !== null;
-  const isArchived = workspace.status === "archived";
+  const statusDotColor = useMemo(() => {
+    if (workspace.status === "creating") return "bg-yellow-400";
+    if (workspace.status === "archived") return "bg-[var(--theme-text-muted)]";
+    if (workspace.status === "ready" && hasChanges) return "bg-green-400";
+    return "bg-[var(--theme-text-muted)]";
+  }, [workspace.status, hasChanges]);
+
+  const prIcon = useMemo(() => {
+    if (prState === "merged") return { icon: GitMergeIcon, className: "text-purple-400" };
+    if (prState === "closed") return { icon: GitPullRequestClosedIcon, className: "text-red-400" };
+    if (prState === "draft") {
+      return { icon: GitPullRequestDraftIcon, className: "text-[var(--theme-text-muted)]" };
+    }
+    return { icon: GitPullRequestIcon, className: "text-green-400" };
+  }, [prState]);
+
+  const deleteDialogDescription = useMemo(() => {
+    if (workspace.workspaceKind === "linked") {
+      return "Are you sure? This will remove the workspace from Pandora. Your local files and branches will stay on disk.";
+    }
+    if (isArchived) {
+      return "Are you sure? This will permanently remove this workspace from Pandora. This can't be undone.";
+    }
+    return "Are you sure? This will delete the workspace and remove its Pandora worktree from disk. This can't be undone.";
+  }, [isArchived, workspace.workspaceKind]);
 
   const startRename = () => {
+    if (isArchived) return;
     setRenameValue(workspace.name);
   };
 
@@ -137,122 +148,72 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
     workspaceCommands.renameWorkspace(workspace.id, next);
   };
 
-  const restoreWorkspace = () => {
-    workspaceCommands.restoreWorkspace(workspace.id);
+  const requestDeleteWorkspace = () => {
+    if (isPending) return;
+    setDeleteDialogOpen(true);
   };
 
-  const pushAndArchiveWorkspace = async (rememberChoice: boolean) => {
-    setArchiveBusy(true);
+  const confirmDeleteWorkspace = async () => {
+    if (isPending) return;
+    setDeleteDialogOpen(false);
+    setPendingAction("deleting");
     try {
-      await invoke<string>("scm_push", { worktreePath: workspace.worktreePath });
-      if (rememberChoice) {
-        setArchivePushBehavior("always");
-      }
-      setArchiveDialogOpen(false);
-      setRememberArchiveChoice(false);
-      workspaceCommands.archiveWorkspace(workspace.id);
+      await workspaceCommands.removeWorkspace(workspace.id);
     } catch (error) {
-      window.alert(String(error));
-    } finally {
-      setArchiveBusy(false);
+      setPendingAction(null);
+      setDeleteErrorMessage(String(error));
     }
   };
-
-  const archiveWorkspace = async () => {
-    if (archiveBusy) return;
-    try {
-      const result = await invoke<CanArchiveResult>("can_archive_workspace", {
-        workspaceId: workspace.id,
-      });
-      if (!result.canArchive) {
-        const canFixByPushing =
-          typeof result.message === "string" && result.message.toLowerCase().startsWith("push");
-        if (canFixByPushing) {
-          if (archivePushBehavior === "always") {
-            await pushAndArchiveWorkspace(false);
-            return;
-          }
-          setArchiveDialogOpen(true);
-          return;
-        }
-        window.alert(result.message ?? "Workspace is not safe to archive.");
-        return;
-      }
-      workspaceCommands.archiveWorkspace(workspace.id);
-    } catch (error) {
-      window.alert(String(error));
-    }
-  };
-
-  const removeWorkspace = () => {
-    if (!window.confirm("This action is unrecoverable and all changes will be lost.")) {
-      return;
-    }
-    workspaceCommands.removeWorkspace(workspace.id);
-  };
-
-  const statusDotColor = useMemo(() => {
-    if (workspace.status === "creating") return "bg-yellow-400";
-    if (workspace.status === "archived") return "bg-[var(--theme-text-muted)]";
-    if (workspace.status === "ready" && hasChanges) return "bg-green-400";
-    return "bg-[var(--theme-text-muted)]";
-  }, [workspace.status, hasChanges]);
-
-  const prIcon = useMemo(() => {
-    if (prState === "merged") return { icon: GitMergeIcon, className: "text-purple-400" };
-    if (prState === "closed") return { icon: GitPullRequestClosedIcon, className: "text-red-400" };
-    if (prState === "draft")
-      return { icon: GitPullRequestDraftIcon, className: "text-[var(--theme-text-muted)]" };
-    return { icon: GitPullRequestIcon, className: "text-green-400" };
-  }, [prState]);
 
   return (
     <>
       <Dialog
-        open={archiveDialogOpen}
+        open={deleteErrorMessage != null}
         onOpenChange={(open) => {
-          if (!archiveBusy) {
-            setArchiveDialogOpen(open);
-            if (!open) {
-              setRememberArchiveChoice(false);
-            }
+          if (!open) {
+            setDeleteErrorMessage(null);
           }
         }}
       >
-        <DialogContent showCloseButton={!archiveBusy}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Push before archiving</DialogTitle>
-            <DialogDescription>
-              Archive removes this worktree checkout. Push the branch first so it can be restored
-              later.
-            </DialogDescription>
+            <DialogTitle>Couldn&apos;t delete workspace</DialogTitle>
+            <DialogDescription>{deleteErrorMessage}</DialogDescription>
           </DialogHeader>
-          <div className="px-6 pb-2">
-            <label className="flex items-center gap-3 text-sm text-[var(--theme-text)]">
-              <Checkbox
-                checked={rememberArchiveChoice}
-                disabled={archiveBusy}
-                onCheckedChange={(checked) => setRememberArchiveChoice(checked === true)}
-              />
-              <span>Remember my choice</span>
-            </label>
-          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteErrorMessage(null)}>
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!isPending) {
+            setDeleteDialogOpen(open);
+          }
+        }}
+      >
+        <DialogContent showCloseButton={!isPending}>
+          <DialogHeader>
+            <DialogTitle>Delete workspace</DialogTitle>
+            <DialogDescription>{deleteDialogDescription}</DialogDescription>
+          </DialogHeader>
           <DialogFooter>
             <Button
               variant="outline"
-              disabled={archiveBusy}
-              onClick={() => {
-                setArchiveDialogOpen(false);
-                setRememberArchiveChoice(false);
-              }}
+              disabled={isPending}
+              onClick={() => setDeleteDialogOpen(false)}
             >
               Cancel
             </Button>
             <Button
-              loading={archiveBusy}
-              onClick={() => void pushAndArchiveWorkspace(rememberArchiveChoice)}
+              variant="destructive"
+              loading={isPending && pendingAction === "deleting"}
+              onClick={() => void confirmDeleteWorkspace()}
             >
-              Push and Archive
+              Delete Workspace
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -262,42 +223,35 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
           <HoverCard>
             <HoverCardTrigger delay={300} render={<div />}>
               <div
-                role="button"
-                tabIndex={0}
+                role={isArchived ? undefined : "button"}
+                tabIndex={isArchived ? -1 : 0}
                 onClick={(event) => {
+                  if (isPending || isArchived) return;
                   if (isRowActionTarget(event.target)) return;
-                  if (isArchived) {
-                    restoreWorkspace();
-                    return;
-                  }
                   workspaceCommands.selectWorkspace(workspace.id);
                   workspaceCommands.setNavigationArea("sidebar");
                 }}
                 onDoubleClick={(event) => {
+                  if (isPending || isArchived) return;
                   if (isRowActionTarget(event.target)) return;
-                  if (isArchived) {
-                    restoreWorkspace();
-                    return;
-                  }
                   workspaceCommands.selectWorkspace(workspace.id);
                   workspaceCommands.setNavigationArea("workspace");
                 }}
                 onKeyDown={(event) => {
+                  if (isPending || isArchived) return;
                   if (isRowActionTarget(event.target)) return;
                   if (event.key !== "Enter" && event.key !== " ") return;
                   event.preventDefault();
-                  if (isArchived) {
-                    restoreWorkspace();
-                    return;
-                  }
                   workspaceCommands.selectWorkspace(workspace.id);
                   workspaceCommands.setNavigationArea("sidebar");
                 }}
                 className={cn(
-                  "flex h-10 w-full cursor-pointer select-none items-center gap-2 rounded-md border border-transparent px-2.5 text-left transition-colors outline-none focus-visible:border-[var(--theme-border)]",
+                  "flex h-10 w-full select-none items-center gap-2 rounded-md border border-transparent px-2.5 text-left transition-colors outline-none focus-visible:border-[var(--theme-border)]",
                   {
-                    "bg-[var(--theme-panel-hover)]": isActive || isSelected,
-                    "hover:bg-[var(--theme-panel-hover)]": !isActive && !isSelected,
+                    "cursor-pointer": !isArchived,
+                    "cursor-default": isArchived,
+                    "bg-[var(--theme-panel-hover)]": !isArchived && (isActive || isSelected),
+                    "hover:bg-[var(--theme-panel-hover)]": !isArchived && !isActive && !isSelected,
                   },
                 )}
               >
@@ -354,7 +308,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                     {workspace.name}
                   </span>
                 )}
-                {workspace.status === "creating" ? (
+                {workspace.status === "creating" || isPending ? (
                   <DotGridLoader
                     variant="default"
                     gridSize={3}
@@ -362,7 +316,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                     className="mr-1 shrink-0 opacity-80"
                   />
                 ) : null}
-                {!isFailed && workspace.status !== "creating" && (
+                {!isFailed && workspace.status !== "creating" && !isPending && (
                   <div className="relative h-4 w-16 shrink-0">
                     <span className="absolute inset-0 flex items-center justify-end gap-1 transition-opacity group-hover:opacity-0">
                       {addedCount > 0 && (
@@ -376,59 +330,27 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                         </span>
                       )}
                     </span>
-                    {isArchived ? (
-                      <span className="absolute inset-y-0 right-0 my-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <Button
-                          data-workspace-row-action="true"
-                          variant="ghost"
-                          size="icon-xs"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            restoreWorkspace();
-                          }}
-                          className="h-4 w-4 p-0 active:not-aria-[haspopup]:translate-y-0"
-                          title="Restore workspace"
-                          aria-label="Restore workspace"
-                        >
-                          <HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} className="size-4" />
-                        </Button>
-                        <Button
-                          data-workspace-row-action="true"
-                          variant="ghost"
-                          size="icon-xs"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            removeWorkspace();
-                          }}
-                          className="h-4 w-4 p-0 text-[var(--theme-text-muted)] hover:text-red-400 active:not-aria-[haspopup]:translate-y-0"
-                          title="Delete workspace record"
-                          aria-label="Delete workspace record"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button
-                        data-workspace-row-action="true"
-                        variant="ghost"
-                        size="icon-xs"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void archiveWorkspace();
-                        }}
-                        className="absolute inset-y-0 right-0 my-auto h-4 w-4 p-0 opacity-0 transition-opacity active:not-aria-[haspopup]:translate-y-0 group-hover:opacity-100"
-                        title="Archive workspace"
-                        aria-label="Archive workspace"
-                      >
-                        <HugeiconsIcon icon={Archive03Icon} strokeWidth={2} className="size-4" />
-                      </Button>
-                    )}
+                    <Button
+                      data-workspace-row-action="true"
+                      variant="ghost"
+                      size="icon-xs"
+                      disabled={isPending}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        requestDeleteWorkspace();
+                      }}
+                      className="absolute inset-y-0 right-0 my-auto h-4 w-4 p-0 opacity-0 transition-opacity text-[var(--theme-text-muted)] hover:text-red-400 active:not-aria-[haspopup]:translate-y-0 group-hover:opacity-100"
+                      title="Delete workspace"
+                      aria-label="Delete workspace"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
                   </div>
                 )}
-                {isFailed && <span className="font-mono text-[11px] text-red-400/80">failed</span>}
+                {isFailed && !isPending && (
+                  <span className="font-mono text-[11px] text-red-400/80">failed</span>
+                )}
               </div>
             </HoverCardTrigger>
 
@@ -438,7 +360,6 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
               className="w-72 bg-[var(--theme-panel-elevated)] p-0"
             >
               <div className="flex flex-col gap-2 p-3">
-                {/* Header: branch badge with status dot */}
                 <div className="flex items-center gap-2">
                   <HugeiconsIcon
                     icon={GitBranchIcon}
@@ -451,12 +372,10 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                   <span className={cn("ml-auto h-2 w-2 shrink-0 rounded-full", statusDotColor)} />
                 </div>
 
-                {/* Workspace name */}
                 <span className="truncate text-sm font-semibold text-[var(--theme-text)]">
                   {workspace.name}
                 </span>
 
-                {/* Stats line */}
                 {workspace.status === "ready" &&
                   (addedCount > 0 || removedCount > 0 || filesChanged > 0) && (
                     <div className="flex items-center gap-1.5 font-mono text-xs text-[var(--theme-text-subtle)]">
@@ -477,7 +396,6 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                     </div>
                   )}
 
-                {/* Time */}
                 <div className="flex items-center gap-1.5 text-xs text-[var(--theme-text-muted)]">
                   <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} className="h-3 w-3 shrink-0" />
                   <span>
@@ -488,7 +406,6 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                 </div>
               </div>
 
-              {/* PR footer */}
               {workspace.prUrl && workspace.prNumber != null && (
                 <div className="border-t border-[var(--theme-border)] px-3 py-2">
                   <button
@@ -520,26 +437,26 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
           </HoverCard>
 
           {workspace.status === "failed" && workspace.failureMessage && isSelected && (
-            <div className="px-7 pb-1 text-[11px] text-red-400/80 truncate">
+            <div className="px-7 pb-1 truncate text-[11px] text-red-400/80">
               {workspace.failureMessage}
             </div>
           )}
         </ContextMenuTrigger>
         <ContextMenuContent side="right" align="start" className="min-w-40">
-          <ContextMenuItem disabled={workspace.status === "creating"} onClick={startRename}>
+          <ContextMenuItem
+            disabled={workspace.status === "creating" || isPending || isArchived}
+            onClick={startRename}
+          >
             Rename
           </ContextMenuItem>
           <ContextMenuSeparator />
-          {isArchived ? (
-            <ContextMenuItem onClick={restoreWorkspace}>Restore</ContextMenuItem>
-          ) : (
-            <ContextMenuItem onClick={() => void archiveWorkspace()}>Archive</ContextMenuItem>
-          )}
-          {isArchived ? (
-            <ContextMenuItem variant="destructive" onClick={removeWorkspace}>
-              Delete Workspace
-            </ContextMenuItem>
-          ) : null}
+          <ContextMenuItem
+            variant="destructive"
+            disabled={isPending}
+            onClick={requestDeleteWorkspace}
+          >
+            Delete Workspace
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
     </>

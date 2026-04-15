@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type BranchPrefixMode = "github-username" | "custom" | "none";
-export type ArchivePushBehavior = "ask" | "always";
+export type ArchivePushBehavior = "ask" | "push-and-archive" | "delete-worktree";
 export type FontOption =
   | "system-default"
   | "segoe-ui"
@@ -70,6 +70,13 @@ export interface SettingsStore {
 const STORAGE_KEY = "pandora-settings";
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 24;
+
+export function normalizeArchivePushBehavior(value: unknown): ArchivePushBehavior {
+  if (value === "push-and-archive" || value === "delete-worktree") {
+    return value;
+  }
+  return "ask";
+}
 
 function clampFontSize(size: number) {
   return Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
@@ -154,13 +161,35 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ branchPrefixMode: mode, branchPrefixCustom: custom }),
       setDeleteLocalBranchOnArchive: (value: boolean) => set({ deleteLocalBranchOnArchive: value }),
       setArchiveOnMerge: (value: boolean) => set({ archiveOnMerge: value }),
-      setArchivePushBehavior: (value: ArchivePushBehavior) => set({ archivePushBehavior: value }),
+      setArchivePushBehavior: (value: ArchivePushBehavior) =>
+        set({ archivePushBehavior: normalizeArchivePushBehavior(value) }),
       setRunTeardownOnArchive: (value: boolean) => set({ runTeardownOnArchive: value }),
     }),
     {
       name: STORAGE_KEY,
-      version: 1,
-      migrate: (persisted) => persisted as SettingsStore,
+      version: 2,
+      migrate: (persisted) => {
+        const state = (persisted ?? {}) as Partial<SettingsStore> & {
+          archivePushBehavior?: unknown;
+        };
+        const persistedArchivePushBehavior = state.archivePushBehavior as unknown;
+        return {
+          ...state,
+          archivePushBehavior: normalizeArchivePushBehavior(
+            persistedArchivePushBehavior === "always" ? "ask" : persistedArchivePushBehavior,
+          ),
+        } as SettingsStore;
+      },
+      merge: (persisted, current) => {
+        const merged = {
+          ...current,
+          ...(persisted as Partial<SettingsStore>),
+        } as SettingsStore & { archivePushBehavior?: unknown };
+        return {
+          ...merged,
+          archivePushBehavior: normalizeArchivePushBehavior(merged.archivePushBehavior),
+        };
+      },
     },
   ),
 );
