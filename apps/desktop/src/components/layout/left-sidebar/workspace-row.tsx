@@ -228,12 +228,14 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
                 onClick={(event) => {
                   if (isPending || isArchived) return;
                   if (isRowActionTarget(event.target)) return;
+                  event.currentTarget.blur();
                   workspaceCommands.selectWorkspace(workspace.id);
                   workspaceCommands.setNavigationArea("sidebar");
                 }}
                 onDoubleClick={(event) => {
                   if (isPending || isArchived) return;
                   if (isRowActionTarget(event.target)) return;
+                  event.currentTarget.blur();
                   workspaceCommands.selectWorkspace(workspace.id);
                   workspaceCommands.setNavigationArea("workspace");
                 }}
