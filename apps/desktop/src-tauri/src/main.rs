@@ -10,6 +10,7 @@ mod database;
 mod git;
 mod models;
 mod native_shortcuts;
+mod runtime;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod ghostty_app;
@@ -126,16 +127,19 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("pandora_tauri=info")),
+        )
+        .init();
+
     // Truncate terminal diagnostic log on fresh launch.
     let _ = std::fs::write("/tmp/pandora-terminal.log", b"");
     tlog!("INIT", "pandora-tauri starting pid={}", std::process::id());
 
     let pandora_home = git::pandora_home();
     let db = AppDatabase::open(&pandora_home).expect("Failed to open database");
-    // Migrate old per-runtime SQLite DB files into the global app-state.db.
-    if let Err(e) = db.migrate_runtime_dbs(&pandora_home) {
-        eprintln!("Warning: runtime DB migration failed: {e}");
-    }
     let db = Arc::new(db);
 
     tauri::Builder::default()
@@ -166,11 +170,11 @@ fn main() {
             }
             _ => {}
         })
-        .manage(daemon_bridge::DaemonState::new())
+        .manage(daemon_bridge::new_state())
         .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
         .manage(DbState(db))
         .invoke_handler(tauri::generate_handler![
-            // Daemon bridge
+            // Runtime bridge
             daemon_bridge::daemon_send,
             // Native terminal surfaces (Ghostty on macOS arm64; stubs elsewhere)
             terminal_commands::terminal_surface_create,

@@ -141,8 +141,7 @@ unsafe extern "C" fn runtime_wakeup_cb(userdata: *mut c_void) {
 }
 
 /// Called when ghostty wants to perform a runtime action (new_window, new_tab, etc.).
-/// We return false for all actions since we don't handle ghostty-initiated actions;
-/// the daemon manages lifecycle.
+/// We return false for all actions since we don't handle ghostty-initiated actions.
 unsafe extern "C" fn runtime_action_cb(
     _app: ghostty_app_t,
     _target: ghostty_target_s,
@@ -188,7 +187,5 @@ unsafe extern "C" fn runtime_write_clipboard_cb(
 }
 
 /// Called when ghostty wants to close a surface.
-/// No-op: the daemon manages terminal lifecycle.
-unsafe extern "C" fn runtime_close_surface_cb(_userdata: *mut c_void, _process_alive: bool) {
-    // Intentionally empty. Daemon handles close.
-}
+/// No-op: the runtime manages terminal lifecycle via `close_session`.
+unsafe extern "C" fn runtime_close_surface_cb(_userdata: *mut c_void, _process_alive: bool) {}

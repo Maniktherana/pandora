@@ -4,14 +4,13 @@
 //! an absolute wall-clock timestamp, the thread name (or id), elapsed µs since
 //! process start, and a tag so you can grep for specific subsystems:
 //!
-//!   [FEED]    — feed_output (daemon read loop)
+//!   [FEED]    — feed_output
 //!   [FLUSH]   — flush_surface_output (main thread)
 //!   [CREATE]  — create_surface
 //!   [UPDATE]  — update_surface
 //!   [DESTROY] — destroy_surface
 //!   [FOCUS]   — focus_surface
 //!   [CMD]     — terminal_commands dispatch + completion
-//!   [DAEMON]  — daemon_bridge read loop
 //!   [OVERLAY] — begin/end_web_overlay
 
 use chrono::Local;

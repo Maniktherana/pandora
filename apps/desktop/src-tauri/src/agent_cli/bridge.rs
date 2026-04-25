@@ -1,12 +1,29 @@
 use std::fs;
 
-use serde_json::json;
 use tauri::{AppHandle, Manager};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 
 use super::paths::agent_socket_path;
 use super::types::AgentHookEnvelope;
+use crate::daemon_bridge::DaemonState;
+use crate::runtime::types::{AgentCliSignal, AgentVendor};
+
+/// Map a hook payload's `source` string into the `AgentVendor` enum the
+/// runtime understands. Unknown vendors are dropped so we don't surface
+/// garbage signals to the activity tracker.
+fn vendor_from_source(s: &str) -> Option<AgentVendor> {
+    match s {
+        "claude-code" => Some(AgentVendor::ClaudeCode),
+        "codex" => Some(AgentVendor::Codex),
+        "opencode" => Some(AgentVendor::Opencode),
+        "gemini" => Some(AgentVendor::Gemini),
+        "cursor-agent" => Some(AgentVendor::CursorAgent),
+        "github-copilot" => Some(AgentVendor::GithubCopilot),
+        "amp-code" => Some(AgentVendor::AmpCode),
+        _ => None,
+    }
+}
 
 async fn handle_hook_connection(app: AppHandle, mut stream: tokio::net::UnixStream) {
     let mut buffer = Vec::new();
@@ -24,28 +41,30 @@ async fn handle_hook_connection(app: AppHandle, mut stream: tokio::net::UnixStre
             Err(_) => continue,
         };
 
-        let source = match envelope.source.as_str() {
-            "claude-code" | "codex" | "opencode" | "gemini" | "cursor-agent" | "github-copilot"
-            | "amp-code" => envelope.source,
-            _ => continue,
+        let Some(vendor) = vendor_from_source(envelope.source.as_str()) else {
+            continue;
         };
 
-        let message = json!({
-            "type": "agent_cli_signal",
-            "signal": {
-                "slotID": envelope.slot_id,
-                "source": source,
-                "payloadBase64": envelope.payload_base64,
-            }
-        });
+        let signal = AgentCliSignal {
+            slot_id: envelope.slot_id,
+            source: vendor,
+            payload_base64: envelope.payload_base64,
+        };
 
-        let daemon_state = app.state::<crate::daemon_bridge::DaemonState>();
-        let _ = crate::daemon_bridge::send_workspace_message(
-            daemon_state.inner(),
-            &envelope.runtime_id,
-            &message.to_string(),
-        )
-        .await;
+        let runtime_state = app.state::<DaemonState>();
+        match runtime_state.inner().get(&envelope.runtime_id).await {
+            Some(runtime) => {
+                runtime.process_manager.record_agent_cli_signal(&signal).await;
+            }
+            None => {
+                // Hook payloads can race with workspace teardown; log and
+                // move on instead of disturbing the agent's terminal.
+                eprintln!(
+                    "[agent-cli] dropped hook for runtime {}: no runtime registered",
+                    envelope.runtime_id
+                );
+            }
+        }
     }
 }
 
