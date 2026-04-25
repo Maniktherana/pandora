@@ -14,7 +14,10 @@ impl AppDatabase {
         let db_path = db_dir.join("app-state.db");
 
         let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
+        // WAL + a generous busy_timeout keeps reads and writes from
+        // blocking each other under concurrent access. Defence in depth
+        // even now that there is only one writer.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;")
             .map_err(|e| e.to_string())?;
 
         let db = Self {
@@ -22,7 +25,32 @@ impl AppDatabase {
         };
         db.create_schema()?;
         db.migrate_schema()?;
+        db.runtime_open_fixups()?;
         Ok(db)
+    }
+
+    /// Idempotent fix-ups run on every open. Specifically:
+    ///   * rename legacy "Local Terminal" rows to "Terminal"
+    ///   * disable autostart on `terminal_slot` rows (we don't auto-spawn the
+    ///     dormant terminal on workspace open).
+    fn runtime_open_fixups(&self) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE slot_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE session_definitions SET name = 'Terminal' WHERE name = 'Local Terminal'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE slot_definitions SET autostart = 0 WHERE kind = 'terminal_slot' AND autostart != 0",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn create_schema(&self) -> Result<(), String> {
@@ -587,145 +615,745 @@ impl AppDatabase {
         Ok(())
     }
 
-    /// Migrate data from old per-runtime DB files into the global schema.
-    /// Runs once — skips if already migrated.
-    pub fn migrate_runtime_dbs(&self, pandora_home: &str) -> Result<(), String> {
-        if self.load_ui_state("runtime_dbs_migrated").is_some() {
-            return Ok(());
-        }
-
-        let runtime_dir = PathBuf::from(pandora_home).join("runtime");
-        if !runtime_dir.exists() {
-            self.save_ui_state("runtime_dbs_migrated", Some("1"));
-            return Ok(());
-        }
-
-        let entries = std::fs::read_dir(&runtime_dir).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.starts_with("runtime-") || !name.ends_with(".db") {
-                continue;
-            }
-            let runtime_id = name
-                .strip_prefix("runtime-")
-                .and_then(|s| s.strip_suffix(".db"))
-                .unwrap_or("")
-                .to_string();
-            if runtime_id.is_empty() {
-                continue;
-            }
-
-            let old_db_path = entry.path();
-            let old_conn = match Connection::open(&old_db_path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            // Migrate slot_definitions
-            if let Ok(mut stmt) = old_conn.prepare(
-                "SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order FROM slot_definitions",
-            ) {
-                let conn = self.conn.lock().unwrap();
-                let rows: Vec<_> = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i32>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, Option<String>>(5)?,
-                            row.get::<_, i32>(6)?,
-                            row.get::<_, i32>(7)?,
-                        ))
-                    })
-                    .map(|r| r.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default();
-                for (id, kind, name, autostart, pres_mode, primary_sid, persisted, sort_order) in rows {
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO slot_definitions (id, runtime_id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        params![id, runtime_id, kind, name, autostart, pres_mode, primary_sid, persisted, sort_order],
-                    );
-                }
-            }
-
-            // Migrate session_definitions
-            if let Ok(mut stmt) = old_conn.prepare(
-                "SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported FROM session_definitions",
-            ) {
-                let conn = self.conn.lock().unwrap();
-                let rows: Vec<_> = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, Option<String>>(5)?,
-                            row.get::<_, Option<i32>>(6)?,
-                            row.get::<_, String>(7)?,
-                            row.get::<_, String>(8)?,
-                            row.get::<_, i32>(9)?,
-                            row.get::<_, i32>(10)?,
-                        ))
-                    })
-                    .map(|r| r.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default();
-                for (id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_sup, resume_sup) in rows {
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO session_definitions (id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                        params![id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_sup, resume_sup],
-                    );
-                }
-            }
-
-            // Migrate runtime_metadata
-            if let Ok(mut stmt) = old_conn.prepare("SELECT key, value FROM runtime_metadata") {
-                let conn = self.conn.lock().unwrap();
-                let rows: Vec<_> = stmt
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .map(|r| r.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default();
-                for (key, value) in rows {
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO runtime_metadata (runtime_id, key, value) VALUES (?1, ?2, ?3)",
-                        params![runtime_id, key, value],
-                    );
-                }
-            }
-
-            drop(old_conn);
-
-            // Remove old DB files
-            let _ = std::fs::remove_file(&old_db_path);
-            let _ = std::fs::remove_file(old_db_path.with_extension("db-wal"));
-            let _ = std::fs::remove_file(old_db_path.with_extension("db-shm"));
-        }
-
-        // Clean up runtime directory if empty
-        if let Ok(mut remaining) = std::fs::read_dir(&runtime_dir) {
-            if remaining.next().is_none() {
-                let _ = std::fs::remove_dir(&runtime_dir);
-            }
-        }
-
-        self.save_ui_state("runtime_dbs_migrated", Some("1"));
-        Ok(())
-    }
-
     /// Returns the path to the global app-state.db file.
+    #[allow(dead_code)]
     pub fn db_path(pandora_home: &str) -> PathBuf {
         PathBuf::from(pandora_home).join("app").join("app-state.db")
     }
+
+    // ---------------------------------------------------------------------
+    // Runtime metadata (key/value scoped by runtime_id).
+    // ---------------------------------------------------------------------
+
+    #[allow(dead_code)]
+    pub fn get_runtime_metadata(&self, runtime_id: &str, key: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM runtime_metadata WHERE runtime_id = ?1 AND key = ?2",
+            params![runtime_id, key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    #[allow(dead_code)]
+    pub fn set_runtime_metadata(
+        &self,
+        runtime_id: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO runtime_metadata (runtime_id, key, value) VALUES (?1, ?2, ?3)
+             ON CONFLICT(runtime_id, key) DO UPDATE SET value = excluded.value",
+            params![runtime_id, key, value],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------
+    // Slot definitions (CRUD scoped to runtime_id).
+    //
+    // `sessionDefIDs` is computed by joining session_definitions and is
+    // not stored on the slot row itself.
+    // ---------------------------------------------------------------------
+
+    pub fn list_slot_definitions(&self, runtime_id: &str) -> Vec<SlotDefinition> {
+        let conn = self.conn.lock().unwrap();
+
+        // Build slotID -> [sessionID] in one pass, ordered by rowid so the
+        // session order is stable across reads.
+        let mut sessions_by_slot: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, slot_id FROM session_definitions WHERE runtime_id = ?1 ORDER BY rowid",
+        ) {
+            if let Ok(rows) =
+                stmt.query_map(params![runtime_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+            {
+                for r in rows.flatten() {
+                    sessions_by_slot.entry(r.1).or_default().push(r.0);
+                }
+            }
+        }
+
+        let mut stmt = match conn.prepare(
+            "SELECT id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order
+             FROM slot_definitions WHERE runtime_id = ?1
+             ORDER BY sort_order ASC, rowid ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let rows = stmt.query_map(params![runtime_id], |row| {
+            let kind_str: String = row.get(1)?;
+            let pres_str: String = row.get(4)?;
+            Ok(SlotDefinition {
+                id: row.get(0)?,
+                kind: SlotKind::from_str(&kind_str).unwrap_or(SlotKind::TerminalSlot),
+                name: row.get(2)?,
+                autostart: row.get::<_, i32>(3)? == 1,
+                presentation_mode: PresentationMode::from_str(&pres_str)
+                    .unwrap_or(PresentationMode::Single),
+                primary_session_def_id: row.get(5)?,
+                session_def_ids: Vec::new(),
+                persisted: row.get::<_, i32>(6)? == 1,
+                sort_order: row.get::<_, i64>(7)?,
+            })
+        });
+
+        match rows {
+            Ok(iter) => iter
+                .filter_map(|r| r.ok())
+                .map(|mut slot| {
+                    slot.session_def_ids =
+                        sessions_by_slot.remove(&slot.id).unwrap_or_default();
+                    slot
+                })
+                .collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    pub fn create_slot_definition(
+        &self,
+        runtime_id: &str,
+        slot: &SlotDefinition,
+    ) -> Result<(), String> {
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO slot_definitions
+                 (id, runtime_id, kind, name, autostart, presentation_mode, primary_session_def_id, persisted, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    slot.id,
+                    runtime_id,
+                    slot.kind.as_str(),
+                    slot.name,
+                    slot.autostart as i32,
+                    slot.presentation_mode.as_str(),
+                    slot.primary_session_def_id,
+                    slot.persisted as i32,
+                    slot.sort_order,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Partial update — only fields supplied as `Some` are written.
+    #[allow(dead_code)]
+    pub fn update_slot_definition(
+        &self,
+        runtime_id: &str,
+        id: &str,
+        patch: SlotDefinitionPatch,
+    ) -> Result<(), String> {
+        let mut sets: Vec<&'static str> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(v) = patch.kind {
+            sets.push("kind = ?");
+            values.push(Box::new(v.as_str().to_string()));
+        }
+        if let Some(v) = patch.name {
+            sets.push("name = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.autostart {
+            sets.push("autostart = ?");
+            values.push(Box::new(v as i32));
+        }
+        if let Some(v) = patch.presentation_mode {
+            sets.push("presentation_mode = ?");
+            values.push(Box::new(v.as_str().to_string()));
+        }
+        if let Some(v) = patch.primary_session_def_id {
+            sets.push("primary_session_def_id = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.persisted {
+            sets.push("persisted = ?");
+            values.push(Box::new(v as i32));
+        }
+        if let Some(v) = patch.sort_order {
+            sets.push("sort_order = ?");
+            values.push(Box::new(v));
+        }
+
+        if sets.is_empty() {
+            return Ok(());
+        }
+
+        let sql = format!(
+            "UPDATE slot_definitions SET {} WHERE id = ? AND runtime_id = ?",
+            sets.join(", ")
+        );
+        values.push(Box::new(id.to_string()));
+        values.push(Box::new(runtime_id.to_string()));
+
+        let conn = self.conn.lock().unwrap();
+        let params: Vec<&dyn rusqlite::ToSql> = values.iter().map(|b| b.as_ref()).collect();
+        conn.execute(&sql, params.as_slice())
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_slot_definition(&self, runtime_id: &str, slot_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM session_definitions WHERE slot_id = ?1 AND runtime_id = ?2",
+            params![slot_id, runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM slot_definitions WHERE id = ?1 AND runtime_id = ?2",
+            params![slot_id, runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------
+    // Session definitions (CRUD scoped to runtime_id).
+    //
+    // Session definitions (CRUD scoped to runtime_id).
+    // ---------------------------------------------------------------------
+
+    pub fn list_session_definitions(&self, runtime_id: &str) -> Vec<SessionDefinition> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported
+             FROM session_definitions WHERE runtime_id = ?1
+             ORDER BY rowid ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let rows = stmt.query_map(params![runtime_id], |row| {
+            let kind_str: String = row.get(2)?;
+            let restart_str: String = row.get(8)?;
+            let env_raw: Option<String> = row.get(7)?;
+            Ok(SessionDefinition {
+                id: row.get(0)?,
+                slot_id: row.get(1)?,
+                kind: SessionKind::from_str(&kind_str).unwrap_or(SessionKind::Process),
+                name: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                port: row.get(6)?,
+                env_overrides: decode_env_overrides(env_raw.as_deref()),
+                restart_policy: RestartPolicy::from_str(&restart_str)
+                    .unwrap_or(RestartPolicy::Manual),
+                pause_supported: row.get::<_, i32>(9)? == 1,
+                resume_supported: row.get::<_, i32>(10)? == 1,
+            })
+        });
+
+        match rows {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    pub fn create_session_definition(
+        &self,
+        runtime_id: &str,
+        session: &SessionDefinition,
+    ) -> Result<(), String> {
+        let env_json = encode_env_overrides(&session.env_overrides);
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO session_definitions
+             (id, runtime_id, slot_id, kind, name, command, cwd, port, env_overrides, restart_policy, pause_supported, resume_supported)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                session.id,
+                runtime_id,
+                session.slot_id,
+                session.kind.as_str(),
+                session.name,
+                session.command,
+                session.cwd,
+                session.port,
+                env_json,
+                session.restart_policy.as_str(),
+                session.pause_supported as i32,
+                session.resume_supported as i32,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn update_session_definition(
+        &self,
+        runtime_id: &str,
+        id: &str,
+        patch: SessionDefinitionPatch,
+    ) -> Result<(), String> {
+        let mut sets: Vec<&'static str> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(v) = patch.slot_id {
+            sets.push("slot_id = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.kind {
+            sets.push("kind = ?");
+            values.push(Box::new(v.as_str().to_string()));
+        }
+        if let Some(v) = patch.name {
+            sets.push("name = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.command {
+            sets.push("command = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.cwd {
+            sets.push("cwd = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.port {
+            sets.push("port = ?");
+            values.push(Box::new(v));
+        }
+        if let Some(v) = patch.env_overrides {
+            sets.push("env_overrides = ?");
+            values.push(Box::new(encode_env_overrides(&v)));
+        }
+        if let Some(v) = patch.restart_policy {
+            sets.push("restart_policy = ?");
+            values.push(Box::new(v.as_str().to_string()));
+        }
+        if let Some(v) = patch.pause_supported {
+            sets.push("pause_supported = ?");
+            values.push(Box::new(v as i32));
+        }
+        if let Some(v) = patch.resume_supported {
+            sets.push("resume_supported = ?");
+            values.push(Box::new(v as i32));
+        }
+
+        if sets.is_empty() {
+            return Ok(());
+        }
+
+        let sql = format!(
+            "UPDATE session_definitions SET {} WHERE id = ? AND runtime_id = ?",
+            sets.join(", ")
+        );
+        values.push(Box::new(id.to_string()));
+        values.push(Box::new(runtime_id.to_string()));
+
+        let conn = self.conn.lock().unwrap();
+        let params: Vec<&dyn rusqlite::ToSql> = values.iter().map(|b| b.as_ref()).collect();
+        conn.execute(&sql, params.as_slice())
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_session_definition(
+        &self,
+        runtime_id: &str,
+        session_def_id: &str,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM session_definitions WHERE id = ?1 AND runtime_id = ?2",
+            params![session_def_id, runtime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------------
+    // Seed data — creates the dormant "Terminal" slot+session for a fresh
+    // runtime that has no slot definitions yet.
+    // ---------------------------------------------------------------------
+
+    /// Create a dormant "Terminal" slot+session for a fresh runtime that has
+    /// no slot definitions yet. Idempotent — if any slot already exists for
+    /// this runtime_id, this is a no-op.
+    pub fn ensure_seed_data(&self, runtime_id: &str, default_cwd: &str) -> Result<(), String> {
+        let slot_count: i64 = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM slot_definitions WHERE runtime_id = ?1",
+                params![runtime_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+        };
+        if slot_count > 0 {
+            return Ok(());
+        }
+
+        let slot_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        let slot = SlotDefinition {
+            id: slot_id.clone(),
+            kind: SlotKind::TerminalSlot,
+            name: "Terminal".to_string(),
+            autostart: false,
+            presentation_mode: PresentationMode::Single,
+            primary_session_def_id: Some(session_id.clone()),
+            session_def_ids: vec![],
+            persisted: true,
+            sort_order: 0,
+        };
+        self.create_slot_definition(runtime_id, &slot)?;
+
+        let session = SessionDefinition {
+            id: session_id,
+            slot_id,
+            kind: SessionKind::Terminal,
+            name: "Terminal".to_string(),
+            command: "exec ${SHELL:-/bin/zsh} -i".to_string(),
+            cwd: Some(default_cwd.to_string()),
+            port: None,
+            env_overrides: std::collections::BTreeMap::new(),
+            restart_policy: RestartPolicy::Manual,
+            pause_supported: true,
+            resume_supported: true,
+        };
+        self.create_session_definition(runtime_id, &session)?;
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Patch types for partial updates. Using explicit structs keeps each call site
+// self-documenting and avoids the trap of passing default-zero fields by
+// accident the way a `..Default::default()` literal would.
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone)]
+pub struct SlotDefinitionPatch {
+    pub kind: Option<SlotKind>,
+    pub name: Option<String>,
+    pub autostart: Option<bool>,
+    pub presentation_mode: Option<PresentationMode>,
+    /// Outer Option = "field present in patch", inner Option = "set to NULL".
+    pub primary_session_def_id: Option<Option<String>>,
+    pub persisted: Option<bool>,
+    pub sort_order: Option<i64>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone)]
+pub struct SessionDefinitionPatch {
+    pub slot_id: Option<String>,
+    pub kind: Option<SessionKind>,
+    pub name: Option<String>,
+    pub command: Option<String>,
+    pub cwd: Option<Option<String>>,
+    pub port: Option<Option<i64>>,
+    pub env_overrides: Option<std::collections::BTreeMap<String, String>>,
+    pub restart_policy: Option<RestartPolicy>,
+    pub pause_supported: Option<bool>,
+    pub resume_supported: Option<bool>,
+}
+
+fn encode_env_overrides(env: &std::collections::BTreeMap<String, String>) -> String {
+    serde_json::to_string(env).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn decode_env_overrides(raw: Option<&str>) -> std::collections::BTreeMap<String, String> {
+    let Some(text) = raw else {
+        return std::collections::BTreeMap::new();
+    };
+    serde_json::from_str(text).unwrap_or_default()
 }
 
 pub fn now_iso8601() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_pandora_home(prefix: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pandora-db-{prefix}-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("create temp pandora_home");
+        dir.to_string_lossy().into_owned()
+    }
+
+    fn sample_slot(id: &str) -> SlotDefinition {
+        SlotDefinition {
+            id: id.to_string(),
+            kind: SlotKind::ProcessSlot,
+            name: "backend".to_string(),
+            autostart: true,
+            presentation_mode: PresentationMode::Single,
+            primary_session_def_id: None,
+            session_def_ids: vec![],
+            persisted: true,
+            sort_order: 10,
+        }
+    }
+
+    fn sample_session(id: &str, slot_id: &str) -> SessionDefinition {
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("NODE_ENV".to_string(), "development".to_string());
+        SessionDefinition {
+            id: id.to_string(),
+            slot_id: slot_id.to_string(),
+            kind: SessionKind::Process,
+            name: "backend".to_string(),
+            command: "echo hello".to_string(),
+            cwd: Some("/tmp/pandora-project".to_string()),
+            port: Some(3000),
+            env_overrides: env,
+            restart_policy: RestartPolicy::Manual,
+            pause_supported: true,
+            resume_supported: true,
+        }
+    }
+
+    #[test]
+    fn persists_slot_and_session_definitions() {
+        let home = temp_pandora_home("persist");
+        let db = AppDatabase::open(&home).expect("open db");
+        let runtime = "test-runtime-1";
+
+        let slot = sample_slot("slot-1");
+        db.create_slot_definition(runtime, &slot).expect("create slot");
+
+        let session = sample_session("session-1", &slot.id);
+        db.create_session_definition(runtime, &session)
+            .expect("create session");
+
+        db.update_slot_definition(
+            runtime,
+            &slot.id,
+            SlotDefinitionPatch {
+                primary_session_def_id: Some(Some(session.id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("update slot");
+
+        let slots = db.list_slot_definitions(runtime);
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].primary_session_def_id.as_deref(), Some("session-1"));
+        assert_eq!(slots[0].session_def_ids, vec!["session-1".to_string()]);
+
+        let sessions = db.list_session_definitions(runtime);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].env_overrides.get("NODE_ENV").map(|s| s.as_str()), Some("development"));
+        assert_eq!(sessions[0].port, Some(3000));
+
+        db.remove_session_definition(runtime, &session.id)
+            .expect("remove session");
+        db.remove_slot_definition(runtime, &slot.id)
+            .expect("remove slot");
+        assert!(db.list_slot_definitions(runtime).is_empty());
+        assert!(db.list_session_definitions(runtime).is_empty());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// terminal_slot autostart is forced off on reopen so a workspace open
+    /// never auto-spawns the dormant terminal, while non-terminal slots
+    /// keep their autostart flag.
+    #[test]
+    fn terminal_slot_autostart_is_disabled_on_open() {
+        let home = temp_pandora_home("autostart");
+        let runtime = "test-runtime-2";
+
+        {
+            let db = AppDatabase::open(&home).expect("open db");
+            let mut term = sample_slot("terminal-slot");
+            term.kind = SlotKind::TerminalSlot;
+            term.name = "Terminal".to_string();
+            term.autostart = true;
+            db.create_slot_definition(runtime, &term).expect("create term slot");
+
+            let mut proc = sample_slot("process-slot");
+            proc.kind = SlotKind::ProcessSlot;
+            proc.name = "Server".to_string();
+            proc.autostart = true;
+            proc.sort_order = 2;
+            db.create_slot_definition(runtime, &proc).expect("create proc slot");
+        }
+
+        let db = AppDatabase::open(&home).expect("reopen db");
+        let slots = db.list_slot_definitions(runtime);
+        let term = slots.iter().find(|s| s.id == "terminal-slot").expect("term");
+        let proc = slots.iter().find(|s| s.id == "process-slot").expect("proc");
+        assert!(!term.autostart, "terminal_slot autostart should be cleared on open");
+        assert!(proc.autostart, "process_slot autostart should be preserved");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn seeds_dormant_terminal_when_runtime_is_empty() {
+        let home = temp_pandora_home("seed");
+        let db = AppDatabase::open(&home).expect("open db");
+        let runtime = "test-runtime-3";
+
+        db.ensure_seed_data(runtime, "/tmp/pandora-project")
+            .expect("seed");
+
+        let slots = db.list_slot_definitions(runtime);
+        assert_eq!(slots.len(), 1);
+        let slot = &slots[0];
+        assert_eq!(slot.kind, SlotKind::TerminalSlot);
+        assert_eq!(slot.name, "Terminal");
+        assert!(!slot.autostart);
+        assert_eq!(slot.session_def_ids.len(), 1);
+
+        let sessions = db.list_session_definitions(runtime);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].cwd.as_deref(), Some("/tmp/pandora-project"));
+        assert_eq!(sessions[0].command, "exec ${SHELL:-/bin/zsh} -i");
+        assert_eq!(sessions[0].kind, SessionKind::Terminal);
+
+        db.ensure_seed_data(runtime, "/tmp/pandora-project")
+            .expect("seed (idempotent)");
+        assert_eq!(db.list_slot_definitions(runtime).len(), 1);
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn removing_last_slot_allows_reseed() {
+        let home = temp_pandora_home("rearm");
+        let db = AppDatabase::open(&home).expect("open db");
+        let runtime = "test-runtime-4";
+
+        let slot = sample_slot("only-slot");
+        db.create_slot_definition(runtime, &slot).expect("create slot");
+
+        db.remove_slot_definition(runtime, &slot.id)
+            .expect("remove slot");
+
+        // After removing the last slot, ensure_seed_data should re-create one.
+        db.ensure_seed_data(runtime, "/tmp").expect("re-seed");
+        assert_eq!(db.list_slot_definitions(runtime).len(), 1);
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Two runtimes sharing the global DB don't see each other's data.
+    #[test]
+    fn runtime_id_scoping_isolates_rows() {
+        let home = temp_pandora_home("scope");
+        let db = AppDatabase::open(&home).expect("open db");
+
+        db.create_slot_definition("runtime-a", &sample_slot("slot-a"))
+            .expect("create a");
+        db.create_slot_definition("runtime-b", &sample_slot("slot-b"))
+            .expect("create b");
+
+        let a = db.list_slot_definitions("runtime-a");
+        let b = db.list_slot_definitions("runtime-b");
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(a[0].id, "slot-a");
+        assert_eq!(b[0].id, "slot-b");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Partial updates: SET clauses only emitted for fields supplied as Some.
+    #[test]
+    fn partial_session_update_only_writes_supplied_fields() {
+        let home = temp_pandora_home("patch");
+        let db = AppDatabase::open(&home).expect("open db");
+        let runtime = "test-runtime-5";
+
+        let slot = sample_slot("slot-1");
+        db.create_slot_definition(runtime, &slot).expect("slot");
+        let session = sample_session("session-1", &slot.id);
+        db.create_session_definition(runtime, &session).expect("session");
+
+        db.update_session_definition(
+            runtime,
+            &session.id,
+            SessionDefinitionPatch {
+                command: Some("echo updated".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("update");
+
+        let sessions = db.list_session_definitions(runtime);
+        assert_eq!(sessions[0].command, "echo updated");
+        // Untouched fields preserved.
+        assert_eq!(sessions[0].port, Some(3000));
+        assert_eq!(sessions[0].name, "backend");
+        assert_eq!(
+            sessions[0].env_overrides.get("NODE_ENV").map(|s| s.as_str()),
+            Some("development")
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Verify serde emits the exact field names the renderer expects:
+    /// slotID, primarySessionDefID, sessionDefIDs (uppercase ID, not
+    /// serde's stock camelCase slotId / sessionDefId).
+    #[test]
+    fn slot_definition_json_uses_daemon_field_names() {
+        let slot = SlotDefinition {
+            id: "s1".into(),
+            kind: SlotKind::ProcessSlot,
+            name: "n".into(),
+            autostart: false,
+            presentation_mode: PresentationMode::Tabs,
+            primary_session_def_id: Some("sd1".into()),
+            session_def_ids: vec!["sd1".into()],
+            persisted: true,
+            sort_order: 0,
+        };
+        let json = serde_json::to_value(&slot).unwrap();
+        assert!(json.get("primarySessionDefID").is_some());
+        assert!(json.get("sessionDefIDs").is_some());
+        assert_eq!(json["kind"], "process_slot");
+        assert_eq!(json["presentationMode"], "tabs");
+
+        let session = SessionDefinition {
+            id: "sd1".into(),
+            slot_id: "s1".into(),
+            kind: SessionKind::Terminal,
+            name: "n".into(),
+            command: "c".into(),
+            cwd: None,
+            port: None,
+            env_overrides: std::collections::BTreeMap::new(),
+            restart_policy: RestartPolicy::Always,
+            pause_supported: false,
+            resume_supported: false,
+        };
+        let json = serde_json::to_value(&session).unwrap();
+        assert!(json.get("slotID").is_some());
+        assert_eq!(json["kind"], "terminal");
+        assert_eq!(json["restartPolicy"], "always");
+    }
 }

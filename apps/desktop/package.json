@@ -8,7 +8,6 @@
     "dev": "bun run generate:theme-css && vite",
     "build": "bun run generate:theme-css && vite build",
     "preview": "vite preview",
-    "bundle-daemon": "bun run scripts/bundle-daemon.ts",
     "clean": "bun run scripts/clear-pandora-home.ts",
     "tauri": "cargo tauri",
     "tauri:dev": "cargo tauri dev",

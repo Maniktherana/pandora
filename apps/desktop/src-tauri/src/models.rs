@@ -123,6 +123,155 @@ pub struct EditorInfo {
     pub category: String, // "finder", "ide", "terminal"
 }
 
+// ---------------------------------------------------------------------------
+// Runtime models: slot / session definitions + supporting enums.
+//
+// Runtime models: slot / session definitions + supporting enums.
+// Field renames preserve the camelCase-with-uppercase-ID style
+// (slotID, primarySessionDefID, sessionDefIDs) the renderer expects rather
+// than serde's stock camelCase (slotId, primarySessionDefId, …).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlotKind {
+    ProcessSlot,
+    AgentSlot,
+    TerminalSlot,
+}
+
+impl SlotKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProcessSlot => "process_slot",
+            Self::AgentSlot => "agent_slot",
+            Self::TerminalSlot => "terminal_slot",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "process_slot" => Some(Self::ProcessSlot),
+            "agent_slot" => Some(Self::AgentSlot),
+            "terminal_slot" => Some(Self::TerminalSlot),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    Process,
+    Agent,
+    Terminal,
+}
+
+impl SessionKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Process => "process",
+            Self::Agent => "agent",
+            Self::Terminal => "terminal",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "process" => Some(Self::Process),
+            "agent" => Some(Self::Agent),
+            "terminal" => Some(Self::Terminal),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationMode {
+    Single,
+    Tabs,
+    Split,
+}
+
+impl PresentationMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Tabs => "tabs",
+            Self::Split => "split",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "single" => Some(Self::Single),
+            "tabs" => Some(Self::Tabs),
+            "split" => Some(Self::Split),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartPolicy {
+    Manual,
+    Always,
+}
+
+impl RestartPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "manual" => Some(Self::Manual),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotDefinition {
+    pub id: String,
+    pub kind: SlotKind,
+    pub name: String,
+    pub autostart: bool,
+    pub presentation_mode: PresentationMode,
+    #[serde(rename = "primarySessionDefID")]
+    pub primary_session_def_id: Option<String>,
+    /// Populated by the DB layer (joined from `session_definitions`); never
+    /// stored directly on the slot row.
+    #[serde(rename = "sessionDefIDs", default)]
+    pub session_def_ids: Vec<String>,
+    pub persisted: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDefinition {
+    pub id: String,
+    #[serde(rename = "slotID")]
+    pub slot_id: String,
+    pub kind: SessionKind,
+    pub name: String,
+    pub command: String,
+    pub cwd: Option<String>,
+    pub port: Option<i64>,
+    pub env_overrides: std::collections::BTreeMap<String, String>,
+    pub restart_policy: RestartPolicy,
+    pub pause_supported: bool,
+    pub resume_supported: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSettingsRow {

@@ -4,7 +4,7 @@
 //! layout, focus, and I/O routing. Each surface is an NSView overlaid on the
 //! Tauri webview, with a ghostty terminal rendering into it.
 
-use crate::daemon_bridge::{self, DaemonState};
+use crate::daemon_bridge::DaemonState;
 use crate::ghostty_app;
 use crate::ghostty_ffi::*;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -1271,14 +1271,14 @@ impl SurfaceRegistry {
 
     /// Feed terminal output data to a surface, identified by session ID.
     ///
-    /// Live output is queued from the daemon thread and coalesced into bounded
-    /// main-thread Ghostty writes. Output that arrives before a surface is routed
-    /// stays in the bounded pending buffer.
+    /// Output is queued and coalesced into bounded main-thread Ghostty
+    /// writes. Output that arrives before a surface is routed stays in the
+    /// bounded pending buffer.
     ///
     /// Returns `true` if the surface was found and data was queued.
     pub fn feed_output(
         self: &Arc<Self>,
-        app_handle: &AppHandle,
+        _app_handle: &AppHandle,
         session_id: &str,
         data: &[u8],
     ) -> bool {
@@ -1489,8 +1489,10 @@ impl SurfaceRegistry {
 // Ghostty receive callbacks (extern "C")
 // ---------------------------------------------------------------------------
 
-/// Called by ghostty when the terminal generates output in HOST_MANAGED mode.
-/// Routes data back toward the daemon for the associated session.
+/// Called by ghostty when the terminal generates output in HOST_MANAGED mode
+/// (which, despite the name, fires for user input that ghostty has handled —
+/// keystrokes, paste, mouse events translated to escape sequences). Routes the
+/// bytes straight into the in-process runtime registry for the owning session.
 unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const u8, len: usize) {
     if userdata.is_null() || buf.is_null() || len == 0 {
         return;
@@ -1499,12 +1501,12 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
     let arc = Arc::from_raw(userdata as *const SurfaceCallbackContext);
     let ctx = Arc::clone(&arc);
     let _ = Arc::into_raw(arc);
-    let data = std::slice::from_raw_parts(buf, len);
+    let data_slice = std::slice::from_raw_parts(buf, len);
     let session_id = ctx.session_id.clone();
     let workspace_id = ctx.workspace_id.clone();
     let app_handle = ctx.app_handle.clone();
 
-    // Log PTY input (user keystrokes / ghostty-generated input going to daemon).
+    // Log PTY input (user keystrokes / ghostty-generated input going to runtime).
     if len <= 64 {
         tlog!(
             "PTY_IN",
@@ -1512,7 +1514,7 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
             session_id,
             workspace_id,
             len,
-            String::from_utf8_lossy(data)
+            String::from_utf8_lossy(data_slice)
         );
     } else {
         tlog!(
@@ -1523,34 +1525,38 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
             len
         );
     }
-    let payload = serde_json::json!({
-        "type": "input",
-        "sessionID": session_id,
-        "data": BASE64_STANDARD.encode(data),
-    })
-    .to_string();
+
+    // Existing renderer hook keeps working — broadcast the same shape it always saw.
     let _ = app_handle.emit(
         "native-terminal-input",
         serde_json::json!({
             "workspaceId": workspace_id,
             "sessionId": ctx.session_id,
-            "data": BASE64_STANDARD.encode(data),
+            "data": BASE64_STANDARD.encode(data_slice),
         })
         .to_string(),
     );
+
+    // Snapshot the bytes; the spawn closure outlives the FFI buffer.
+    let owned = data_slice.to_vec();
     tauri::async_runtime::spawn(async move {
-        let daemon_state = app_handle.state::<DaemonState>();
-        if let Err(err) =
-            daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload)
-                .await
+        let runtime_state = app_handle.state::<DaemonState>();
+        if let Err(err) = crate::daemon_bridge::write_to_session(
+            runtime_state.inner(),
+            &workspace_id,
+            &session_id,
+            &owned,
+        )
+        .await
         {
             eprintln!("[surface_registry] failed to route terminal input: {err}");
         }
     });
 }
 
-/// Called by ghostty when the terminal grid size changes.
-/// Routes resize events back toward the daemon for the associated session.
+/// Called by ghostty when the terminal grid size changes. Forwarded straight
+/// to the runtime which issues `TIOCSWINSZ` on the master fd and signals the
+/// child with `SIGWINCH`.
 unsafe extern "C" fn receive_resize_callback(
     userdata: *mut c_void,
     cols: u16,
@@ -1579,18 +1585,17 @@ unsafe extern "C" fn receive_resize_callback(
         _width_px,
         _height_px
     );
-    let payload = serde_json::json!({
-        "type": "resize",
-        "sessionID": session_id,
-        "cols": cols,
-        "rows": rows,
-    })
-    .to_string();
+
     tauri::async_runtime::spawn(async move {
-        let daemon_state = app_handle.state::<DaemonState>();
-        if let Err(err) =
-            daemon_bridge::send_workspace_message(daemon_state.inner(), &workspace_id, &payload)
-                .await
+        let runtime_state = app_handle.state::<DaemonState>();
+        if let Err(err) = crate::daemon_bridge::resize_session(
+            runtime_state.inner(),
+            &workspace_id,
+            &session_id,
+            cols,
+            rows,
+        )
+        .await
         {
             eprintln!("[surface_registry] failed to route terminal resize: {err}");
         }
