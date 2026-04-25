@@ -211,7 +211,7 @@ type ReviewFileEntryProps = {
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
-  targetBranch?: string | null;
+  targetBranch?: string | null | undefined;
   isFirst: boolean;
   onToggle: (path: string, nextOpen: boolean) => void;
   onOpenFile: (path: string) => void;
@@ -227,7 +227,7 @@ type ReviewDiffBodyProps = {
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
-  targetBranch?: string | null;
+  targetBranch?: string | null | undefined;
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({

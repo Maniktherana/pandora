@@ -11,12 +11,16 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "prepare": "effect-language-service patch",
     "desktop:dev": "bun run --filter @pandora/desktop tauri:dev",
     "desktop:build": "bun run --filter @pandora/desktop tauri:build",
     "daemon:dev": "bun --cwd apps/daemon run dev"
   },
   "devDependencies": {
-    "turbo": "^2.5.6"
+    "@effect/language-service": "^0.85.1",
+    "effect-solutions": "^0.5.2",
+    "turbo": "^2.5.6",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.96.2"

@@ -10,6 +10,7 @@ import { ScriptTabContent } from "./scripts/script-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
 import DotGridLoader from "@/components/dot-grid-loader";
+import { useRuntimeStore } from "@/state/runtime-store";
 
 type BottomPanelProps = {
   onCollapse: () => void;
@@ -28,6 +29,14 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
   const hasTerminalGroups = (projectRuntime?.terminalPanel?.groups.length ?? 0) > 0;
+  const activePortCount = useRuntimeStore((s) => {
+    const seen = new Set<number>();
+    for (const runtime of Object.values(s.runtimeState)) {
+      if (!runtime.detectedPorts?.length) continue;
+      for (const p of runtime.detectedPorts) seen.add(p.port);
+    }
+    return seen.size;
+  });
 
   const addProjectTerminal = useCallback(() => {
     if (!projectKey) return;
@@ -88,6 +97,7 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
         onAddProjectTerminal={addProjectTerminal}
         onSplitActiveGroup={splitActiveGroup}
         hasTerminalGroups={hasTerminalGroups}
+        activePortCount={activePortCount}
       />
       <TabsContent value="setup" className="min-h-0 flex-1 overflow-hidden m-0">
         <ScriptTabContent

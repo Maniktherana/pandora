@@ -53,7 +53,7 @@ type DirectoryNodeProps = {
   parentRelPath: string;
   name: string;
   depth: number;
-  isIgnored?: boolean;
+  isIgnored?: boolean | undefined;
   resolveDecoration: ScmDecorationResolver;
   isExpanded: boolean;
   isPathExpanded: (relPath: string) => boolean;

@@ -40,6 +40,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
     : cn(chromeSpanClass, className);
 
   const innerClassName = unstyled ? unstyledInnerClassName : inputClassName;
+  const nativeProps = props as React.InputHTMLAttributes<HTMLInputElement>;
 
   return (
     <span className={spanClassName || undefined} data-size={size} data-slot="input-control">
@@ -49,7 +50,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
           className={innerClassName}
           data-slot="input"
           size={typeof size === "number" ? size : undefined}
-          {...props}
+          {...nativeProps}
         />
       ) : (
         <InputPrimitive

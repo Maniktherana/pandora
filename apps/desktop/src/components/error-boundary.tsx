@@ -11,17 +11,17 @@ interface ErrorBoundaryState {
 }
 
 export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  override state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error(`[${this.props.name ?? "ErrorBoundary"}]`, error, info);
   }
 
-  render() {
+  override render() {
     if (this.state.error) {
       return (
         this.props.fallback ?? (

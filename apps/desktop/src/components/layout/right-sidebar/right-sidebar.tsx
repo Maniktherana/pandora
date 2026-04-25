@@ -1052,7 +1052,7 @@ export default memo(function RightSidebar({
   );
 
   const handleTreeContextMenuCapture = useCallback((event: React.MouseEvent) => {
-    const hit = (event.target as Element).closest?.("[data-tree-row-path]");
+    const hit = (event.target as Element).closest?.("[data-tree-row-path]") as HTMLElement | null;
     if (!hit) {
       setContextMenu({ relPath: "", kind: "root" });
       return;

@@ -21,7 +21,7 @@ export interface ManagedSurfaceRegistration {
   visible: boolean;
   focused: boolean;
   overlayExempt?: boolean;
-  onFocus?: () => void;
+  onFocus?: (() => void) | undefined;
 }
 
 interface ManagedSurfaceEntry extends ManagedSurfaceRegistration {

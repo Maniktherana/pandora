@@ -21,7 +21,7 @@ import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import DotGridLoader from "@/components/dot-grid-loader";
 import ProjectTerminalSidebar from "./project-terminal-sidebar";
-import { ProjectTerminalAnchorInfo } from "../project-terminal.types";
+import type { ProjectTerminalAnchorInfo } from "../project-terminal.types";
 import { createSlotMap, createSessionMap } from "../project-terminal.utils";
 
 type ProjectTerminalViewProps = {

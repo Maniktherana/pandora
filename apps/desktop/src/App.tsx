@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ImperativePanelHandle } from "react-resizable-panels";
+import type { ImperativePanelHandle } from "react-resizable-panels";
 import LeftSidebar from "@/components/layout/left-sidebar/left-sidebar";
 import BottomPanel from "@/components/layout/bottom-panel";
 import RightSidebar from "@/components/layout/right-sidebar/right-sidebar";

@@ -87,7 +87,9 @@ export function addProjectTerminalGroupInRuntime(
   slotId: string,
   index?: number,
 ) {
-  updateProjectTerminalPanel(runtime, (panel) => addTerminalGroup(panel, slotId, { index }));
+  updateProjectTerminalPanel(runtime, (panel) =>
+    addTerminalGroup(panel, slotId, index === undefined ? {} : { index }),
+  );
 }
 
 export function splitProjectTerminalGroupInRuntime(
@@ -150,7 +152,7 @@ export function moveProjectTerminalToGroupInRuntime(
   index?: number,
 ) {
   updateProjectTerminalPanel(runtime, (panel) =>
-    moveTerminalToGroup(panel, slotId, targetGroupId, { index }),
+    moveTerminalToGroup(panel, slotId, targetGroupId, index === undefined ? {} : { index }),
   );
 }
 

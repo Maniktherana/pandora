@@ -79,7 +79,7 @@ export default function DiffViewer({
   wrapLines?: boolean;
   reloadKey?: number;
   metrics?: VirtualFileMetrics;
-  targetBranch?: string | null;
+  targetBranch?: string | null | undefined;
   onStatsChange?: (stats: DiffViewerStats) => void;
 }) {
   const staged = source === "staged";
@@ -301,7 +301,7 @@ export default function DiffViewer({
           <PierreFileDiff
             fileDiff={diffMetadata}
             options={options}
-            metrics={metrics}
+            {...(metrics === undefined ? {} : { metrics })}
             className="block h-full min-h-full w-full"
           />
         )}

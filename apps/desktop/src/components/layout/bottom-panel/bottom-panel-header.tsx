@@ -12,6 +12,7 @@ type BottomPanelHeaderProps = {
   hasTerminalGroups: boolean;
   onRunSetup?: () => void;
   onRunScripts?: () => void;
+  activePortCount?: number;
 };
 
 export function BottomPanelHeader({
@@ -23,6 +24,7 @@ export function BottomPanelHeader({
   hasTerminalGroups,
   onRunSetup,
   onRunScripts,
+  activePortCount = 0,
 }: BottomPanelHeaderProps) {
   return (
     <div className="relative z-20 flex h-8 shrink-0 items-stretch border-b border-[var(--theme-border)] bg-[var(--theme-bg)]">
@@ -52,6 +54,9 @@ export function BottomPanelHeader({
               )}
             >
               {labels[id]}
+              {id === "ports" && activePortCount > 0 ? (
+                <span className="ml-1.5 text-[var(--theme-text-muted)]">{activePortCount}</span>
+              ) : null}
             </TabsTrigger>
           );
         })}

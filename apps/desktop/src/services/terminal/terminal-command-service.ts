@@ -71,7 +71,7 @@ export const TerminalCommandServiceLive = Layer.scoped(
           : Effect.fail(
               new TerminalCommandError({
                 cause: new Error("Terminal daemon not connected"),
-                runtimeId,
+                ...(runtimeId === undefined ? {} : { runtimeId }),
               }),
             ),
       );

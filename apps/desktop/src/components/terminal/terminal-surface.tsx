@@ -10,7 +10,7 @@ export interface TerminalSurfaceProps {
   visible: boolean;
   focused: boolean;
   overlayExempt?: boolean;
-  onFocus?: () => void;
+  onFocus?: (() => void) | undefined;
   anchorElement?: HTMLElement | null;
 }
 

@@ -281,7 +281,7 @@ export default function PaneEditor({
         <Editor
           height="100%"
           path={relativePath}
-          language={language}
+          {...(language === undefined ? {} : { language })}
           defaultValue={initialContent}
           theme={MONACO_THEME_ID}
           loading={editorLoading}

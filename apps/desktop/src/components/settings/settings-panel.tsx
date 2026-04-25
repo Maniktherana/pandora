@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { HugeiconsIcon, IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, PaintBucketIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/shared/utils";

@@ -32,7 +32,7 @@ type WorkspaceTabProps = {
   isFocused: boolean;
   isLast: boolean;
   isBeingDragged: boolean;
-  scmEntry?: ScmStatusEntry;
+  scmEntry?: ScmStatusEntry | undefined;
   slotsMap: Record<string, SlotState | undefined>;
   sessionsMap: Record<string, SessionState | undefined>;
   displayMap: Record<string, TerminalDisplayState>;

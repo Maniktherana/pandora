@@ -279,7 +279,10 @@ type DesktopStateSnapshot = {
 };
 
 function workspaceSelectionError(cause: unknown, workspaceId?: string) {
-  return new WorkspaceSelectionError({ cause, workspaceId });
+  return new WorkspaceSelectionError({
+    cause,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+  });
 }
 
 function publishDesktopView(snapshot: DesktopViewStateSnapshot) {
