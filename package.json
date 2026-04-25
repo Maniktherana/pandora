@@ -13,8 +13,7 @@
     "test": "turbo run test",
     "prepare": "effect-language-service patch",
     "desktop:dev": "bun run --filter @pandora/desktop tauri:dev",
-    "desktop:build": "bun run --filter @pandora/desktop tauri:build",
-    "daemon:dev": "bun --cwd apps/daemon run dev"
+    "desktop:build": "bun run --filter @pandora/desktop tauri:build"
   },
   "devDependencies": {
     "@effect/language-service": "^0.85.1",
@@ -26,8 +25,6 @@
     "@tanstack/react-query": "^5.96.2"
   },
   "trustedDependencies": [
-    "better-sqlite3",
-    "esbuild",
-    "node-pty"
+    "esbuild"
   ]
 }
