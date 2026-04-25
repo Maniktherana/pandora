@@ -12,6 +12,7 @@
 //! - **Project runtime** — key = `project:<project_id>`; `workspace_path` is the git root.
 
 use crate::commands::DbState;
+use crate::database::{AppDatabase, SessionDefinitionPatch, SlotDefinitionPatch};
 use crate::runtime::process_manager::RuntimeEmitter;
 use crate::runtime::registry::{Runtime, RuntimeRegistry};
 use crate::runtime::types::{
@@ -19,9 +20,9 @@ use crate::runtime::types::{
 };
 use crate::surface_registry::SurfaceRegistry;
 use async_trait::async_trait;
-use bytes::Bytes;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use bytes::Bytes;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -226,6 +227,7 @@ pub async fn stop_workspace_runtime(state: &DaemonState, workspace_id: &str) {
 /// the surface-registry / agent-CLI fast paths don't already cover.
 pub async fn send_workspace_message(
     state: &DaemonState,
+    db: &AppDatabase,
     workspace_id: &str,
     message: &str,
 ) -> Result<(), String> {
@@ -235,7 +237,7 @@ pub async fn send_workspace_message(
         .get(workspace_id)
         .await
         .ok_or_else(|| format!("no runtime: {workspace_id}"))?;
-    dispatch(&runtime, parsed).await
+    dispatch(&runtime, db, workspace_id, parsed).await
 }
 
 /// Synchronous-style helpers used by the macOS surface registry hot path —
@@ -275,11 +277,33 @@ pub async fn resize_session(
 
 /// Translate one parsed `ClientMessage` into the corresponding
 /// `ProcessManager` call.
-async fn dispatch(runtime: &Runtime, message: ClientMessage) -> Result<(), String> {
+async fn dispatch(
+    runtime: &Runtime,
+    db: &AppDatabase,
+    runtime_id: &str,
+    message: ClientMessage,
+) -> Result<(), String> {
     let pm = &runtime.process_manager;
     match message {
-        ClientMessage::CreateSlot { slot } => pm.register_slot(slot).await,
+        ClientMessage::CreateSlot { slot } => {
+            db.create_slot_definition(runtime_id, &slot)?;
+            pm.register_slot(slot).await;
+            pm.emit_snapshots().await;
+        }
         ClientMessage::UpdateSlot { slot } => {
+            db.update_slot_definition(
+                runtime_id,
+                &slot.id,
+                SlotDefinitionPatch {
+                    kind: slot.kind,
+                    name: slot.name.clone(),
+                    autostart: slot.autostart,
+                    presentation_mode: slot.presentation_mode,
+                    primary_session_def_id: slot.primary_session_def_id.clone(),
+                    persisted: slot.persisted,
+                    sort_order: slot.sort_order,
+                },
+            )?;
             pm.update_slot_definition(crate::runtime::process_manager::SlotDefinitionMutation {
                 id: slot.id,
                 kind: slot.kind,
@@ -291,12 +315,35 @@ async fn dispatch(runtime: &Runtime, message: ClientMessage) -> Result<(), Strin
                 sort_order: slot.sort_order,
             })
             .await;
+            pm.emit_snapshots().await;
         }
-        ClientMessage::RemoveSlot { slot_id } => pm.remove_slot(&slot_id).await,
+        ClientMessage::RemoveSlot { slot_id } => {
+            pm.remove_slot(&slot_id).await;
+            db.remove_slot_definition(runtime_id, &slot_id)?;
+            pm.emit_snapshots().await;
+        }
         ClientMessage::CreateSessionDef { session } => {
+            db.create_session_definition(runtime_id, &session)?;
             pm.register_session_definition(session).await;
+            pm.emit_snapshots().await;
         }
         ClientMessage::UpdateSessionDef { session } => {
+            db.update_session_definition(
+                runtime_id,
+                &session.id,
+                SessionDefinitionPatch {
+                    slot_id: session.slot_id.clone(),
+                    kind: session.kind,
+                    name: session.name.clone(),
+                    command: session.command.clone(),
+                    cwd: session.cwd.clone(),
+                    port: session.port,
+                    env_overrides: session.env_overrides.clone(),
+                    restart_policy: session.restart_policy,
+                    pause_supported: session.pause_supported,
+                    resume_supported: session.resume_supported,
+                },
+            )?;
             pm.update_session_definition(
                 crate::runtime::process_manager::SessionDefinitionMutation {
                     id: session.id,
@@ -313,28 +360,72 @@ async fn dispatch(runtime: &Runtime, message: ClientMessage) -> Result<(), Strin
                 },
             )
             .await;
+            pm.emit_snapshots().await;
         }
         ClientMessage::RemoveSessionDef { session_def_id } => {
             pm.remove_session_definition(&session_def_id).await;
+            db.remove_session_definition(runtime_id, &session_def_id)?;
+            pm.emit_snapshots().await;
         }
-        ClientMessage::StartSlot { slot_id } => pm.start_slot(&slot_id).await,
-        ClientMessage::StopSlot { slot_id } => pm.stop_slot(&slot_id).await,
-        ClientMessage::RestartSlot { slot_id } => pm.restart_slot(&slot_id).await,
-        ClientMessage::PauseSlot { slot_id } => pm.pause_slot(&slot_id).await,
-        ClientMessage::ResumeSlot { slot_id } => pm.resume_slot(&slot_id).await,
-        ClientMessage::StartSession { session_id } => pm.start_session(&session_id).await,
-        ClientMessage::StopSession { session_id } => pm.stop_session(&session_id).await,
-        ClientMessage::RestartSession { session_id } => pm.restart_session(&session_id).await,
-        ClientMessage::PauseSession { session_id } => pm.pause_session(&session_id).await,
-        ClientMessage::ResumeSession { session_id } => pm.resume_session(&session_id).await,
+        ClientMessage::StartSlot { slot_id } => {
+            pm.start_slot(&slot_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::StopSlot { slot_id } => {
+            pm.stop_slot(&slot_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::RestartSlot { slot_id } => {
+            pm.restart_slot(&slot_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::PauseSlot { slot_id } => {
+            pm.pause_slot(&slot_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::ResumeSlot { slot_id } => {
+            pm.resume_slot(&slot_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::StartSession { session_id } => {
+            pm.start_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::StopSession { session_id } => {
+            pm.stop_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::RestartSession { session_id } => {
+            pm.restart_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::PauseSession { session_id } => {
+            pm.pause_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
+        ClientMessage::ResumeSession { session_id } => {
+            pm.resume_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
         ClientMessage::OpenSessionInstance { session_def_id } => {
             pm.open_session_instance(&session_def_id).await?;
+            pm.emit_snapshots().await;
         }
-        ClientMessage::CloseSessionInstance { session_id } => pm.close_session(&session_id).await,
+        ClientMessage::CloseSessionInstance { session_id } => {
+            pm.close_session(&session_id).await;
+            pm.emit_snapshots().await;
+        }
         ClientMessage::Input { session_id, data } => {
-            pm.write_to_session(&session_id, data.as_bytes()).await;
+            let bytes = BASE64_STANDARD
+                .decode(data.as_bytes())
+                .map_err(|e| format!("invalid input payload: {e}"))?;
+            pm.write_to_session(&session_id, &bytes).await;
         }
-        ClientMessage::Resize { session_id, cols, rows } => {
+        ClientMessage::Resize {
+            session_id,
+            cols,
+            rows,
+        } => {
             pm.resize_session(&session_id, cols, rows).await;
         }
         ClientMessage::RequestSnapshot => {
@@ -352,8 +443,9 @@ async fn dispatch(runtime: &Runtime, message: ClientMessage) -> Result<(), Strin
 #[tauri::command]
 pub async fn daemon_send(
     state: tauri::State<'_, DaemonState>,
+    db: tauri::State<'_, DbState>,
     workspace_id: String,
     message: String,
 ) -> Result<(), String> {
-    send_workspace_message(state.inner(), &workspace_id, &message).await
+    send_workspace_message(state.inner(), db.0.as_ref(), &workspace_id, &message).await
 }

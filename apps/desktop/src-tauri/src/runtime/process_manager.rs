@@ -225,7 +225,7 @@ impl ProcessManager {
         inner
             .slot_definitions
             .values()
-            .map(|slot| slot_state_of(slot, &inner.sessions))
+            .map(|slot| slot_state_of(slot, &inner.session_definitions, &inner.sessions))
             .collect()
     }
 
@@ -249,6 +249,8 @@ impl ProcessManager {
 
     pub async fn register_slot(&self, slot: SlotDefinition) {
         let mut inner = self.inner.lock().await;
+        let mut slot = slot;
+        slot.session_def_ids.clear();
         inner.slot_definitions.insert(slot.id.clone(), slot);
     }
 
@@ -1310,7 +1312,11 @@ fn session_state_of(session: &ManagedSession) -> SessionState {
     }
 }
 
-fn slot_state_of(slot: &SlotDefinition, sessions: &HashMap<String, ManagedSession>) -> SlotState {
+fn slot_state_of(
+    slot: &SlotDefinition,
+    session_definitions: &HashMap<String, SessionDefinition>,
+    sessions: &HashMap<String, ManagedSession>,
+) -> SlotState {
     let states: Vec<SessionState> = sessions
         .values()
         .filter(|s| s.instance.slot_id == slot.id)
@@ -1326,8 +1332,14 @@ fn slot_state_of(slot: &SlotDefinition, sessions: &HashMap<String, ManagedSessio
         can_stop: states.iter().any(|s| s.capabilities.can_stop),
         can_restart: states.iter().any(|s| s.capabilities.can_restart),
     };
+    let mut definition = slot.clone();
+    definition.session_def_ids = session_definitions
+        .values()
+        .filter(|definition| definition.slot_id == slot.id)
+        .map(|definition| definition.id.clone())
+        .collect();
     SlotState {
-        definition: slot.clone(),
+        definition,
         aggregate_status,
         session_ids,
         capabilities,
@@ -1407,6 +1419,25 @@ mod tests {
             "test-runtime".to_string(),
         );
         (pm, emitter)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn slot_state_computes_session_def_ids_from_registered_definitions() {
+        let (pm, _emitter) = make_pm(vec![], vec![]);
+        let mut slot = slot("slot-1", false);
+        slot.session_def_ids = vec!["future-def".into()];
+
+        pm.register_slot(slot).await;
+        assert_eq!(
+            pm.list_slot_states().await[0].definition.session_def_ids,
+            Vec::<String>::new(),
+        );
+
+        pm.register_session_definition(session_def("def-1", "slot-1", "true")).await;
+        assert_eq!(
+            pm.list_slot_states().await[0].definition.session_def_ids,
+            vec!["def-1".to_string()],
+        );
     }
 
     #[test]
