@@ -70,6 +70,36 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
     *outDy = event.scrollingDeltaY * scale;
 }
 
+static BOOL PandoraRectsOverlap(NSRect a, NSRect b) {
+    return NSIntersectsRect(a, b) || NSContainsRect(a, b) || NSContainsRect(b, a);
+}
+
+static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects) {
+    NSMutableArray<NSValue *> *merged = [rects mutableCopy];
+    BOOL changed = YES;
+
+    while (changed) {
+        changed = NO;
+        for (NSUInteger i = 0; i < merged.count && !changed; i++) {
+            NSRect left = merged[i].rectValue;
+            for (NSUInteger j = i + 1; j < merged.count; j++) {
+                NSRect right = merged[j].rectValue;
+                if (!PandoraRectsOverlap(left, right)) {
+                    continue;
+                }
+
+                NSRect unionRect = NSUnionRect(left, right);
+                [merged replaceObjectAtIndex:i withObject:[NSValue valueWithRect:unionRect]];
+                [merged removeObjectAtIndex:j];
+                changed = YES;
+                break;
+            }
+        }
+    }
+
+    return merged;
+}
+
 @interface PandoraTerminalNativeView : NSView
 @property(nonatomic, assign) ghostty_surface_t surface;
 @property(nonatomic, copy, nullable) NSString *sessionID;
@@ -283,7 +313,7 @@ static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *out
         return nil;
     }
     if ([self pandoraPointIsInWebOverlayOcclusion:point]) {
-        return self;
+        return nil;
     }
     return [super hitTest:point];
 }
@@ -728,6 +758,6 @@ void pandora_terminal_view_set_web_occlusion_rects(
         }
         [values addObject:[NSValue valueWithRect:NSMakeRect(rect.x, rect.y, rect.width, rect.height)]];
     }
-    view.pandoraWebOverlayOcclusionRects = values;
+    view.pandoraWebOverlayOcclusionRects = PandoraMergedOcclusionRects(values);
     [view pandoraApplyWebOverlayOcclusionMask];
 }

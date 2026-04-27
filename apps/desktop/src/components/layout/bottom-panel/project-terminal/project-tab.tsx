@@ -70,7 +70,7 @@ export function ProjectTab({
         {
           "border-t border-[var(--theme-border)]": !isFirst,
           "border-b border-[var(--theme-border)]": isLast,
-          "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]": active,
+          "bg-[var(--theme-terminal-bg)] text-[var(--theme-text)]": active,
           "text-[var(--theme-text-muted)] hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]":
             !active,
           "opacity-30": isBeingDragged,
@@ -114,7 +114,7 @@ export function ProjectTab({
               "pointer-events-none absolute right-0 top-0 h-full w-14 opacity-0 transition-opacity group-hover/tab:opacity-100",
               "bg-gradient-to-l to-transparent",
               {
-                "from-[var(--theme-panel-hover)]": active,
+                "from-[var(--theme-terminal-bg)]": active,
                 "from-[var(--theme-panel-hover)]/40": !active,
               },
             )}

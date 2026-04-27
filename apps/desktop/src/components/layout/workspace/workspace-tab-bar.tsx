@@ -161,6 +161,7 @@ export default function WorkspaceTabBar({
     () => new Map(scmEntries.map((entry) => [entry.path, entry])),
     [scmEntries],
   );
+  const selectedTab = tabs[selectedIndex] ?? tabs[0];
 
   const rowRef = useRef<HTMLDivElement>(null);
   const tabsWrapRef = useRef<HTMLDivElement>(null);
@@ -203,7 +204,10 @@ export default function WorkspaceTabBar({
 
   return (
     <div
-      className="flex h-8 min-w-0 items-stretch border-b border-neutral-800 bg-neutral-900/80"
+      className={cn("flex h-8 min-w-0 items-stretch border-b border-neutral-800", {
+        "bg-[var(--theme-terminal-bg)]": selectedTab?.kind === "terminal",
+        "bg-neutral-900/80": selectedTab?.kind !== "terminal",
+      })}
       onPointerMove={handlePointerMove}
       onPointerLeave={() => {
         pendingDragRef.current = null;

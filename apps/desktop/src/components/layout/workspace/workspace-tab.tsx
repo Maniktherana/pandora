@@ -169,6 +169,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
   } = props;
 
   const isActive = index === selectedIndex;
+  const isTerminal = tab.kind === "terminal";
   const terminalDisplay =
     tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
   const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
@@ -193,7 +194,9 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
         "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:z-20 after:h-[2px]",
         {
           "border-r border-neutral-800": !isLast,
-          "bg-neutral-900 text-neutral-200 after:content-['']": isActive,
+          "bg-[var(--theme-terminal-bg)] text-neutral-200 after:content-['']":
+            isActive && isTerminal,
+          "bg-neutral-900 text-neutral-200 after:content-['']": isActive && !isTerminal,
           "after:bg-neutral-200": isActive && isFocused,
           "after:bg-neutral-800": isActive && !isFocused,
           "text-neutral-500 hover:bg-neutral-800/30 hover:text-neutral-300": !isActive,
@@ -232,7 +235,8 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
           "pointer-events-none absolute right-0 top-0 h-full w-14 opacity-0 transition-opacity group-hover/tab:opacity-100",
           "bg-gradient-to-l to-transparent",
           {
-            "from-neutral-900": isActive,
+            "from-[var(--theme-terminal-bg)]": isActive && isTerminal,
+            "from-neutral-900": isActive && !isTerminal,
             "from-neutral-800/30": !isActive,
           },
         )}
