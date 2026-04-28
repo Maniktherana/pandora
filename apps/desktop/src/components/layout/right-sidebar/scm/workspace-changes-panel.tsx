@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -23,18 +22,16 @@ import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useScmController } from "@/services/scm/use-scm";
 import {
-  scmCommit,
-  scmDiscardTracked,
-  scmDiscardUntracked,
-  scmStage,
-  scmUnstage,
+  flattenScmSnapshot,
   optimisticallyStageAllScmEntries,
   optimisticallyStageScmEntries,
   optimisticallyUnstageAllScmEntries,
   optimisticallyUnstageScmEntries,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
-import type { ScmSelectionModifiers, ScmStatusEntry } from "./scm.types";
+} from "@/services/scm/scm-utils";
+import type { ScmSelectionModifiers } from "@/services/scm/scm-types";
+import type { ScmEntry } from "@/lib/shared/types";
 import {
   composePrInstruction,
   findAgentTerminal,
@@ -46,16 +43,11 @@ import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
 import { CommitDropdown } from "./commit-dropdown";
 import { ChecksPanel } from "./checks-panel";
-import { scmStatusQueryKey, useScmStatusQuery } from "./scm-queries";
-import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "./scm.types";
+import { SCM_SECTION_STICKY_Z_INDEX_BASE } from "@/services/scm/scm-types";
 import DotGridLoader from "@/components/dot-grid-loader";
 import type { DiffSource, HeaderBranchContext } from "@/lib/shared/types";
-import { requestReviewNavigation } from "@/state/review-navigation-store";
-import {
-  formatTargetBranch,
-  persistWorkspaceTargetBranch,
-  resolveWorkspaceTargetBranch,
-} from "./target-branch";
+import { requestReviewNavigation } from "@/services/editor/review-navigation-store";
+import { formatTargetBranch, resolveWorkspaceTargetBranch } from "./target-branch";
 
 type WorkspaceChangesPanelProps = {
   workspaceRoot: string;
@@ -63,11 +55,11 @@ type WorkspaceChangesPanelProps = {
   workspaceLabel: string;
 };
 
-function hasStaged(entry: ScmStatusEntry): boolean {
+function hasStaged(entry: ScmEntry): boolean {
   return entry.stagedKind != null && entry.stagedKind !== "";
 }
 
-function hasUnstaged(entry: ScmStatusEntry): boolean {
+function hasUnstaged(entry: ScmEntry): boolean {
   return entry.untracked || (entry.worktreeKind != null && entry.worktreeKind !== "");
 }
 
@@ -83,7 +75,7 @@ export default function WorkspaceChangesPanel({
   const [changesOpen, setChangesOpen] = useState(true);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSending, setPrSending] = useState(false);
-  const [optimisticEntries, setOptimisticEntries] = useState<ScmStatusEntry[] | null>(null);
+  const [optimisticEntries, setOptimisticEntries] = useState<ScmEntry[] | null>(null);
   const [scmTab, setScmTab] = useState<"changes" | "checks">("changes");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
@@ -94,7 +86,7 @@ export default function WorkspaceChangesPanel({
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
   const optimisticRevisionRef = useRef(0);
 
-  const queryClient = useQueryClient();
+  const scm = useScmController(workspaceId);
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
@@ -103,33 +95,40 @@ export default function WorkspaceChangesPanel({
   const workspaceRuntime = useRuntimeState(workspaceId);
   const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
   const projectRuntime = useRuntimeState(projectRuntimeId ?? "");
-  const {
-    data: entriesData,
-    error: entriesError,
-    refetch: refetchEntries,
-  } = useScmStatusQuery(workspaceRoot);
-  const entries = optimisticEntries ?? entriesData ?? null;
+
+  const serverEntries = useMemo(
+    () => flattenScmSnapshot(scm.snapshot),
+    [scm.snapshot],
+  );
+  const entries = optimisticEntries ?? (scm.snapshot ? serverEntries : null);
+
+  // Clear optimistic state when a fresh snapshot arrives from Rust.
+  useEffect(() => {
+    if (scm.snapshot && optimisticRevisionRef.current > 0) {
+      optimisticRevisionRef.current = 0;
+      setOptimisticEntries(null);
+      setBusy(false);
+    }
+  }, [scm.snapshot]);
 
   useEffect(() => {
-    if (entriesError) {
-      setLoadError(String(entriesError));
-      return;
+    if (scm.snapshot?.targetBranch !== undefined) {
+      setTargetBranch((current) => current ?? scm.snapshot?.targetBranch ?? null);
     }
-    setLoadError(null);
-  }, [entriesError]);
+  }, [scm.snapshot?.targetBranch]);
 
   useEffect(() => {
     setOptimisticEntries(null);
     setSelectedPaths([]);
     setLastSelectedPath(null);
-  }, [workspaceRoot]);
+  }, [workspaceId]);
 
   useEffect(() => {
-    if (!entriesData) return;
-    const existingPaths = new Set(entriesData.map((entry) => entry.path));
+    if (!serverEntries.length) return;
+    const existingPaths = new Set(serverEntries.map((entry) => entry.path));
     setSelectedPaths((current) => current.filter((path) => existingPaths.has(path)));
     setLastSelectedPath((current) => (current && existingPaths.has(current) ? current : null));
-  }, [entriesData]);
+  }, [serverEntries]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,19 +136,20 @@ export default function WorkspaceChangesPanel({
       .then((ctx) => {
         if (!cancelled) {
           setBranchContext(ctx);
-          setTargetBranch(resolveWorkspaceTargetBranch(ctx, workspaceId));
+          setTargetBranch((current) =>
+            resolveWorkspaceTargetBranch(ctx, current ?? scm.snapshot?.targetBranch ?? null),
+          );
         }
       })
       .catch(() => {
         if (!cancelled) {
           setBranchContext(null);
-          setTargetBranch(null);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!branchPickerOpen) setBranchSearch("");
@@ -181,11 +181,11 @@ export default function WorkspaceChangesPanel({
   const handleSelectTargetBranch = useCallback(
     (branch: string) => {
       setTargetBranch(branch);
-      void persistWorkspaceTargetBranch(workspaceId, branch);
+      scm.setTargetBranch(branch);
       setBranchPickerOpen(false);
       setBranchSearch("");
     },
-    [workspaceId],
+    [scm],
   );
 
   const stagedList = useMemo(() => (entries ?? []).filter(hasStaged), [entries]);
@@ -202,57 +202,28 @@ export default function WorkspaceChangesPanel({
   );
   const canCommit = stagedList.length > 0 && commitMessage.trim().length > 0 && !busy;
 
-  const run = async (
-    fn: () => Promise<void>,
-    options?: { optimisticStatusUpdate?: (current: ScmStatusEntry[]) => ScmStatusEntry[] },
+  const run = (
+    fn: () => void,
+    options?: { optimisticStatusUpdate?: (current: ScmEntry[]) => ScmEntry[] },
   ) => {
     const optimisticStatusUpdate = options?.optimisticStatusUpdate;
-    const statusQueryKey = scmStatusQueryKey(workspaceRoot);
-    const previousQueryEntries = queryClient.getQueryData<ScmStatusEntry[]>(statusQueryKey);
-    const previousOptimisticEntries = optimisticEntries;
-    const optimisticRevision = optimisticStatusUpdate ? optimisticRevisionRef.current + 1 : 0;
     if (optimisticStatusUpdate) {
-      optimisticRevisionRef.current = optimisticRevision;
-      const baseEntries = optimisticEntries ?? entriesData ?? previousQueryEntries ?? [];
-      const nextEntries = optimisticStatusUpdate(baseEntries);
+      const revision = optimisticRevisionRef.current + 1;
+      optimisticRevisionRef.current = revision;
+      const base = optimisticEntries ?? serverEntries;
       flushSync(() => {
         setLoadError(null);
         setBusy(true);
-        setOptimisticEntries(nextEntries);
+        setOptimisticEntries(optimisticStatusUpdate(base));
       });
-      void queryClient.cancelQueries({ queryKey: statusQueryKey });
-      queryClient.setQueryData<ScmStatusEntry[]>(statusQueryKey, nextEntries);
     } else {
       setBusy(true);
     }
     try {
-      await fn();
-      if (optimisticStatusUpdate) {
-        void refetchEntries().finally(() => {
-          if (optimisticRevisionRef.current === optimisticRevision) {
-            setOptimisticEntries(null);
-          }
-        });
-        void queryClient.invalidateQueries({ queryKey: ["scm-line-stats", workspaceRoot] });
-        void queryClient.invalidateQueries({
-          queryKey: ["scm-path-line-stats-bulk", workspaceRoot],
-        });
-        void queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
-      } else {
-        await refetchEntries();
-      }
+      fn();
     } catch (error) {
-      if (optimisticStatusUpdate) {
-        if (optimisticRevisionRef.current === optimisticRevision) {
-          setOptimisticEntries(previousOptimisticEntries);
-        }
-        if (previousQueryEntries) {
-          queryClient.setQueryData(statusQueryKey, previousQueryEntries);
-        }
-      }
+      if (optimisticStatusUpdate) setOptimisticEntries(null);
       setLoadError(String(error));
-      void refetchEntries();
-    } finally {
       setBusy(false);
     }
   };
@@ -310,48 +281,42 @@ export default function WorkspaceChangesPanel({
     setLastSelectedPath(null);
   }, []);
 
-  const onDiscard = (entry: ScmStatusEntry) => {
+  const onDiscard = (entry: ScmEntry) => {
     if (entry.untracked) {
       if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
-      void run(() => scmDiscardUntracked(workspaceRoot, entry.path));
+      run(() => scm.discardUntracked([entry.path]));
       return;
     }
     if (
       !window.confirm(`Discard local changes to "${entry.path}"? Staged changes are not removed.`)
     )
       return;
-    void run(() => scmDiscardTracked(workspaceRoot, entry.path));
+    run(() => scm.discardTracked([entry.path]));
   };
 
   const onUnstage = (path: string) => {
     const paths = selectedStagedPaths.includes(path) ? selectedStagedPaths : [path];
-    void run(() => scmUnstage(workspaceRoot, paths), {
+    run(() => scm.unstage(paths), {
       optimisticStatusUpdate: (current) => optimisticallyUnstageScmEntries(current, paths),
     });
   };
 
   const onCommit = () =>
-    void run(async () => {
-      await scmCommit(workspaceRoot, commitMessage);
+    run(() => {
+      scm.commit(commitMessage);
       setCommitMessage("");
     });
 
   const onUnstageAll = () => {
     if (!stagedList.length) return;
-    const paths = stagedList.map((entry) => entry.path);
     clearSelection();
-    void run(() => scmUnstage(workspaceRoot, paths), {
-      optimisticStatusUpdate: optimisticallyUnstageAllScmEntries,
-    });
+    run(() => scm.unstageAll(), { optimisticStatusUpdate: optimisticallyUnstageAllScmEntries });
   };
 
   const onStageAll = () => {
     if (!unstagedList.length) return;
-    const paths = unstagedList.map((entry) => entry.path);
     clearSelection();
-    void run(() => scmStage(workspaceRoot, paths), {
-      optimisticStatusUpdate: optimisticallyStageAllScmEntries,
-    });
+    run(() => scm.stageAll(), { optimisticStatusUpdate: optimisticallyStageAllScmEntries });
   };
 
   const onDiscardAll = () => {
@@ -359,17 +324,17 @@ export default function WorkspaceChangesPanel({
     const entriesToDiscard = unstagedList;
     if (!window.confirm(`Discard ${entriesToDiscard.length} unstaged files?`)) return;
     clearSelection();
-    void run(async () => {
-      for (const entry of entriesToDiscard) {
-        if (entry.untracked) await scmDiscardUntracked(workspaceRoot, entry.path);
-        else await scmDiscardTracked(workspaceRoot, entry.path);
-      }
+    run(() => {
+      const tracked = entriesToDiscard.filter((e) => !e.untracked).map((e) => e.path);
+      const untracked = entriesToDiscard.filter((e) => e.untracked).map((e) => e.path);
+      if (tracked.length) scm.discardTracked(tracked);
+      if (untracked.length) scm.discardUntracked(untracked);
     });
   };
 
-  const onStage = (entry: ScmStatusEntry) => {
+  const onStage = (entry: ScmEntry) => {
     const paths = selectedUnstagedPaths.includes(entry.path) ? selectedUnstagedPaths : [entry.path];
-    void run(() => scmStage(workspaceRoot, paths), {
+    run(() => scm.stage(paths), {
       optimisticStatusUpdate: (current) => optimisticallyStageScmEntries(current, paths),
     });
   };
@@ -448,7 +413,7 @@ export default function WorkspaceChangesPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 select-none flex-col">
+    <div className="flex h-full min-h-0 min-w-0 select-none flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-0 border-b border-[var(--theme-border)] px-2">
         <button
           type="button"
@@ -561,8 +526,8 @@ export default function WorkspaceChangesPanel({
             disabled={!canCommit}
             title="Commit"
             onClick={() =>
-              void run(async () => {
-                await scmCommit(workspaceRoot, commitMessage);
+              run(() => {
+                scm.commit(commitMessage);
                 setCommitMessage("");
               })
             }
@@ -576,7 +541,7 @@ export default function WorkspaceChangesPanel({
             className="text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
             disabled={busy}
             title="Refresh"
-            onClick={() => void refetchEntries()}
+            onClick={() => scm.refresh()}
           >
             <HugeiconsIcon icon={Refresh01Icon} strokeWidth={1.5} className="size-3.5" />
           </Button>
@@ -604,7 +569,8 @@ export default function WorkspaceChangesPanel({
             onCommit={onCommit}
             canCommit={canCommit}
             busy={busy}
-            worktreePath={workspaceRoot}
+            runtimeId={workspaceId}
+            scm={scm}
           />
         </div>
         <Button
@@ -630,7 +596,7 @@ export default function WorkspaceChangesPanel({
 
           <div
             data-scm-sidebar="true"
-            className="relative min-h-0 flex-1 overflow-auto overscroll-none pb-1"
+            className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none pb-1"
             style={{ overscrollBehavior: "none" }}
             onPointerDown={(event) => {
               if (event.target === event.currentTarget) {

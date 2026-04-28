@@ -1,6 +1,6 @@
 import { cn } from "@/lib/shared/utils";
-import type { TreeScmTone } from "./scm.types";
-import { scmToneTextClass } from "./scm.utils";
+import type { TreeScmTone } from "@/services/scm/scm-types";
+import { scmToneTextClass } from "@/services/scm/scm-utils";
 
 type ScmStatusBadgeProps = {
   text: string;

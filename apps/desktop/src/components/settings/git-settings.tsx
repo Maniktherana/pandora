@@ -1,4 +1,4 @@
-import { useSettingsStore } from "@/state/settings-store";
+import { useSettingsStore } from "@/services/settings/settings-store";
 import { Input } from "@/components/ui/input";
 
 export default function GitSettings() {

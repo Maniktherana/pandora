@@ -2,10 +2,10 @@ import type {
   DesktopView,
   UiPreferencesView,
   WorkspaceView,
-} from "@/state/desktop-view-projections";
-import { buildWorkspaceView } from "@/state/desktop-view-projections";
-import { useDesktopViewStore } from "@/state/desktop-view-store";
-import { useRuntimeStore } from "@/state/runtime-store";
+} from "@/services/workspace/desktop-view-projections";
+import { buildWorkspaceView } from "@/services/workspace/desktop-view-projections";
+import { useDesktopViewStore } from "@/services/workspace/desktop-view-store";
+import { useRuntimeStore } from "@/services/runtime/runtime-store";
 import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 
 export function useDesktopView<T = DesktopView>(selector?: (view: DesktopView) => T) {

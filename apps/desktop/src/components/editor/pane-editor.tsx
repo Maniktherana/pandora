@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useEditorStore } from "@/state/editor-store";
+import { useEditorStore } from "@/services/editor/editor-store";
+import { editorEnsureFileLoaded, editorSaveFile } from "@/services/editor/editor-service";
 import { languageFromRelativePath } from "@/components/editor/editor-language";
 import {
   MONACO_THEME_ID,
@@ -12,7 +12,7 @@ import {
   PANDORA_EDITOR_FONT_FAMILY,
   PANDORA_EDITOR_FONT_SIZE,
 } from "@/components/editor/monaco-pandora";
-import { useSettingsStore, getMonoFont } from "@/state/settings-store";
+import { useSettingsStore, getMonoFont } from "@/services/settings/settings-store";
 
 const LARGE_FILE_BYTES = 500_000;
 const HUGE_FILE_BYTES = 2_000_000;
@@ -86,30 +86,18 @@ export default function PaneEditor({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
 
-  const mergeSaved = useEditorStore((s) => s.mergeDiskContent);
   const workspaceCommands = useWorkspaceActions();
 
   const currentPathRef = useRef(relativePath);
   currentPathRef.current = relativePath;
 
-  // Load file content from disk if not already in store
+  // Load file content via runtime editor IO if not already in store
   useEffect(() => {
     if (!relativePath) return;
     const has = useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath];
     if (has !== undefined) return;
-    let cancelled = false;
-    void invoke<string>("read_workspace_text_file", {
-      workspaceRoot,
-      relativePath,
-    })
-      .then((content) => {
-        if (!cancelled) mergeSaved(workspaceId, relativePath, content);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, workspaceRoot, relativePath, mergeSaved]);
+    void editorEnsureFileLoaded(workspaceId, workspaceRoot, relativePath);
+  }, [workspaceId, workspaceRoot, relativePath]);
 
   // Read initial content non-reactively (only used as defaultValue for first model creation)
   const initialContent = useMemo(() => {
@@ -149,10 +137,8 @@ export default function PaneEditor({
         if (!path) return;
         const content = editor.getModel()?.getValue();
         if (content === undefined) return;
-        void useEditorStore
-          .getState()
-          .saveFile(workspaceId, workspaceRoot, path, content)
-          .catch((e) => console.error("Save failed:", e));
+        void editorSaveFile(workspaceId, workspaceRoot, path, content)
+          .catch((e: unknown) => console.error("Save failed:", e));
       });
 
       // --- Focus handler ---

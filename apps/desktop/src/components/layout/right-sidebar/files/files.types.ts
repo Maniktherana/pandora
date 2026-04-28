@@ -1,4 +1,4 @@
-import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
+import type { TreeScmDecoration } from "@/services/scm/scm-types";
 
 export const TREE_ROW_SELECTOR = "[data-tree-row-path]";
 export const INTERNAL_DRAG_THRESHOLD_PX = 4;

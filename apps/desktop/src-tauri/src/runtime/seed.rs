@@ -9,11 +9,7 @@ use crate::database::AppDatabase;
 
 /// Seed a dormant Terminal slot if the runtime has no slot definitions yet.
 /// Returns `Ok(())` even when nothing was seeded.
-pub fn ensure_seed(
-    db: &AppDatabase,
-    runtime_id: &str,
-    default_cwd: &str,
-) -> Result<(), String> {
+pub fn ensure_seed(db: &AppDatabase, runtime_id: &str, default_cwd: &str) -> Result<(), String> {
     db.ensure_seed_data(runtime_id, default_cwd)?;
     Ok(())
 }
@@ -58,7 +54,8 @@ mod tests {
 
         ensure_seed(&db, runtime, "/tmp").expect("seed");
         let slot_id = db.list_slot_definitions(runtime)[0].id.clone();
-        db.remove_slot_definition(runtime, &slot_id).expect("remove");
+        db.remove_slot_definition(runtime, &slot_id)
+            .expect("remove");
         ensure_seed(&db, runtime, "/tmp").expect("seed again");
         assert_eq!(db.list_slot_definitions(runtime).len(), 1);
 

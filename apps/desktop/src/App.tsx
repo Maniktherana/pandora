@@ -19,18 +19,17 @@ import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/file
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useBootstrapDesktop, useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
+import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 import {
   useSettingsStore,
   getFontFamily,
   getMonoFont,
   getTerminalFont,
-} from "@/state/settings-store";
+} from "@/services/settings/settings-store";
 import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
 import { applyTheme, defaultTheme, themes } from "@/lib/theme";
 import { loader } from "@monaco-editor/react";
-import { Effect } from "effect";
-import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -71,7 +70,6 @@ export default function App() {
   const terminalFontCustom = useSettingsStore((state) => state.terminalFontCustom);
   const editorFontSize = useSettingsStore((state) => state.editorFontSize);
   const terminalFontSize = useSettingsStore((state) => state.terminalFontSize);
-  const runtime = useDesktopRuntime();
   const terminalFontSizeHydratedRef = useRef(false);
   useBootstrapDesktop();
   useNativeTerminalOverlay(settingsOpen ? "opaque" : isResizingPanels ? "semi-transparent" : null);
@@ -120,12 +118,8 @@ export default function App() {
       return;
     }
 
-    void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (service) =>
-        service.setAllSurfaceFontSizes(terminalFontSize),
-      ).pipe(Effect.catchAll(() => Effect.void)),
-    );
-  }, [runtime, terminalFontSize]);
+    void terminalSurfaceService.setAllSurfaceFontSizes(terminalFontSize).catch(() => {});
+  }, [terminalFontSize]);
 
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
   const selectedWsStatus = useDesktopView((view) => view.selectedWorkspace?.status ?? null);
@@ -186,7 +180,7 @@ export default function App() {
       if (selectedWs?.status !== "ready") return;
       const shouldOpen = !fileTreeOpen || rightSidebarMode !== mode;
       setRightSidebarMode(mode);
-      uiPreferencesCommands.setFileTreeOpenForWorkspace(selectedWs.id, shouldOpen);
+      uiPreferencesCommands.setFileTreeOpen(shouldOpen);
     },
     [fileTreeOpen, rightSidebarMode, selectedWs, uiPreferencesCommands],
   );

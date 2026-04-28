@@ -98,7 +98,11 @@ pub struct PortManager {
 impl PortManager {
     /// Spawn the background scan loop. Returns a `(PortManager, ports_rx)`
     /// pair plus the join handle of the scan task; drop the handle to stop.
-    pub fn spawn() -> (Self, mpsc::Receiver<Vec<DetectedPort>>, tokio::task::JoinHandle<()>) {
+    pub fn spawn() -> (
+        Self,
+        mpsc::Receiver<Vec<DetectedPort>>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let (on_change_tx, on_change_rx) = mpsc::channel::<Vec<DetectedPort>>(32);
         let (hint_tx, hint_rx) = mpsc::channel::<()>(16);
         let pm = Self {
@@ -118,7 +122,10 @@ impl PortManager {
         let mut s = self.state.lock().await;
         s.sessions.insert(
             session_id.to_string(),
-            TrackedSession { pid, first_output_at: None },
+            TrackedSession {
+                pid,
+                first_output_at: None,
+            },
         );
     }
 
@@ -254,7 +261,9 @@ impl PortManager {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut next: HashMap<String, DetectedPort> = HashMap::new();
         for sp in scanned {
-            let Some(sid) = pid_to_session.get(&sp.pid) else { continue };
+            let Some(sid) = pid_to_session.get(&sp.pid) else {
+                continue;
+            };
             let key = format!("{}:{}", sid, sp.port);
             let detected_at = {
                 let s = self.state.lock().await;
@@ -402,7 +411,11 @@ fn parse_lsof_line(line: &str, pid_set: &HashSet<u32>) -> Option<ScannedPort> {
         port,
         pid,
         process_name: process_name.to_string(),
-        address: if raw_addr == "*" { "0.0.0.0".into() } else { raw_addr.into() },
+        address: if raw_addr == "*" {
+            "0.0.0.0".into()
+        } else {
+            raw_addr.into()
+        },
     })
 }
 
@@ -480,10 +493,11 @@ mod tests {
         let mut pids = HashSet::new();
         pids.insert(12345);
         for port in IGNORED_PORTS {
-            let line = format!(
-                "sshd      12345 user   3u  IPv4 0x1  0t0  TCP *:{port} (LISTEN)"
+            let line = format!("sshd      12345 user   3u  IPv4 0x1  0t0  TCP *:{port} (LISTEN)");
+            assert!(
+                parse_lsof_line(&line, &pids).is_none(),
+                "{port} should be skipped"
             );
-            assert!(parse_lsof_line(&line, &pids).is_none(), "{port} should be skipped");
         }
     }
 

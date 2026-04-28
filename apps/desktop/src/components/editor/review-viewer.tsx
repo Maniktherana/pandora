@@ -10,9 +10,8 @@ import {
   type CSSProperties,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react";
-import PierreWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url";
+import { useQueryClient } from "@tanstack/react-query";
+import { Virtualizer } from "@pierre/diffs/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -36,25 +35,16 @@ import DiffViewer from "@/components/editor/diff-viewer";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { getPierreSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/pierre-pandora";
-import {
-  useScmPathLineStatsBulkQuery,
-  useScmStatusQuery,
-} from "@/components/layout/right-sidebar/scm/scm-queries";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import {
   decorationForScmEntry,
-  scmBranchChanges,
-  scmDiscardTracked,
-  scmDiscardUntracked,
-  scmStage,
-  scmUnstage,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+  flattenScmSnapshot,
+} from "@/services/scm/scm-utils";
 import type {
   ScmLineStats,
-  ScmBranchChange,
-  ScmStatusEntry,
   TreeScmDecoration,
-} from "@/components/layout/right-sidebar/scm/scm.types";
+} from "@/services/scm/scm-types";
+import type { ScmEntry } from "@/lib/shared/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,21 +53,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
-import { useReviewNavigationStore } from "@/state/review-navigation-store";
+import { useReviewNavigationStore } from "@/services/editor/review-navigation-store";
+import { fileTreeReadTextFile } from "@/services/file-tree/file-tree-service";
 import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
-  WORKSPACE_TARGET_BRANCH_EVENT,
-  type WorkspaceTargetBranchEventDetail,
 } from "@/components/layout/right-sidebar/scm/target-branch";
+import { useScmStore } from "@/services/scm/scm-store";
+import { useScmController } from "@/services/scm/use-scm";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
 
-const pierreWorkerFactory = () => new Worker(PierreWorkerUrl, { type: "module" });
-
-const pierreWorkerPoolOptions = { workerFactory: pierreWorkerFactory, poolSize: 4 };
-const pierreHighlighterOptions = { theme: "pandora-theme" };
 const reviewVirtualizerConfig = {
   overscrollSize: 1000,
   intersectionObserverMargin: 4000,
@@ -130,11 +117,11 @@ function persistWrapLines(wrapLines: boolean) {
   }
 }
 
-function hasStaged(entry: ScmStatusEntry): boolean {
+function hasStaged(entry: ScmEntry): boolean {
   return entry.stagedKind != null && entry.stagedKind !== "";
 }
 
-function hasUnstaged(entry: ScmStatusEntry): boolean {
+function hasUnstaged(entry: ScmEntry): boolean {
   return entry.untracked || (entry.worktreeKind != null && entry.worktreeKind !== "");
 }
 
@@ -199,7 +186,7 @@ function BranchModeLabel({ branchLabel }: { branchLabel: BranchLabel | null }) {
 }
 
 type ReviewFileEntryProps = {
-  entry: ScmStatusEntry;
+  entry: ScmEntry;
   source: DiffSource;
   stats: ScmLineStats | undefined;
   decoration: TreeScmDecoration;
@@ -207,6 +194,7 @@ type ReviewFileEntryProps = {
   canStage: boolean;
   busy: boolean;
   mode: ReviewMode;
+  workspaceId: string;
   workspaceRoot: string;
   diffLayout: DiffLayout;
   wrapLines: boolean;
@@ -215,30 +203,35 @@ type ReviewFileEntryProps = {
   isFirst: boolean;
   onToggle: (path: string, nextOpen: boolean) => void;
   onOpenFile: (path: string) => void;
-  onRevert: (entry: ScmStatusEntry) => void;
-  onStage: (entry: ScmStatusEntry) => void;
+  onRevert: (entry: ScmEntry) => void;
+  onStage: (entry: ScmEntry) => void;
+  onStatsChange: (path: string, source: DiffSource, stats: ScmLineStats) => void;
 };
 
 type ReviewDiffBodyProps = {
-  entry: ScmStatusEntry;
+  entry: ScmEntry;
   source: DiffSource;
   stats: ScmLineStats | undefined;
+  workspaceId: string;
   workspaceRoot: string;
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
   targetBranch?: string | null | undefined;
+  onStatsChange: (path: string, source: DiffSource, stats: ScmLineStats) => void;
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({
   entry,
   source,
   stats,
+  workspaceId,
   workspaceRoot,
   diffLayout,
   wrapLines,
   reloadKey,
   targetBranch,
+  onStatsChange,
 }: ReviewDiffBodyProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [shouldMountDiff, setShouldMountDiff] = useState(false);
@@ -288,6 +281,15 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
           reloadKey={reloadKey}
           targetBranch={targetBranch}
           metrics={REVIEW_DIFF_METRICS}
+          readWorkingCopy={(path) => fileTreeReadTextFile(workspaceId, path)}
+          onStatsChange={(next) => {
+            if (!next.loading && !next.error) {
+              onStatsChange(entry.path, source, {
+                added: next.additions,
+                removed: next.deletions,
+              });
+            }
+          }}
         />
       ) : (
         <div
@@ -309,6 +311,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   canStage,
   busy,
   mode,
+  workspaceId,
   workspaceRoot,
   diffLayout,
   wrapLines,
@@ -319,6 +322,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   onOpenFile,
   onRevert,
   onStage,
+  onStatsChange,
 }: ReviewFileEntryProps) {
   const { directory, fileName } = splitDisplayPath(entry.path);
 
@@ -388,8 +392,12 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
           {decoration.badge ? (
             <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="shrink-0" />
           ) : null}
-          <span className="shrink-0 text-[var(--theme-scm-added)]">+{stats?.added ?? 0}</span>
-          <span className="shrink-0 text-[var(--theme-scm-deleted)]">-{stats?.removed ?? 0}</span>
+          {stats ? (
+            <>
+              <span className="shrink-0 text-[var(--theme-scm-added)]">+{stats.added}</span>
+              <span className="shrink-0 text-[var(--theme-scm-deleted)]">-{stats.removed}</span>
+            </>
+          ) : null}
         </div>
         <Button
           type="button"
@@ -412,11 +420,13 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
           entry={entry}
           source={source}
           stats={stats}
+          workspaceId={workspaceId}
           workspaceRoot={workspaceRoot}
           diffLayout={diffLayout}
           wrapLines={wrapLines}
           reloadKey={reloadKey}
           targetBranch={targetBranch}
+          onStatsChange={onStatsChange}
         />
       ) : null}
     </section>
@@ -428,27 +438,23 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const { data: entriesData, refetch, isFetching } = useScmStatusQuery(workspaceRoot);
-  const entries = entriesData ?? [];
+  const scm = useScmController(workspaceId);
+  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspaceId]?.snapshot ?? null);
+  const isFetching = useScmStore((s) => s.byRuntimeId[workspaceId]?.refreshing ?? false);
+  const entries = useMemo(() => flattenScmSnapshot(scmSnapshot), [scmSnapshot]);
   const [diffLayout, setDiffLayout] = useState<DiffLayout>(loadDiffLayout);
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
-  const [targetBranch, setTargetBranch] = useState<string | null>(workspace?.targetBranch ?? null);
+  const targetBranch = scmSnapshot?.targetBranch ?? null;
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
+  const [loadedStatsByKey, setLoadedStatsByKey] = useState<Record<string, ScmLineStats>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const reviewNavigationRequest = useReviewNavigationStore(
     (state) => state.requestByWorkspaceId[workspaceId] ?? null,
   );
   const clearReviewNavigation = useReviewNavigationStore((state) => state.clearReviewNavigation);
-  const { data: branchEntriesData = [], refetch: refetchBranchEntries } = useQuery({
-    queryKey: ["scm-branch-changes", workspaceRoot, targetBranch],
-    queryFn: () => scmBranchChanges(workspaceRoot, targetBranch!),
-    enabled: Boolean(workspaceRoot && targetBranch),
-    staleTime: 5_000,
-    gcTime: 300_000,
-  });
 
   useEffect(() => {
     if (!workspace || workspace.status !== "ready") {
@@ -459,8 +465,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     invoke<HeaderBranchContext>("header_branch_context", { workspaceId: workspace.id })
       .then((ctx) => {
         if (!cancelled) {
-          const resolvedTarget = resolveWorkspaceTargetBranch(ctx, workspace.id);
-          setTargetBranch(resolvedTarget);
+          const resolvedTarget = resolveWorkspaceTargetBranch(ctx, targetBranch);
           setBaseBranchLabel({
             source: workspace.gitBranchName,
             target: formatTargetBranch(resolvedTarget),
@@ -478,75 +483,36 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [workspace]);
-
-  useEffect(() => {
-    const handleTargetBranchChange = (event: Event) => {
-      const customEvent = event as CustomEvent<WorkspaceTargetBranchEventDetail>;
-      if (customEvent.detail.workspaceId !== workspaceId) return;
-      setTargetBranch(customEvent.detail.targetBranch);
-      if (workspace) {
-        setBaseBranchLabel({
-          source: workspace.gitBranchName,
-          target: formatTargetBranch(customEvent.detail.targetBranch),
-        });
-      }
-    };
-    window.addEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
-    return () =>
-      window.removeEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
-  }, [workspace, workspaceId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace, targetBranch]);
 
   const filteredEntries = useMemo(() => {
     switch (mode) {
       case "staged":
-        return entries.filter(hasStaged);
+        return scmSnapshot?.staged ?? [];
       case "branch":
-        return branchEntriesData;
+        return [];
       default:
-        return entries.filter(hasUnstaged);
+        return scmSnapshot?.unstaged ?? [];
     }
-  }, [branchEntriesData, entries, mode]);
+  }, [mode, scmSnapshot?.staged, scmSnapshot?.unstaged]);
 
   const unstagedCount = useMemo(() => entries.filter(hasUnstaged).length, [entries]);
   const stagedCount = useMemo(() => entries.filter(hasStaged).length, [entries]);
 
   const activeSource = sourceForMode(mode);
-  const statPaths = useMemo(() => filteredEntries.map((entry) => entry.path), [filteredEntries]);
   const prefetchPathKey = useMemo(
     () => filteredEntries.map((entry) => entry.path).join("\0"),
     [filteredEntries],
   );
-  const untrackedPaths = useMemo(
-    () =>
-      mode === "unstaged"
-        ? filteredEntries.filter((entry) => entry.untracked).map((entry) => entry.path)
-        : [],
-    [filteredEntries, mode],
-  );
-  const { data: bulkStats = [] } = useScmPathLineStatsBulkQuery(
-    workspaceRoot,
-    statPaths,
-    activeSource === "staged",
-    untrackedPaths,
-    { enabled: activeSource !== null && activeSource !== "branch" },
-  );
-  const statsByKey = useMemo(() => {
-    if (activeSource === "branch") {
-      return Object.fromEntries(
-        (filteredEntries as ScmBranchChange[]).map((entry) => [
-          statsKey(entry.path, "branch"),
-          { added: entry.added, removed: entry.removed },
-        ]),
-      );
+  const statsByKey = useMemo((): Record<string, ScmLineStats> => {
+    if (!activeSource) return loadedStatsByKey;
+    const next: Record<string, ScmLineStats> = {};
+    for (const entry of filteredEntries) {
+      next[statsKey(entry.path, activeSource)] = entry.lineStats;
     }
-    return Object.fromEntries(
-      bulkStats.map((stat) => [
-        statsKey(stat.path, activeSource === "staged" ? "staged" : "working"),
-        stat,
-      ]),
-    );
-  }, [activeSource, bulkStats, filteredEntries]);
+    return { ...next, ...loadedStatsByKey };
+  }, [activeSource, filteredEntries, loadedStatsByKey]);
   const decorationByPath = useMemo(
     () =>
       Object.fromEntries(
@@ -564,6 +530,24 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       return next;
     });
   }, [filteredEntries]);
+
+  useEffect(() => {
+    setLoadedStatsByKey({});
+  }, [workspaceId, mode, targetBranch]);
+
+  const handleDiffStatsChange = useCallback(
+    (path: string, source: DiffSource, stats: ScmLineStats) => {
+      const key = statsKey(path, source);
+      setLoadedStatsByKey((current) => {
+        const previous = current[key];
+        if (previous?.added === stats.added && previous?.removed === stats.removed) {
+          return current;
+        }
+        return { ...current, [key]: stats };
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!reviewNavigationRequest) return;
@@ -589,13 +573,14 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           reviewNavigationRequest.path,
           reviewNavigationRequest.source,
           targetBranch,
+          (path) => fileTreeReadTextFile(workspaceId, path),
         ),
       staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     });
-  }, [queryClient, reviewNavigationRequest, targetBranch, workspaceRoot]);
+  }, [queryClient, reviewNavigationRequest, targetBranch, workspaceId, workspaceRoot]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest || entriesData == null) return;
+    if (!reviewNavigationRequest || scmSnapshot == null) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     if (mode !== requestedMode) return;
@@ -634,7 +619,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     };
   }, [
     clearReviewNavigation,
-    entriesData,
+    scmSnapshot,
     filteredEntries,
     mode,
     reviewNavigationRequest,
@@ -656,6 +641,8 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
             })
         : (task: () => void) => window.setTimeout(task, 32);
 
+    const readWorkingCopy = (path: string) => fileTreeReadTextFile(workspaceId, path);
+
     const runWorker = () => {
       if (cancelled) return;
       const nextPath = queue.shift();
@@ -672,7 +659,14 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         void queryClient
           .prefetchQuery({
             queryKey,
-            queryFn: () => fetchDiffContents(workspaceRoot, nextPath, activeSource, targetBranch),
+            queryFn: () =>
+              fetchDiffContents(
+                workspaceRoot,
+                nextPath,
+                activeSource,
+                targetBranch,
+                readWorkingCopy,
+              ),
             staleTime: DIFF_CONTENTS_STALE_TIME_MS,
           })
           .finally(() => {
@@ -688,59 +682,63 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeSource, prefetchPathKey, queryClient, reloadKey, targetBranch, workspaceRoot]);
+  }, [
+    activeSource,
+    prefetchPathKey,
+    queryClient,
+    reloadKey,
+    targetBranch,
+    workspaceId,
+    workspaceRoot,
+  ]);
 
   const allCollapsed =
     filteredEntries.length > 0 &&
     filteredEntries.every((entry) => openByPath[entry.path] === false);
 
   const refreshAll = useCallback(async () => {
-    await refetch();
-    if (targetBranch) {
-      await refetchBranchEntries();
-    }
+    scm.refresh();
     await queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
     setReloadKey((value) => value + 1);
-  }, [queryClient, refetch, refetchBranchEntries, targetBranch, workspaceRoot]);
+  }, [queryClient, scm, workspaceRoot]);
 
   const runEntryAction = useCallback(
-    async (path: string, fn: () => Promise<void>) => {
+    (path: string, fn: () => void) => {
       setBusyPath(path);
       try {
-        await fn();
-        await refreshAll();
+        fn();
       } finally {
         setBusyPath(null);
       }
     },
-    [refreshAll],
+    [],
   );
 
   const handleRevert = useCallback(
-    (entry: ScmStatusEntry) => {
+    (entry: ScmEntry) => {
       if (mode === "staged") {
-        void runEntryAction(entry.path, () => scmUnstage(workspaceRoot, [entry.path]));
+        runEntryAction(entry.path, () => scm.unstage([entry.path]));
         return;
       }
 
       if (entry.untracked) {
         if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
-        void runEntryAction(entry.path, () => scmDiscardUntracked(workspaceRoot, entry.path));
+        runEntryAction(entry.path, () => scm.discardUntracked([entry.path]));
         return;
       }
 
       if (!window.confirm(`Discard local changes to "${entry.path}"?`)) return;
-      void runEntryAction(entry.path, () => scmDiscardTracked(workspaceRoot, entry.path));
+      runEntryAction(entry.path, () => scm.discardTracked([entry.path]));
     },
-    [mode, runEntryAction, workspaceRoot],
+    [mode, runEntryAction, scm],
   );
 
   const handleStage = useCallback(
-    (entry: ScmStatusEntry) => {
+    (entry: ScmEntry) => {
       if (mode !== "unstaged" || !hasUnstaged(entry)) return;
-      void runEntryAction(entry.path, () => scmStage(workspaceRoot, [entry.path]));
+      runEntryAction(entry.path, () => scm.stage([entry.path]));
     },
-    [mode, runEntryAction, workspaceRoot],
+    [mode, runEntryAction, scm],
   );
 
   const handleToggleEntry = useCallback(
@@ -750,12 +748,15 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       });
       if (!nextOpen || !activeSource) return;
       void queryClient.prefetchQuery({
-        queryKey: diffContentsQueryKey(workspaceRoot, path, activeSource),
-        queryFn: () => fetchDiffContents(workspaceRoot, path, activeSource),
+        queryKey: diffContentsQueryKey(workspaceRoot, path, activeSource, targetBranch),
+        queryFn: () =>
+          fetchDiffContents(workspaceRoot, path, activeSource, targetBranch, (relativePath) =>
+            fileTreeReadTextFile(workspaceId, relativePath),
+          ),
         staleTime: DIFF_CONTENTS_STALE_TIME_MS,
       });
     },
-    [activeSource, queryClient, workspaceRoot],
+    [activeSource, queryClient, targetBranch, workspaceId, workspaceRoot],
   );
 
   const handleOpenFile = useCallback(
@@ -766,11 +767,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   );
 
   return (
-    <WorkerPoolContextProvider
-      poolOptions={pierreWorkerPoolOptions}
-      highlighterOptions={pierreHighlighterOptions}
-    >
-      <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
+    <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
         <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -892,13 +889,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           </div>
         </div>
 
-        {entriesData == null || filteredEntries.length === 0 ? (
+        {scmSnapshot == null || filteredEntries.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {mode === "branch" && !targetBranch ? (
-              <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
-                Pick a target branch in Source Control to compare this branch.
-              </div>
-            ) : entriesData == null ? (
+            {scmSnapshot == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
                 Loading review…
               </div>
@@ -930,6 +923,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
                   canStage={mode === "unstaged" && hasUnstaged(entry)}
                   busy={busyPath === entry.path}
                   mode={mode}
+                  workspaceId={workspaceId}
                   workspaceRoot={workspaceRoot}
                   diffLayout={diffLayout}
                   wrapLines={wrapLines}
@@ -940,13 +934,13 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
                   onOpenFile={handleOpenFile}
                   onRevert={handleRevert}
                   onStage={handleStage}
+                  onStatsChange={handleDiffStatsChange}
                 />
               );
             })}
           </Virtualizer>
         )}
-      </div>
-    </WorkerPoolContextProvider>
+    </div>
   );
 }
 

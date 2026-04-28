@@ -6,8 +6,8 @@ use tokio::net::UnixListener;
 
 use super::paths::agent_socket_path;
 use super::types::AgentHookEnvelope;
-use crate::daemon_bridge::DaemonState;
 use crate::runtime::types::{AgentCliSignal, AgentVendor};
+use crate::runtime_ipc::RuntimeIpcState;
 
 /// Map a hook payload's `source` string into the `AgentVendor` enum the
 /// runtime understands. Unknown vendors are dropped so we don't surface
@@ -51,10 +51,13 @@ async fn handle_hook_connection(app: AppHandle, mut stream: tokio::net::UnixStre
             payload_base64: envelope.payload_base64,
         };
 
-        let runtime_state = app.state::<DaemonState>();
+        let runtime_state = app.state::<RuntimeIpcState>();
         match runtime_state.inner().get(&envelope.runtime_id).await {
             Some(runtime) => {
-                runtime.process_manager.record_agent_cli_signal(&signal).await;
+                runtime
+                    .process_manager
+                    .record_agent_cli_signal(&signal)
+                    .await;
             }
             None => {
                 // Hook payloads can race with workspace teardown; log and

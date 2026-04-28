@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -11,6 +12,7 @@ import {
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import ReviewViewer from "@/components/editor/review-viewer";
+import { fileTreeReadTextFile } from "@/services/file-tree/file-tree-service";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
@@ -21,6 +23,7 @@ import { useDesktopView, useRuntimeState, useUiPreferencesView } from "@/hooks/u
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useRuntimeStore } from "@/services/runtime/runtime-store";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
 import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
 import type { SessionState } from "@/lib/shared/types";
@@ -235,6 +238,7 @@ function PaneView({
                 key={tabKey(tab)}
                 className="absolute inset-0 overflow-hidden"
                 style={{
+                  display: isActiveTab ? undefined : "none",
                   visibility: isActiveTab ? "visible" : "hidden",
                   pointerEvents: isActiveTab ? "auto" : "none",
                 }}
@@ -245,6 +249,7 @@ function PaneView({
                   relativePath={tab.path}
                   source={tab.source}
                   isActive={isActiveTab}
+                  readWorkingCopy={(path) => fileTreeReadTextFile(workspaceId, path)}
                 />
               </div>
             );
@@ -255,12 +260,16 @@ function PaneView({
                 key={tabKey(tab)}
                 className="absolute inset-0 overflow-hidden"
                 style={{
+                  display: isActiveTab ? undefined : "none",
                   visibility: isActiveTab ? "visible" : "hidden",
                   pointerEvents: isActiveTab ? "auto" : "none",
                 }}
                 aria-hidden={!isActiveTab}
               >
-                <ReviewViewer workspaceId={workspaceId} workspaceRoot={workspaceRoot} />
+                <ReviewViewer
+                  workspaceId={workspaceId}
+                  workspaceRoot={workspaceRoot}
+                />
               </div>
             );
           }
@@ -625,12 +634,44 @@ function WorkspaceRuntimeLoading() {
 export default memo(function WorkspaceView() {
   const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
   const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const runtime = useRuntimeState(selectedWorkspaceID ?? "");
+  const workspaces = useDesktopView((view) => view.workspaces);
+  const runtimeState = useRuntimeStore((state) => state.runtimeState);
+  const runtime = selectedWorkspaceID ? (runtimeState[selectedWorkspaceID] ?? null) : null;
+  const [mountedWorkspaceIds, setMountedWorkspaceIds] = useState<string[]>([]);
   const workspaceCommands = useWorkspaceActions();
   const handleRootPointerDownCapture = useCallback(() => {
     workspaceCommands.setLayoutTargetRuntimeId(null);
     workspaceCommands.setNavigationArea("workspace");
   }, [workspaceCommands]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceID || !selectedWs || selectedWs.status !== "ready") return;
+    if (!runtime || runtime.connectionState !== "connected" || !runtime.layoutLoaded) return;
+    setMountedWorkspaceIds((current) =>
+      current.includes(selectedWorkspaceID) ? current : [...current, selectedWorkspaceID],
+    );
+  }, [runtime, selectedWorkspaceID, selectedWs]);
+
+  const mountedReadyWorkspaceIds = useMemo(() => {
+    const readyWorkspaceIds = new Set(
+      workspaces
+        .filter((workspace) => workspace.status === "ready")
+        .map((workspace) => workspace.id),
+    );
+    return mountedWorkspaceIds.filter((workspaceId) => readyWorkspaceIds.has(workspaceId));
+  }, [mountedWorkspaceIds, workspaces]);
+  const workspaceIdsToRender = useMemo(() => {
+    if (
+      selectedWorkspaceID &&
+      selectedWs?.status === "ready" &&
+      runtime?.connectionState === "connected" &&
+      runtime.layoutLoaded &&
+      !mountedReadyWorkspaceIds.includes(selectedWorkspaceID)
+    ) {
+      return [...mountedReadyWorkspaceIds, selectedWorkspaceID];
+    }
+    return mountedReadyWorkspaceIds;
+  }, [mountedReadyWorkspaceIds, runtime, selectedWorkspaceID, selectedWs?.status]);
 
   if (!selectedWs || selectedWs.status !== "ready") {
     return <EmptyWorkspaceState />;
@@ -649,13 +690,32 @@ export default memo(function WorkspaceView() {
   }
 
   return (
-    <div className="h-full min-h-0" onPointerDownCapture={handleRootPointerDownCapture}>
-      <WorkspaceRuntimeView
-        workspaceId={selectedWorkspaceID!}
-        workspaceRoot={selectedWs.worktreePath}
-        runtime={runtime}
-        layoutTargetOnFocus={null}
-      />
+    <div
+      className="relative h-full min-h-0"
+      onPointerDownCapture={handleRootPointerDownCapture}
+    >
+      {workspaceIdsToRender.map((workspaceId) => {
+        const workspace = workspaces.find((entry) => entry.id === workspaceId);
+        const mountedRuntime = runtimeState[workspaceId];
+        if (!workspace || !mountedRuntime?.root) return null;
+        const isSelected = workspaceId === selectedWorkspaceID;
+        return (
+          <div
+            key={workspaceId}
+            className="absolute inset-0 min-h-0"
+            style={{ display: isSelected ? undefined : "none" }}
+            aria-hidden={!isSelected}
+          >
+            <WorkspaceRuntimeView
+              workspaceId={workspaceId}
+              workspaceRoot={workspace.worktreePath}
+              runtime={mountedRuntime}
+              layoutTargetOnFocus={null}
+              isVisible={isSelected}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 });

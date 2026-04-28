@@ -11,7 +11,12 @@ import {
   SETTINGS_PREVIEW_RUNTIME_ID,
   isSettingsPreviewSlot,
 } from "@/lib/terminal/settings-preview";
-import type { ClientMessage, DaemonMessage, SessionState } from "@/lib/shared/types";
+import type {
+  RuntimeCommand,
+  RuntimeConnectionEvent,
+  RuntimeEventEnvelope,
+  SessionState,
+} from "@/lib/shared/types";
 
 const SETTINGS_PREVIEW_HEIGHT_CLASS = "h-[320px]";
 
@@ -29,18 +34,18 @@ const settingsPreviewState: {
   initializing: null,
 };
 
-async function sendRuntimeMessage(workspaceId: string, message: ClientMessage) {
-  await invoke("daemon_send", {
-    workspaceId,
+async function sendRuntimeMessage(runtimeId: string, message: RuntimeCommand) {
+  await invoke("runtime_send", {
+    runtimeId,
     message: JSON.stringify(message),
   });
 }
 
 function ensureSettingsPreviewTerminal(workspacePath: string) {
-  const workspaceId = SETTINGS_PREVIEW_RUNTIME_ID;
-  if (settingsPreviewState.runtimeId === workspaceId && settingsPreviewState.sessionId) {
+  const runtimeId = SETTINGS_PREVIEW_RUNTIME_ID;
+  if (settingsPreviewState.runtimeId === runtimeId && settingsPreviewState.sessionId) {
     return Promise.resolve({
-      runtimeId: workspaceId,
+      runtimeId,
       sessionId: settingsPreviewState.sessionId,
     });
   }
@@ -51,7 +56,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
 
   const previewSlotId = `${SETTINGS_PREVIEW_SLOT_ID_PREFIX}${crypto.randomUUID()}`;
   const previewSessionDefId = `${SETTINGS_PREVIEW_SESSION_DEF_ID_PREFIX}${crypto.randomUUID()}`;
-  settingsPreviewState.runtimeId = workspaceId;
+  settingsPreviewState.runtimeId = runtimeId;
   settingsPreviewState.slotId = previewSlotId;
   settingsPreviewState.sessionDefId = previewSessionDefId;
 
@@ -68,18 +73,15 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
       const waitForConnection = new Promise<void>(async (resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("connection timeout")), 8000);
 
-        cleanup.connectionUnlisten = await listen<string>("daemon-connection", (event) => {
-          try {
-            const payload = JSON.parse(event.payload) as {
-              workspaceId?: string;
-              state?: string;
-            };
-            if (payload.workspaceId !== workspaceId) return;
-            if (payload.state !== "connected") return;
+        cleanup.connectionUnlisten = await listen<RuntimeConnectionEvent>(
+          "runtime-connection",
+          (event) => {
+            if (event.payload.runtimeId !== runtimeId) return;
+            if (event.payload.state !== "connected") return;
             clearTimeout(timeout);
             resolve();
-          } catch {}
-        });
+          },
+        );
       });
 
       const waitForSession = new Promise<string>(async (resolve, reject) => {
@@ -92,14 +94,10 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
           resolve(session.id);
         };
 
-        cleanup.sessionUnlisten = await listen<string>("daemon-message", (event) => {
+        cleanup.sessionUnlisten = await listen<RuntimeEventEnvelope>("runtime-event", (event) => {
           try {
-            const payload =
-              typeof event.payload === "string"
-                ? (JSON.parse(event.payload) as DaemonMessage)
-                : (event.payload as DaemonMessage);
-
-            if (payload.workspaceId !== workspaceId) return;
+            const payload = event.payload;
+            if (payload.runtimeId !== runtimeId) return;
 
             if (payload.type === "session_opened") {
               finish(payload.session);
@@ -121,13 +119,13 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
         (window as typeof window & { __PANDORA_SHELL__?: string }).__PANDORA_SHELL__ ?? "/bin/zsh";
 
       await invoke("start_workspace_runtime", {
-        workspaceId,
+        workspaceId: runtimeId,
         workspacePath,
         defaultCwd: workspacePath,
       });
       await waitForConnection;
 
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(runtimeId, {
         type: "create_slot",
         slot: {
           id: previewSlotId,
@@ -142,7 +140,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
         },
       });
 
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(runtimeId, {
         type: "create_session_def",
         session: {
           id: previewSessionDefId,
@@ -153,7 +151,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
           cwd: null,
           port: null,
           envOverrides: {
-            PANDORA_RUNTIME_ID: workspaceId,
+            PANDORA_RUNTIME_ID: runtimeId,
             PANDORA_SLOT_ID: previewSlotId,
           },
           restartPolicy: "manual",
@@ -162,7 +160,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
         },
       });
 
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(runtimeId, {
         type: "open_session_instance",
         sessionDefID: previewSessionDefId,
       });
@@ -170,7 +168,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
       const sessionId = await waitForSession;
       settingsPreviewState.sessionId = sessionId;
 
-      return { runtimeId: workspaceId, sessionId };
+      return { runtimeId, sessionId };
     } finally {
       if (cleanup.connectionUnlisten) {
         await cleanup.connectionUnlisten();

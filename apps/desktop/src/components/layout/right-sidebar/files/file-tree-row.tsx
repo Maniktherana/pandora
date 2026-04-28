@@ -1,8 +1,8 @@
 import React from "react";
 import { cn } from "@/lib/shared/utils";
-import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { scmToneTextClass } from "@/services/scm/scm-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import type { TreeScmDecoration } from "@/components/layout/right-sidebar/scm/scm.types";
+import type { TreeScmDecoration } from "@/services/scm/scm-types";
 import {
   TREE_ROW_HEIGHT_PX,
   TREE_ROW_INDENT_PX,

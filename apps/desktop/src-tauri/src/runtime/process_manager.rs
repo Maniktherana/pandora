@@ -45,7 +45,8 @@ use super::port_manager::PortManager;
 use super::pty::{Pty, PtySpawnSpec};
 use super::types::{
     aggregate_slot_status, capabilities_for, ActionCapabilities, AgentCliSignal, AgentPhase,
-    DetectedPort, SessionInstance, SessionState, SessionStatus, SlotState,
+    DetectedPort, FileTreeEntry, FileTreeSnapshot, SessionInstance, SessionState, SessionStatus,
+    SlotState,
 };
 
 /// Output batching constants. Tuned for terminal smoothness at 240 Hz.
@@ -79,6 +80,35 @@ pub trait RuntimeEmitter: Send + Sync {
     /// have to care.
     async fn slot_snapshot(&self, _slots: Vec<SlotState>) {}
     async fn session_snapshot(&self, _sessions: Vec<SessionState>) {}
+    async fn file_tree_snapshot(&self, _snapshot: FileTreeSnapshot) {}
+    async fn file_tree_directory_changed(&self, _path: String, _entries: Vec<FileTreeEntry>) {}
+    async fn file_tree_file_read(
+        &self,
+        _request_id: String,
+        _relative_path: String,
+        _contents: Option<String>,
+    ) {
+    }
+    async fn file_tree_file_written(&self, _request_id: String, _relative_path: String) {}
+    async fn file_tree_error(&self, _request_id: Option<String>, _message: String) {}
+
+    // ---- SCM ----------------------------------------------------------------
+    async fn scm_snapshot(&self, _snapshot: super::types::ScmSnapshot) {}
+    async fn scm_refreshing(&self) {}
+    async fn scm_operation_started(&self, _op_id: String) {}
+    async fn scm_error(&self, _message: String) {}
+
+    // ---- Editor IO ----------------------------------------------------------
+    async fn editor_file_read(
+        &self,
+        _request_id: String,
+        _relative_path: String,
+        _contents: Option<String>,
+    ) {
+    }
+    async fn editor_file_written(&self, _request_id: String, _relative_path: String) {}
+    async fn editor_file_changed(&self, _relative_path: String) {}
+    async fn editor_error(&self, _request_id: Option<String>, _message: String) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +164,7 @@ impl ManagedSession {
 }
 
 // ---------------------------------------------------------------------------
-// ProcessManager — public API used by daemon_bridge::dispatch and the
+// ProcessManager — public API used by runtime_ipc::dispatch and the
 // surface-registry / agent-CLI hot paths.
 // ---------------------------------------------------------------------------
 
@@ -213,11 +243,7 @@ impl ProcessManager {
 
     pub async fn list_session_states(&self) -> Vec<SessionState> {
         let inner = self.inner.lock().await;
-        inner
-            .sessions
-            .values()
-            .map(session_state_of)
-            .collect()
+        inner.sessions.values().map(session_state_of).collect()
     }
 
     pub async fn list_slot_states(&self) -> Vec<SlotState> {
@@ -616,7 +642,8 @@ impl ProcessManager {
                 let _ = pty.signal_child(nix::sys::signal::Signal::SIGTERM);
                 drop(pty);
             }
-            self.arm_kill_escalation(session_id, RESTART_ESCALATION).await;
+            self.arm_kill_escalation(session_id, RESTART_ESCALATION)
+                .await;
         } else {
             // Already-exited session: spawn straight away.
             self.spawn(session_id).await;
@@ -722,25 +749,19 @@ impl ProcessManager {
     /// Apply an agent CLI signal to the matching session in the slot.
     /// Returns the updated state if a matching running/paused session was
     /// found and the event was actionable.
-    pub async fn record_agent_cli_signal(
-        &self,
-        signal: &AgentCliSignal,
-    ) -> Option<SessionState> {
+    pub async fn record_agent_cli_signal(&self, signal: &AgentCliSignal) -> Option<SessionState> {
         let now = Utc::now().to_rfc3339();
         let activity = super::agent_signal::next_agent_activity(signal, &now)?;
 
         let state = {
             let mut inner = self.inner.lock().await;
-            let candidate = inner
-                .sessions
-                .values_mut()
-                .find(|s| {
-                    s.instance.slot_id == signal.slot_id
-                        && matches!(
-                            s.instance.status,
-                            SessionStatus::Running | SessionStatus::Paused
-                        )
-                })?;
+            let candidate = inner.sessions.values_mut().find(|s| {
+                s.instance.slot_id == signal.slot_id
+                    && matches!(
+                        s.instance.status,
+                        SessionStatus::Running | SessionStatus::Paused
+                    )
+            })?;
             candidate.instance.agent_activity = Some(activity.clone());
             candidate.instance.foreground_process = match activity.phase {
                 AgentPhase::Finished | AgentPhase::Idle => None,
@@ -770,7 +791,11 @@ impl ProcessManager {
                 &session.instance.slot_id,
                 &self.default_cwd,
             );
-            (spec, self.runtime_id.clone(), session.instance.slot_id.clone())
+            (
+                spec,
+                self.runtime_id.clone(),
+                session.instance.slot_id.clone(),
+            )
         };
         let _ = (runtime_id, slot_id); // available for tracing if needed
 
@@ -812,9 +837,7 @@ impl ProcessManager {
         self.emitter.session_state_changed(snapshot).await;
 
         if let Some(pid) = pid {
-            self.port_manager
-                .register_session(session_id, pid)
-                .await;
+            self.port_manager.register_session(session_id, pid).await;
         }
 
         // Spawn the per-session reader/batcher and exit-watcher. The fg-poll
@@ -918,7 +941,9 @@ impl ProcessManager {
                         .unwrap_or(false)
                 };
                 if !paused {
-                    emitter.output_chunk(&session_id, buffer.split().freeze()).await;
+                    emitter
+                        .output_chunk(&session_id, buffer.split().freeze())
+                        .await;
                 }
             }
         })
@@ -942,10 +967,7 @@ impl ProcessManager {
     /// `session_state_changed` only on transitions, so the steady-state cost
     /// is one lock + N `process_group_leader` calls per second (N = open
     /// sessions) regardless of how many sessions exist.
-    fn start_fg_poll(
-        inner: Arc<Mutex<Inner>>,
-        emitter: Arc<dyn RuntimeEmitter>,
-    ) -> JoinHandle<()> {
+    fn start_fg_poll(inner: Arc<Mutex<Inner>>, emitter: Arc<dyn RuntimeEmitter>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut last_names: HashMap<String, Option<String>> = HashMap::new();
             let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -959,9 +981,7 @@ impl ProcessManager {
                     let g = inner.lock().await;
                     g.sessions
                         .iter()
-                        .filter_map(|(id, s)| {
-                            s.pty.as_ref().map(|p| (id.clone(), Arc::clone(p)))
-                        })
+                        .filter_map(|(id, s)| s.pty.as_ref().map(|p| (id.clone(), Arc::clone(p))))
                         .collect()
                 };
 
@@ -1045,8 +1065,12 @@ impl ProcessManager {
             session.exit_handled = true;
 
             // Cancel any pending escalation / reader / fg poller; PTY is dead.
-            if let Some(t) = session.escalation_task.take() { t.abort(); }
-            if let Some(t) = session.reader_task.take() { t.abort(); }
+            if let Some(t) = session.escalation_task.take() {
+                t.abort();
+            }
+            if let Some(t) = session.reader_task.take() {
+                t.abort();
+            }
 
             session.pty = None;
             session.output_paused = false;
@@ -1086,9 +1110,7 @@ impl ProcessManager {
         }
 
         if want_restart_backoff {
-            let backoff_ms = (1_000u64
-                .saturating_mul(1u64 << crash_count.min(5)))
-                .min(30_000);
+            let backoff_ms = (1_000u64.saturating_mul(1u64 << crash_count.min(5))).min(30_000);
             // Bump count for the next round; reset to 0 on successful spawn.
             {
                 let mut inner = self.inner.lock().await;
@@ -1106,8 +1128,7 @@ impl ProcessManager {
                         .sessions
                         .get(&sid)
                         .map(|s| {
-                            matches!(s.instance.status, SessionStatus::Crashed)
-                                && s.pty.is_none()
+                            matches!(s.instance.status, SessionStatus::Crashed) && s.pty.is_none()
                         })
                         .unwrap_or(false)
                 };
@@ -1157,9 +1178,15 @@ impl ProcessManager {
     /// session removed from the map so the exit-watcher can't reach it.
     fn detach_locked(&self, session: &mut ManagedSession) {
         session.exit_handled = true;
-        if let Some(t) = session.escalation_task.take() { t.abort(); }
-        if let Some(t) = session.reader_task.take() { t.abort(); }
-        if let Some(t) = session.restart_task.take() { t.abort(); }
+        if let Some(t) = session.escalation_task.take() {
+            t.abort();
+        }
+        if let Some(t) = session.reader_task.take() {
+            t.abort();
+        }
+        if let Some(t) = session.restart_task.take() {
+            t.abort();
+        }
         if let Some(pty) = session.pty.take() {
             let _ = pty.kill();
         }
@@ -1289,11 +1316,7 @@ fn resolve_process_name(pid: i32) -> Option<String> {
     use libproc::libproc::proc_pid::pidpath;
     pidpath(pid)
         .ok()
-        .and_then(|path| {
-            path.rsplit('/')
-                .next()
-                .map(|s| s.to_string())
-        })
+        .and_then(|path| path.rsplit('/').next().map(|s| s.to_string()))
         .filter(|name| !name.is_empty())
 }
 
@@ -1408,7 +1431,10 @@ mod tests {
         }
     }
 
-    fn make_pm(slots: Vec<SlotDefinition>, defs: Vec<SessionDefinition>) -> (ProcessManager, TestEmitter) {
+    fn make_pm(
+        slots: Vec<SlotDefinition>,
+        defs: Vec<SessionDefinition>,
+    ) -> (ProcessManager, TestEmitter) {
         let emitter = TestEmitter::default();
         let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
         let pm = ProcessManager::new(
@@ -1433,7 +1459,8 @@ mod tests {
             Vec::<String>::new(),
         );
 
-        pm.register_session_definition(session_def("def-1", "slot-1", "true")).await;
+        pm.register_session_definition(session_def("def-1", "slot-1", "true"))
+            .await;
         assert_eq!(
             pm.list_slot_states().await[0].definition.session_def_ids,
             vec!["def-1".to_string()],
@@ -1445,8 +1472,14 @@ mod tests {
         let def = session_def("s", "slot", "true");
         let env = session_spawn_env(&def, "runtime-1", "slot-1");
         let map: HashMap<_, _> = env.into_iter().collect();
-        assert_eq!(map.get("PANDORA_RUNTIME_ID").map(String::as_str), Some("runtime-1"));
-        assert_eq!(map.get("PANDORA_SLOT_ID").map(String::as_str), Some("slot-1"));
+        assert_eq!(
+            map.get("PANDORA_RUNTIME_ID").map(String::as_str),
+            Some("runtime-1")
+        );
+        assert_eq!(
+            map.get("PANDORA_SLOT_ID").map(String::as_str),
+            Some("slot-1")
+        );
         assert_eq!(map.get("TERM").map(String::as_str), Some("xterm-256color"));
         assert!(map.get("PANDORA_HOME").is_some());
         let path = map.get("PATH").expect("PATH");
@@ -1476,7 +1509,10 @@ mod tests {
             .insert("PANDORA_HOME".to_string(), "/custom/home".to_string());
         let env = session_spawn_env(&def, "r", "s");
         let map: HashMap<_, _> = env.into_iter().collect();
-        assert_eq!(map.get("PANDORA_HOME").map(String::as_str), Some("/custom/home"));
+        assert_eq!(
+            map.get("PANDORA_HOME").map(String::as_str),
+            Some("/custom/home")
+        );
         assert!(map.get("PATH").unwrap().starts_with("/custom/home/bin:"));
     }
 
@@ -1492,7 +1528,10 @@ mod tests {
 
         let captured = emitter.0.lock().unwrap();
         assert!(
-            captured.states.iter().any(|s| s.instance.status == SessionStatus::Running),
+            captured
+                .states
+                .iter()
+                .any(|s| s.instance.status == SessionStatus::Running),
             "expected at least one Running state"
         );
         let outputs: Vec<u8> = captured

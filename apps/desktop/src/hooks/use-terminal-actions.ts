@@ -1,116 +1,67 @@
-import { Effect } from "effect";
 import { useMemo } from "react";
-import { TerminalCommandService } from "@/services/terminal/terminal-command-service";
-import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import { useDesktopEffectRunner } from "./use-bootstrap-desktop";
+import { terminalCommandService } from "@/services/terminal/terminal-command-service";
+import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 
 export function useTerminalActions() {
-  const { run, runPromise } = useDesktopEffectRunner();
-
   return useMemo(
     () => ({
       newTerminal() {
-        run(Effect.flatMap(TerminalCommandService, (service) => service.newTerminal()));
+        void terminalCommandService.newTerminal().catch(console.error);
       },
       closeFocusedTab() {
-        run(Effect.flatMap(TerminalCommandService, (service) => service.closeFocusedTab()));
+        void terminalCommandService.closeFocusedTab().catch(console.error);
       },
       toggleBottomPanel(currentlyOpen: boolean) {
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.toggleBottomPanel(currentlyOpen),
-          ),
-        );
+        void terminalCommandService.toggleBottomPanel(currentlyOpen).catch(console.error);
       },
       createWorkspaceTerminal(runtimeId: string) {
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.createWorkspaceTerminal(runtimeId),
-          ),
-        );
+        void terminalCommandService.createWorkspaceTerminal(runtimeId).catch(console.error);
       },
       closeTerminalSlot(runtimeId: string, slotId: string) {
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.closeTerminalSlot(runtimeId, slotId),
-          ),
-        );
+        void terminalCommandService.closeTerminalSlot(runtimeId, slotId).catch(console.error);
       },
       async sendInput(runtimeId: string, sessionId: string, text: string) {
-        await runPromise(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.sendInput(runtimeId, sessionId, text),
-          ),
-        );
+        await terminalCommandService.sendInput(runtimeId, sessionId, text);
       },
     }),
-    [run, runPromise],
+    [],
   );
 }
 
 export function useProjectTerminalActions() {
-  const { run } = useDesktopEffectRunner();
-
   return useMemo(
     () => ({
       createProjectTerminal: (workspaceId: string, index?: number) =>
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.createProjectTerminal(workspaceId, index),
-          ),
-        ),
+        void terminalCommandService.createProjectTerminal(workspaceId, index).catch(console.error),
       splitProjectTerminalGroup: (workspaceId: string, groupId: string) =>
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.splitProjectTerminalGroup(workspaceId, groupId),
-          ),
-        ),
+        void terminalCommandService
+          .splitProjectTerminalGroup(workspaceId, groupId)
+          .catch(console.error),
       closeProjectTerminal: (workspaceId: string, slotId: string) =>
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.closeTerminalSlot(workspaceId, slotId),
-          ),
-        ),
+        void terminalCommandService.closeTerminalSlot(workspaceId, slotId).catch(console.error),
       renameTerminal: (workspaceId: string, slotId: string, name: string) =>
-        run(
-          Effect.flatMap(TerminalCommandService, (service) =>
-            service.renameTerminal(workspaceId, slotId, name),
-          ),
-        ),
+        void terminalCommandService
+          .renameTerminal(workspaceId, slotId, name)
+          .catch(console.error),
       selectProjectTerminalGroup: (workspaceId: string, groupId: string, slotId?: string | null) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.selectProjectTerminalGroup(workspaceId, groupId, slotId),
-          ),
-        ),
+        desktopWorkspaceService.selectProjectTerminalGroup(workspaceId, groupId, slotId),
       focusProjectTerminal: (workspaceId: string, slotId: string | null) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.focusProjectTerminal(workspaceId, slotId),
-          ),
-        ),
+        desktopWorkspaceService.focusProjectTerminal(workspaceId, slotId),
       setProjectTerminalPanelVisible: (workspaceId: string, visible: boolean) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.setProjectTerminalPanelVisible(workspaceId, visible),
-          ),
-        ),
+        desktopWorkspaceService.setProjectTerminalPanelVisible(workspaceId, visible),
       reorderProjectTerminalGroups: (workspaceId: string, fromIndex: number, toIndex: number) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.reorderProjectTerminalGroups(workspaceId, fromIndex, toIndex),
-          ),
-        ),
+        desktopWorkspaceService.reorderProjectTerminalGroups(workspaceId, fromIndex, toIndex),
       reorderProjectTerminalGroupChildren: (
         workspaceId: string,
         groupId: string,
         fromIndex: number,
         toIndex: number,
       ) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.reorderProjectTerminalGroupChildren(workspaceId, groupId, fromIndex, toIndex),
-          ),
+        desktopWorkspaceService.reorderProjectTerminalGroupChildren(
+          workspaceId,
+          groupId,
+          fromIndex,
+          toIndex,
         ),
       moveProjectTerminalToGroup: (
         workspaceId: string,
@@ -118,18 +69,15 @@ export function useProjectTerminalActions() {
         targetGroupId: string,
         index?: number,
       ) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.moveProjectTerminalToGroup(workspaceId, slotId, targetGroupId, index),
-          ),
+        desktopWorkspaceService.moveProjectTerminalToGroup(
+          workspaceId,
+          slotId,
+          targetGroupId,
+          index,
         ),
       moveProjectTerminalToNewGroup: (workspaceId: string, slotId: string, index: number) =>
-        run(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            service.moveProjectTerminalToNewGroup(workspaceId, slotId, index),
-          ),
-        ),
+        desktopWorkspaceService.moveProjectTerminalToNewGroup(workspaceId, slotId, index),
     }),
-    [run],
+    [],
   );
 }

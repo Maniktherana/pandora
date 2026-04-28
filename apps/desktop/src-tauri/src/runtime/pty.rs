@@ -70,7 +70,9 @@ impl Pty {
     ///
     /// `cols` / `rows` are clamped to ≥1 (zero would be rejected by the
     /// kernel ioctl).
-    pub fn spawn(spec: PtySpawnSpec) -> Result<(Pty, mpsc::Receiver<Bytes>, oneshot::Receiver<PtyExit>), String> {
+    pub fn spawn(
+        spec: PtySpawnSpec,
+    ) -> Result<(Pty, mpsc::Receiver<Bytes>, oneshot::Receiver<PtyExit>), String> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -159,7 +161,9 @@ impl Pty {
                 };
                 // Receiver may have been dropped if the Pty was discarded
                 // before the child exited; that's fine.
-                let _ = exit_tx.send(PtyExit { exit_code: Some(code) });
+                let _ = exit_tx.send(PtyExit {
+                    exit_code: Some(code),
+                });
             })
             .map_err(|e| format!("spawn waiter thread: {e}"))?;
 
@@ -287,7 +291,10 @@ mod tests {
 
         assert_eq!(exit.exit_code, Some(0));
         let text = String::from_utf8_lossy(&buf);
-        assert!(text.contains("hi"), "expected 'hi' in output, got: {text:?}");
+        assert!(
+            text.contains("hi"),
+            "expected 'hi' in output, got: {text:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -344,7 +351,8 @@ mod tests {
 
         // Give the shell a moment to actually exec sleep before we signal.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        pty.signal_child(nix::sys::signal::Signal::SIGTERM).expect("signal");
+        pty.signal_child(nix::sys::signal::Signal::SIGTERM)
+            .expect("signal");
 
         let exit = tokio::time::timeout(Duration::from_secs(3), exit_rx)
             .await

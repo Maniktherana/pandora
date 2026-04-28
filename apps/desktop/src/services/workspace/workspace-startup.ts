@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Effect, Fiber } from "effect";
 import type { WritableDraft } from "immer";
 import type {
   LayoutNode,
@@ -7,7 +6,7 @@ import type {
   WorkspaceRecord,
   WorkspaceRuntimeState,
 } from "@/lib/shared/types";
-import { LayoutLoadError, RuntimeStartError } from "@/lib/runtime/errors";
+import { LayoutLoadError } from "@/lib/runtime/errors";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { createEmptyTerminalPanel } from "@/lib/terminal/bottom-terminal-panel";
 import { createLeaf } from "@/components/layout/workspace/layout-tree";
@@ -83,39 +82,28 @@ export function createPlaceholderWorkspaceRoot() {
   return { root: leaf, focusedPaneID: leaf.id };
 }
 
-function loadWorkspaceLayoutEffect(
+async function loadWorkspaceLayout(
   get: WorkspaceStartupGet,
   set: WorkspaceStartupSet,
   workspaceId: string,
-) {
-  return Effect.tryPromise({
-    try: () => invoke<unknown>("load_workspace_layout", { workspaceId }),
-    catch: (cause) =>
-      new LayoutLoadError({
-        workspaceId,
-        cause,
-      }),
-  }).pipe(
-    Effect.map((raw) => (raw != null ? migratePersistedLayout(raw) : null)),
-    Effect.tap((layout) =>
-      Effect.sync(() => {
-        set((s) => {
-          const runtime = s.runtimes[workspaceId];
-          if (!runtime) return;
-
-          runtime.layoutLoading = false;
-          runtime.layoutLoaded = true;
-          runtime.root = (layout?.root ?? null) as WritableDraft<LayoutNode> | null;
-          runtime.focusedPaneID = layout?.focusedPaneID ?? null;
-        });
-
-        // Reconcile any live slots into the loaded layout. Without this, slots that
-        // arrive while layoutLoading is true can be dropped from the visible pane tree.
-        get().ensureRuntimeLayout(workspaceId);
-      }),
-    ),
-    Effect.asVoid,
-  );
+): Promise<void> {
+  let raw: unknown;
+  try {
+    raw = await invoke<unknown>("load_workspace_layout", { workspaceId });
+  } catch (cause) {
+    throw new LayoutLoadError({ workspaceId, cause });
+  }
+  const layout = raw != null ? migratePersistedLayout(raw) : null;
+  set((s) => {
+    const runtime = s.runtimes[workspaceId];
+    if (!runtime) return;
+    runtime.layoutLoading = false;
+    runtime.layoutLoaded = true;
+    runtime.root = (layout?.root ?? null) as WritableDraft<LayoutNode> | null;
+    runtime.focusedPaneID = layout?.focusedPaneID ?? null;
+  });
+  // Reconcile any live slots into the loaded layout.
+  get().ensureRuntimeLayout(workspaceId);
 }
 
 export function resetWorkspaceStartupState(
@@ -136,44 +124,30 @@ export function resetWorkspaceStartupState(
   });
 }
 
-export function startWorkspaceRuntimeEffect(
+async function runWorkspaceStartup(
   get: WorkspaceStartupGet,
   set: WorkspaceStartupSet,
   workspace: WorkspaceRecord,
-) {
+): Promise<void> {
   const defaultCwd = workspace.workspaceContextSubpath
     ? `${workspace.worktreePath}/${workspace.workspaceContextSubpath}`
     : workspace.worktreePath;
 
-  return Effect.gen(function* () {
-    yield* Effect.all(
-      [
-        Effect.tryPromise({
-          try: () =>
-            invoke("start_workspace_runtime", {
-              workspaceId: workspace.id,
-              workspacePath: workspace.worktreePath,
-              defaultCwd,
-            }),
-          catch: (cause) =>
-            new RuntimeStartError({
-              workspaceId: workspace.id,
-              cause,
-            }),
-        }),
-        loadWorkspaceLayoutEffect(get, set, workspace.id),
-      ],
-      { concurrency: "unbounded" },
-    );
-  }).pipe(
-    Effect.timeout("10 seconds"),
-    Effect.catchAll((error) =>
-      Effect.sync(() => {
-        console.error("Workspace startup failed:", error);
-        resetWorkspaceStartupState(set, workspace.id, true);
-      }),
-    ),
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("workspace startup timeout")), 10_000),
   );
+
+  await Promise.race([
+    Promise.all([
+      invoke("start_workspace_runtime", {
+        workspaceId: workspace.id,
+        workspacePath: workspace.worktreePath,
+        defaultCwd,
+      }),
+      loadWorkspaceLayout(get, set, workspace.id),
+    ]),
+    timeout,
+  ]);
 }
 
 export function syncProjectScopedRuntime(
@@ -235,18 +209,18 @@ export function ensureWorkspaceStartupRuntime(
 }
 
 export function createWorkspaceStartupController(): WorkspaceStartupController {
-  let current: { workspaceId: string; fiber: Fiber.RuntimeFiber<void, never> } | null = null;
+  let currentWorkspaceId: string | null = null;
+  let generation = 0;
 
   function interruptWorkspaceStartup(
     set: WorkspaceStartupSet,
     workspaceId: string,
     disconnected = false,
   ) {
-    if (current?.workspaceId !== workspaceId) return;
-
+    if (currentWorkspaceId !== workspaceId) return;
     resetWorkspaceStartupState(set, workspaceId, disconnected);
-    void Effect.runFork(Fiber.interrupt(current.fiber));
-    current = null;
+    generation++;
+    currentWorkspaceId = null;
   }
 
   function startWorkspaceStartup(
@@ -254,25 +228,33 @@ export function createWorkspaceStartupController(): WorkspaceStartupController {
     get: WorkspaceStartupGet,
     workspace: WorkspaceRecord,
   ) {
-    if (current && current.workspaceId !== workspace.id) {
-      interruptWorkspaceStartup(set, current.workspaceId);
+    if (currentWorkspaceId && currentWorkspaceId !== workspace.id) {
+      interruptWorkspaceStartup(set, currentWorkspaceId);
     }
 
     if (workspace.status !== "ready") return;
 
     const runtime = get().runtimes[workspace.id];
     if (!shouldStartWorkspaceStartup(runtime)) return;
-    if (runtime?.layoutLoading && current?.workspaceId === workspace.id) return;
+    if (runtime?.layoutLoading && currentWorkspaceId === workspace.id) return;
 
     ensureWorkspaceStartupRuntime(set, get, workspace);
 
-    const fiber = Effect.runFork(startWorkspaceRuntimeEffect(get, set, workspace));
-    fiber.addObserver(() => {
-      if (current?.fiber === fiber) {
-        current = null;
-      }
-    });
-    current = { workspaceId: workspace.id, fiber };
+    currentWorkspaceId = workspace.id;
+    const myGeneration = ++generation;
+
+    void runWorkspaceStartup(get, set, workspace)
+      .catch((error) => {
+        if (generation === myGeneration) {
+          console.error("Workspace startup failed:", error);
+          resetWorkspaceStartupState(set, workspace.id, true);
+        }
+      })
+      .finally(() => {
+        if (generation === myGeneration) {
+          currentWorkspaceId = null;
+        }
+      });
   }
 
   return { startWorkspaceStartup, interruptWorkspaceStartup };

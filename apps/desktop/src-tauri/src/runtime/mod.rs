@@ -4,7 +4,7 @@
 //! Module map:
 //!
 //! ```text
-//!   types          — Wire enums (ClientMessage / DaemonMessage) + helpers.
+//!   types          — Wire enums (RuntimeCommand / RuntimeEvent) + helpers.
 //!                    Wire shape is preserved across the renderer boundary.
 //!   agent_signal   — Pure-function vendor signal → AgentActivityState.
 //!   pty            — portable-pty wrapper (spawn / read / write / signal).
@@ -15,14 +15,16 @@
 //!                    facades; each Runtime owns one ProcessManager).
 //! ```
 //!
-//! [`crate::daemon_bridge`] is the thin shim that routes Tauri commands and
-//! events into this module while preserving the renderer's existing
-//! `daemon-message` / `daemon-connection` event names.
+//! [`crate::runtime_ipc`] is the renderer-facing IPC boundary for commands
+//! and runtime events.
 
 pub mod agent_signal;
+pub mod editor_io;
+pub mod file_tree;
 pub mod port_manager;
 pub mod process_manager;
 pub mod pty;
 pub mod registry;
+pub mod scm;
 pub mod seed;
 pub mod types;

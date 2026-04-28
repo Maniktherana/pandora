@@ -33,10 +33,8 @@ import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
 import type { WorkspaceRecord, WorkspaceRuntimeState } from "@/lib/shared/types";
-import {
-  useScmLineStatsQuery,
-  useScmStatusQuery,
-} from "@/components/layout/right-sidebar/scm/scm-queries";
+import { useScmStore } from "@/services/scm/scm-store";
+import { flattenScmSnapshot } from "@/services/scm/scm-utils";
 import DotGridLoader from "@/components/dot-grid-loader";
 import {
   isTerminalAgentAttentionStatus,
@@ -64,21 +62,17 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
   const agentStatus = useRuntimeState(workspace.id, selectAgentStatus);
-  const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
-    enabled: workspace.status === "ready",
-  });
-  const { data: scmStatus } = useScmStatusQuery(workspace.worktreePath, {
-    enabled: workspace.status === "ready",
-  });
+  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspace.id]?.snapshot ?? null);
+  const scmStatus = flattenScmSnapshot(scmSnapshot);
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
   const isFailed = workspace.status === "failed";
   const isArchived = workspace.status === "archived";
   const isPending = pendingAction !== null;
-  const addedCount = scmCounts?.added ?? 0;
-  const removedCount = scmCounts?.removed ?? 0;
-  const filesChanged = scmStatus?.length ?? 0;
+  const addedCount = scmSnapshot?.lineStats.added ?? 0;
+  const removedCount = scmSnapshot?.lineStats.removed ?? 0;
+  const filesChanged = scmStatus.length;
   const hasAgentAttention = !isSelected && isTerminalAgentAttentionStatus(agentStatus);
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;

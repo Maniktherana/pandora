@@ -17,10 +17,12 @@ use tokio::sync::Mutex;
 
 use crate::database::AppDatabase;
 
+use super::editor_io::EditorIoService;
+use super::file_tree::FileTreeService;
 use super::process_manager::{ProcessManager, RuntimeEmitter};
+use super::scm::ScmService;
 use super::seed::ensure_seed;
 
-/// One workspace's worth of running sessions.
 #[derive(Clone)]
 pub struct Runtime {
     #[allow(dead_code)]
@@ -28,32 +30,49 @@ pub struct Runtime {
     #[allow(dead_code)]
     pub default_cwd: String,
     pub process_manager: ProcessManager,
+    pub file_tree: FileTreeService,
+    pub scm: ScmService,
+    pub editor_io: EditorIoService,
 }
 
 impl Runtime {
-    /// Open or hydrate a runtime: seeds the dormant terminal, reads
-    /// definitions back from the DB, and constructs a `ProcessManager`
-    /// with them.
+    /// `workspace_root` is the file-system root the file tree is rooted at
+    /// (the worktree path for workspace runtimes, the git root for project
+    /// runtimes). `default_cwd` is the cwd for spawned sessions.
     pub fn open(
-        db: &AppDatabase,
+        db: Arc<AppDatabase>,
         runtime_id: &str,
+        workspace_root: &str,
         default_cwd: &str,
         emitter: Arc<dyn RuntimeEmitter>,
     ) -> Result<Self, String> {
-        ensure_seed(db, runtime_id, default_cwd)?;
+        ensure_seed(db.as_ref(), runtime_id, default_cwd)?;
         let slots = db.list_slot_definitions(runtime_id);
         let sessions = db.list_session_definitions(runtime_id);
         let pm = ProcessManager::new(
             slots,
             sessions,
-            emitter,
+            Arc::clone(&emitter),
             default_cwd.to_string(),
             runtime_id.to_string(),
         );
+        let file_tree =
+            FileTreeService::open(runtime_id.to_string(), workspace_root, Arc::clone(&emitter))?;
+        let scm = ScmService::open(
+            Arc::clone(&db),
+            runtime_id.to_string(),
+            workspace_root.to_string(),
+            Arc::clone(&emitter),
+        );
+        let editor_io =
+            EditorIoService::open(runtime_id.to_string(), workspace_root, Arc::clone(&emitter))?;
         Ok(Self {
             id: runtime_id.to_string(),
             default_cwd: default_cwd.to_string(),
             process_manager: pm,
+            file_tree,
+            scm,
+            editor_io,
         })
     }
 }
@@ -115,6 +134,8 @@ impl RuntimeRegistry {
         match runtime {
             Some(rt) => {
                 rt.process_manager.close_all_sessions().await;
+                rt.scm.close().await;
+                rt.editor_io.close().await;
                 true
             }
             None => false,
@@ -154,15 +175,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn second_get_or_create_returns_cached_instance() {
         let home = temp_home("cache");
-        let db = AppDatabase::open(&home).expect("open");
+        let db = Arc::new(AppDatabase::open(&home).expect("open"));
         let emitter: Arc<dyn RuntimeEmitter> = Arc::new(NullEmitter);
         let registry = RuntimeRegistry::new();
 
-        let factory = || Runtime::open(&db, "rt1", "/tmp", Arc::clone(&emitter));
-        let (first, was_new_first) = registry
-            .get_or_create("rt1", factory)
-            .await
-            .expect("first");
+        let db1 = Arc::clone(&db);
+        let em1 = Arc::clone(&emitter);
+        let factory = || Runtime::open(Arc::clone(&db1), "rt1", "/tmp", "/tmp", Arc::clone(&em1));
+        let (first, was_new_first) = registry.get_or_create("rt1", factory).await.expect("first");
         assert!(was_new_first);
         // If the factory ran a second time, we'd open a new ProcessManager
         // (and re-seed). Use `get` after to verify the cached identity.
@@ -170,7 +190,10 @@ mod tests {
         assert_eq!(first.id, second.id);
 
         // Second get_or_create should report was_new=false.
-        let factory_again = || Runtime::open(&db, "rt1", "/tmp", Arc::clone(&emitter));
+        let db2 = Arc::clone(&db);
+        let em2 = Arc::clone(&emitter);
+        let factory_again =
+            || Runtime::open(Arc::clone(&db2), "rt1", "/tmp", "/tmp", Arc::clone(&em2));
         let (_, was_new_second) = registry
             .get_or_create("rt1", factory_again)
             .await
@@ -183,12 +206,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn close_removes_runtime_from_cache() {
         let home = temp_home("close");
-        let db = AppDatabase::open(&home).expect("open");
+        let db = Arc::new(AppDatabase::open(&home).expect("open"));
         let emitter: Arc<dyn RuntimeEmitter> = Arc::new(NullEmitter);
         let registry = RuntimeRegistry::new();
+        let db1 = Arc::clone(&db);
+        let em1 = Arc::clone(&emitter);
         let (_, was_new) = registry
             .get_or_create("rt2", || {
-                Runtime::open(&db, "rt2", "/tmp", Arc::clone(&emitter))
+                Runtime::open(Arc::clone(&db1), "rt2", "/tmp", "/tmp", Arc::clone(&em1))
             })
             .await
             .expect("create");

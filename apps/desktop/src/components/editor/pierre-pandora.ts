@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+import { createElement, type CSSProperties, type ReactNode } from "react";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
+import PierreWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url";
 import {
   registerCustomTheme,
   type FileContents,
@@ -14,6 +16,10 @@ const syntax = defaultTheme.codeEditor.syntax;
 const codeSurface = defaultTheme.codeEditor.surface;
 
 let pierreThemeRegistered = false;
+
+const pierreWorkerFactory = () => new Worker(PierreWorkerUrl, { type: "module" });
+const pierreWorkerPoolOptions = { workerFactory: pierreWorkerFactory, poolSize: 4 };
+const pierreHighlighterOptions = { theme: PANDORA_PIERRE_THEME };
 
 function registerPandoraPierreTheme() {
   if (pierreThemeRegistered) return;
@@ -174,4 +180,15 @@ export function getLargeDiffOptions(diffStyle: PierreDiffStyle): Partial<FileDif
 
 export function getPierreSurfaceStyle(): CSSProperties {
   return pierreSurfaceStyle;
+}
+
+export function PandoraDiffWorkerPoolProvider({ children }: { children: ReactNode }) {
+  return createElement(
+    WorkerPoolContextProvider,
+    {
+      poolOptions: pierreWorkerPoolOptions,
+      highlighterOptions: pierreHighlighterOptions,
+      children,
+    },
+  );
 }

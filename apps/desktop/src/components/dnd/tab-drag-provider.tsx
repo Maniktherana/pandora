@@ -1,7 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import { Effect } from "effect";
-import { useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
-import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { TabDragOverlay } from "./tab-drag-overlay";
 import type { DragState } from "./tab-drag.types";
 
@@ -20,23 +18,14 @@ export function useTabDrag() {
 
 export function TabDragProvider({ children }: { children: ReactNode }) {
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const runtime = useDesktopRuntime();
 
   useEffect(() => {
     if (!dragState) return;
-    void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (manager) => manager.beginWebOverlay("opaque")).pipe(
-        Effect.catchAll(() => Effect.void),
-      ),
-    );
+    void terminalSurfaceService.beginWebOverlay("opaque").catch(() => {});
     return () => {
-      void runtime.runPromise(
-        Effect.flatMap(TerminalSurfaceService, (manager) => manager.endWebOverlay("opaque")).pipe(
-          Effect.catchAll(() => Effect.void),
-        ),
-      );
+      void terminalSurfaceService.endWebOverlay("opaque").catch(() => {});
     };
-  }, [dragState, runtime]);
+  }, [dragState]);
 
   const startDrag = useCallback((state: DragState) => {
     setDragState(state);

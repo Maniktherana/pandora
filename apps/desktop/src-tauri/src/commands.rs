@@ -1,8 +1,7 @@
-use crate::daemon_bridge::{self, DaemonState};
 use crate::database::{now_iso8601, AppDatabase};
 use crate::git;
 use crate::models::*;
-use std::collections::HashSet;
+use crate::runtime_ipc::{self, RuntimeIpcState};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -75,11 +74,11 @@ pub fn toggle_project(db: tauri::State<'_, DbState>, project_id: String) -> Resu
 #[tauri::command]
 pub async fn remove_project(
     db: tauri::State<'_, DbState>,
-    daemon_state: tauri::State<'_, DaemonState>,
+    runtime_state: tauri::State<'_, RuntimeIpcState>,
     project_id: String,
 ) -> Result<(), String> {
     let runtime_key = format!("project:{}", project_id);
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &runtime_key).await;
+    runtime_ipc::stop_runtime(runtime_state.inner(), &runtime_key).await;
     db.0.remove_project(&project_id)
 }
 
@@ -99,18 +98,6 @@ pub fn save_project_settings(
     settings: ProjectSettingsRow,
 ) -> Result<(), String> {
     db.0.upsert_project_settings(&settings)
-}
-
-#[tauri::command]
-pub fn set_workspace_target_branch(
-    db: tauri::State<'_, DbState>,
-    workspace_id: String,
-    target_branch: Option<String>,
-) -> Result<(), String> {
-    let normalized = target_branch
-        .map(|branch| branch.trim().trim_start_matches("origin/").to_string())
-        .filter(|branch| !branch.is_empty() && branch != "origin");
-    db.0.update_workspace_target_branch(&workspace_id, normalized.as_deref())
 }
 
 // ─── Workspace commands ───
@@ -281,7 +268,7 @@ pub async fn retry_workspace(
 pub async fn rename_workspace(
     app_handle: AppHandle,
     db: tauri::State<'_, DbState>,
-    daemon_state: tauri::State<'_, DaemonState>,
+    runtime_state: tauri::State<'_, RuntimeIpcState>,
     workspace_id: String,
     name: String,
 ) -> Result<WorkspaceRecord, String> {
@@ -305,7 +292,7 @@ pub async fn rename_workspace(
     let settings = db.0.load_project_settings(&project.id);
 
     if workspace.workspace_kind == WorkspaceKind::Worktree {
-        daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
+        runtime_ipc::stop_runtime(runtime_state.inner(), &workspace_id).await;
     }
 
     let renamed = tokio::task::spawn_blocking(move || {
@@ -328,7 +315,7 @@ pub async fn rename_workspace(
 #[tauri::command]
 pub async fn remove_workspace(
     db: tauri::State<'_, DbState>,
-    daemon_state: tauri::State<'_, DaemonState>,
+    runtime_state: tauri::State<'_, RuntimeIpcState>,
     workspace_id: String,
 ) -> Result<(), String> {
     let workspaces = db.0.load_workspaces(None);
@@ -341,7 +328,7 @@ pub async fn remove_workspace(
     let project = projects.into_iter().find(|p| p.id == workspace.project_id);
 
     // Stop runtime
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace_id).await;
+    runtime_ipc::stop_runtime(runtime_state.inner(), &workspace_id).await;
 
     if workspace.workspace_kind == WorkspaceKind::Worktree {
         if let Some(project) = project {
@@ -431,7 +418,7 @@ pub fn start_workspace_runtime(
     workspace_path: String,
     default_cwd: String,
 ) {
-    daemon_bridge::start_workspace_runtime(app, workspace_id, workspace_path, default_cwd);
+    runtime_ipc::start_workspace_runtime(app, workspace_id, workspace_path, default_cwd);
 }
 
 #[tauri::command]
@@ -441,28 +428,20 @@ pub fn start_project_runtime(
     git_root_path: String,
     default_cwd: String,
 ) {
-    daemon_bridge::start_project_runtime(app, project_id, git_root_path, default_cwd);
+    runtime_ipc::start_project_runtime(app, project_id, git_root_path, default_cwd);
 }
 
 #[tauri::command]
 pub async fn stop_project_runtime(
-    daemon_state: tauri::State<'_, DaemonState>,
+    runtime_state: tauri::State<'_, RuntimeIpcState>,
     project_id: String,
 ) -> Result<(), String> {
     let key = format!("project:{}", project_id);
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &key).await;
+    runtime_ipc::stop_runtime(runtime_state.inner(), &key).await;
     Ok(())
 }
 
-// ─── Workspace file tree ───
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceDirEntry {
-    pub name: String,
-    pub is_directory: bool,
-    pub is_ignored: bool,
-}
+// ─── Ghostty config ───
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -505,225 +484,9 @@ fn read_system_ghostty_config_file() -> GhosttyConfigSource {
     }
 }
 
-fn git_ignored_paths(workspace_root: &str, relative_paths: &[String]) -> HashSet<String> {
-    if relative_paths.is_empty() {
-        return HashSet::new();
-    }
-
-    let mut child = match Command::new("git")
-        .args(["-C", workspace_root, "check-ignore", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return HashSet::new(),
-    };
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        let input = relative_paths.join("\n");
-        let _ = stdin.write_all(input.as_bytes());
-    }
-
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(_) => return HashSet::new(),
-    };
-
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty())
-        .collect()
-}
-
-fn resolve_path_under_workspace_root(
-    workspace_root: &str,
-    relative_path: &str,
-) -> Result<std::path::PathBuf, String> {
-    resolve_workspace_path(workspace_root, relative_path, true)
-}
-
-/// Resolve a relative path under the workspace root.
-/// When `must_exist` is true the full path is canonicalized (it must already
-/// exist on disk).  When false only the *existing* ancestor is canonicalized
-/// and the remaining tail is appended — this is needed for create operations
-/// where the target does not yet exist.
-fn resolve_workspace_path(
-    workspace_root: &str,
-    relative_path: &str,
-    must_exist: bool,
-) -> Result<std::path::PathBuf, String> {
-    let root = Path::new(workspace_root);
-    let root_abs = root
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
-    let trimmed = relative_path.trim();
-    let rel = trimmed.trim_start_matches(|c| c == '/' || c == '\\');
-    if Path::new(rel).is_absolute() {
-        return Err("Absolute paths are not allowed".to_string());
-    }
-    let candidate = if rel.is_empty() || rel == "." {
-        root_abs.clone()
-    } else {
-        root_abs.join(rel)
-    };
-    let resolved = if must_exist {
-        candidate
-            .canonicalize()
-            .map_err(|e| format!("Cannot read directory: {e}"))?
-    } else {
-        // Walk up to find the deepest existing ancestor, canonicalize that,
-        // then re-append the non-existent tail.
-        let mut existing = candidate.as_path();
-        let mut tail = Vec::new();
-        while !existing.exists() {
-            if let Some(name) = existing.file_name() {
-                tail.push(name.to_os_string());
-            } else {
-                break;
-            }
-            existing = match existing.parent() {
-                Some(p) => p,
-                None => break,
-            };
-        }
-        let mut resolved = existing
-            .canonicalize()
-            .map_err(|e| format!("Cannot resolve path: {e}"))?;
-        for component in tail.into_iter().rev() {
-            resolved.push(component);
-        }
-        resolved
-    };
-    if !resolved.starts_with(&root_abs) {
-        return Err("Path escapes workspace root".to_string());
-    }
-    Ok(resolved)
-}
-
-fn list_workspace_directory_blocking(
-    workspace_root: String,
-    relative_path: String,
-) -> Result<Vec<WorkspaceDirEntry>, String> {
-    let root_abs = Path::new(&workspace_root)
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
-    let dir = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
-    if !dir.is_dir() {
-        return Err("Not a directory".to_string());
-    }
-
-    let raw_entries: Vec<(String, bool, String)> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let meta = e.file_type().ok()?;
-            let child_path = dir.join(&name);
-            let rel = child_path
-                .strip_prefix(&root_abs)
-                .ok()?
-                .to_string_lossy()
-                .replace('\\', "/");
-            Some((name, meta.is_dir(), rel))
-        })
-        .collect();
-
-    let rel_paths: Vec<String> = raw_entries.iter().map(|(_, _, rel)| rel.clone()).collect();
-    let ignored = git_ignored_paths(&workspace_root, &rel_paths);
-
-    let mut entries: Vec<WorkspaceDirEntry> = raw_entries
-        .into_iter()
-        .map(|(name, is_directory, rel)| WorkspaceDirEntry {
-            name,
-            is_directory,
-            is_ignored: ignored.contains(&rel),
-        })
-        .collect();
-
-    entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-
-    Ok(entries)
-}
-
-#[tauri::command]
-pub async fn list_workspace_directory(
-    workspace_root: String,
-    relative_path: String,
-) -> Result<Vec<WorkspaceDirEntry>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        list_workspace_directory_blocking(workspace_root, relative_path)
-    })
-    .await
-    .map_err(|e| format!("Failed to list workspace directory: {e}"))?
-}
-
 #[tauri::command]
 pub fn read_system_ghostty_config() -> GhosttyConfigSource {
     read_system_ghostty_config_file()
-}
-
-const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
-
-#[tauri::command]
-pub async fn read_workspace_text_file(
-    workspace_root: String,
-    relative_path: String,
-) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
-        let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
-        if !path.is_file() {
-            return Err("Not a file".to_string());
-        }
-        let len = path.metadata().map_err(|e| e.to_string())?.len();
-        if len > MAX_TEXT_FILE_BYTES {
-            return Err(format!(
-                "File is too large for the editor (max {} MB)",
-                MAX_TEXT_FILE_BYTES / (1024 * 1024)
-            ));
-        }
-        std::fs::read_to_string(&path).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn write_workspace_text_file(
-    workspace_root: String,
-    relative_path: String,
-    contents: String,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let path = resolve_workspace_path(&workspace_root, &relative_path, false)?;
-        if contents.as_bytes().len() as u64 > MAX_TEXT_FILE_BYTES {
-            return Err("Content is too large to save".to_string());
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(&path, contents).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn create_workspace_directory(
-    workspace_root: String,
-    relative_path: String,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let dir = resolve_workspace_path(&workspace_root, &relative_path, false)?;
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 // ─── SCM / diff (git in workspace work tree) ───
@@ -771,127 +534,6 @@ pub async fn scm_read_git_compare_blob(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_status(worktree_path: String) -> Result<Vec<git::ScmStatusEntry>, String> {
-    tokio::task::spawn_blocking(move || git::git_status(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_branch_changes(
-    worktree_path: String,
-    target_branch: String,
-) -> Result<Vec<git::ScmBranchChange>, String> {
-    tokio::task::spawn_blocking(move || git::git_branch_changes(&worktree_path, &target_branch))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_line_stats(worktree_path: String) -> Result<git::ScmLineStats, String> {
-    tokio::task::spawn_blocking(move || git::git_line_stats(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_path_line_stats(
-    worktree_path: String,
-    relative_path: String,
-    staged: bool,
-) -> Result<git::ScmLineStats, String> {
-    tokio::task::spawn_blocking(move || {
-        git::git_path_line_stats(&worktree_path, &relative_path, staged)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_path_line_stats_bulk(
-    worktree_path: String,
-    relative_paths: Vec<String>,
-    staged: bool,
-    untracked_paths: Vec<String>,
-) -> Result<Vec<git::ScmPathLineStats>, String> {
-    tokio::task::spawn_blocking(move || {
-        git::git_path_line_stats_bulk(&worktree_path, &relative_paths, staged, &untracked_paths)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_stage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_add_paths(&worktree_path, &paths))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_stage_all(worktree_path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_add_all(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_unstage(worktree_path: String, paths: Vec<String>) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_restore_staged_paths(&worktree_path, &paths))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_unstage_all(worktree_path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_restore_staged_all(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_discard_tracked(worktree_path: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_restore_worktree_path(&worktree_path, &path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_discard_untracked(worktree_path: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_clean_untracked_path(&worktree_path, &path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_commit(worktree_path: String, message: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || git::git_commit_message(&worktree_path, &message))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_push(worktree_path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || git::git_push(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_fetch(worktree_path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || git::git_fetch(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn scm_pull(worktree_path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || git::git_pull(&worktree_path))
-        .await
-        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1133,7 +775,7 @@ pub async fn can_archive_workspace(
 #[tauri::command]
 pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
-    daemon_state: tauri::State<'_, DaemonState>,
+    runtime_state: tauri::State<'_, RuntimeIpcState>,
     workspace_id: String,
     delete_worktree: Option<bool>,
     run_teardown: Option<bool>,
@@ -1149,7 +791,7 @@ pub async fn archive_workspace(
 
     let result = archive_workspace_inner(
         &db,
-        &daemon_state,
+        &runtime_state,
         &workspace,
         delete_worktree.unwrap_or(false),
         run_teardown.unwrap_or(true),
@@ -1173,7 +815,7 @@ pub async fn archive_workspace(
 
 async fn archive_workspace_inner(
     db: &tauri::State<'_, DbState>,
-    daemon_state: &tauri::State<'_, DaemonState>,
+    runtime_state: &tauri::State<'_, RuntimeIpcState>,
     workspace: &WorkspaceRecord,
     delete_worktree: bool,
     run_teardown: bool,
@@ -1199,7 +841,7 @@ async fn archive_workspace_inner(
     }
 
     // Stop runtime
-    daemon_bridge::stop_workspace_runtime(daemon_state.inner(), &workspace.id).await;
+    runtime_ipc::stop_runtime(runtime_state.inner(), &workspace.id).await;
 
     // Run teardown scripts if requested
     if run_teardown {
@@ -1379,265 +1021,6 @@ pub async fn restore_workspace(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-// ─── File import (drag-drop into workspace) ───
-
-fn copy_path_recursive(src: &Path, dest: &Path) -> Result<(), String> {
-    if src.is_dir() {
-        std::fs::create_dir_all(dest)
-            .map_err(|e| format!("Failed to create directory '{}': {e}", dest.display()))?;
-        for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            copy_path_recursive(&entry.path(), &dest.join(entry.file_name()))?;
-        }
-    } else {
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::copy(src, dest)
-            .map(|_| ())
-            .map_err(|e| format!("Failed to copy '{}': {e}", src.display()))?;
-    }
-    Ok(())
-}
-
-fn copy_name_destination(original_dest: &Path, copy_index: usize) -> Result<PathBuf, String> {
-    let parent = original_dest
-        .parent()
-        .ok_or_else(|| format!("Cannot determine parent for '{}'", original_dest.display()))?;
-    let file_name = original_dest.file_name().ok_or_else(|| {
-        format!(
-            "Cannot determine filename for '{}'",
-            original_dest.display()
-        )
-    })?;
-    let file_name = file_name.to_string_lossy();
-
-    let suffix = if copy_index == 1 {
-        " copy".to_string()
-    } else {
-        format!(" copy {}", copy_index)
-    };
-
-    let candidate_name = if original_dest.is_dir() || original_dest.extension().is_none() {
-        format!("{file_name}{suffix}")
-    } else {
-        let stem = original_dest
-            .file_stem()
-            .ok_or_else(|| {
-                format!(
-                    "Cannot determine file stem for '{}'",
-                    original_dest.display()
-                )
-            })?
-            .to_string_lossy();
-        let extension = original_dest
-            .extension()
-            .ok_or_else(|| {
-                format!(
-                    "Cannot determine extension for '{}'",
-                    original_dest.display()
-                )
-            })?
-            .to_string_lossy();
-        format!("{stem}{suffix}.{extension}")
-    };
-
-    Ok(parent.join(candidate_name))
-}
-
-fn next_copy_destination(dest: &Path) -> Result<PathBuf, String> {
-    let mut copy_index = 1;
-    loop {
-        let candidate = copy_name_destination(dest, copy_index)?;
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-        copy_index += 1;
-    }
-}
-
-#[tauri::command]
-pub fn copy_into_workspace(
-    workspace_root: String,
-    dest_relative_path: String,
-    source_paths: Vec<String>,
-) -> Result<(), String> {
-    let root_abs = Path::new(&workspace_root)
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
-
-    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
-        root_abs.clone()
-    } else {
-        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
-        let candidate = root_abs.join(rel);
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|e| format!("Invalid destination: {e}"))?;
-        if !resolved.starts_with(&root_abs) {
-            return Err("Destination escapes workspace root".to_string());
-        }
-        resolved
-    };
-
-    if !dest_dir.is_dir() {
-        return Err("Destination is not a directory".to_string());
-    }
-
-    for src_str in &source_paths {
-        let src = Path::new(src_str);
-        if !src.exists() {
-            return Err(format!("Source does not exist: {src_str}"));
-        }
-        let name = src
-            .file_name()
-            .ok_or_else(|| format!("Cannot determine filename for: {src_str}"))?;
-        let requested_dest = dest_dir.join(name);
-        let final_dest = if requested_dest.exists() {
-            next_copy_destination(&requested_dest)?
-        } else {
-            requested_dest
-        };
-        copy_path_recursive(src, &final_dest)?;
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn move_within_workspace(
-    workspace_root: String,
-    source_relative_path: String,
-    dest_relative_path: String,
-) -> Result<(), String> {
-    let root_abs = Path::new(&workspace_root)
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
-
-    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
-
-    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
-        root_abs.clone()
-    } else {
-        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
-        let candidate = root_abs.join(rel);
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|e| format!("Invalid destination: {e}"))?;
-        if !resolved.starts_with(&root_abs) {
-            return Err("Destination escapes workspace root".to_string());
-        }
-        resolved
-    };
-
-    if !dest_dir.is_dir() {
-        return Err("Destination is not a directory".to_string());
-    }
-
-    let name = src
-        .file_name()
-        .ok_or_else(|| "Cannot determine filename".to_string())?;
-    let dest = dest_dir.join(name);
-
-    if dest == src {
-        return Ok(());
-    }
-
-    // Try rename first (same filesystem), fall back to copy+delete
-    if std::fs::rename(&src, &dest).is_err() {
-        copy_path_recursive(&src, &dest)?;
-        if src.is_dir() {
-            std::fs::remove_dir_all(&src).map_err(|e| e.to_string())?;
-        } else {
-            std::fs::remove_file(&src).map_err(|e| e.to_string())?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn rename_workspace_entry(
-    workspace_root: String,
-    source_relative_path: String,
-    new_name: String,
-) -> Result<(), String> {
-    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
-    let parent = src
-        .parent()
-        .ok_or_else(|| "Cannot determine parent directory".to_string())?;
-
-    let trimmed = new_name.trim();
-    if trimmed.is_empty() {
-        return Err("New name cannot be empty".to_string());
-    }
-    if trimmed.contains('/') || trimmed.contains('\\') {
-        return Err("New name cannot contain path separators".to_string());
-    }
-
-    let dest = parent.join(trimmed);
-    if dest == src {
-        return Ok(());
-    }
-    if dest.exists() {
-        return Err("Destination already exists".to_string());
-    }
-
-    std::fs::rename(&src, &dest).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn delete_workspace_entry(workspace_root: String, relative_path: String) -> Result<(), String> {
-    let path = resolve_path_under_workspace_root(&workspace_root, &relative_path)?;
-    if path.is_dir() {
-        std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
-    } else {
-        std::fs::remove_file(&path).map_err(|e| e.to_string())
-    }
-}
-
-#[tauri::command]
-pub fn copy_within_workspace(
-    workspace_root: String,
-    source_relative_path: String,
-    dest_relative_path: String,
-) -> Result<(), String> {
-    let src = resolve_path_under_workspace_root(&workspace_root, &source_relative_path)?;
-    let root_abs = Path::new(&workspace_root)
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
-
-    let dest_dir = if dest_relative_path.is_empty() || dest_relative_path == "." {
-        root_abs.clone()
-    } else {
-        let rel = dest_relative_path.trim_start_matches(|c: char| c == '/' || c == '\\');
-        let candidate = root_abs.join(rel);
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|e| format!("Invalid destination: {e}"))?;
-        if !resolved.starts_with(&root_abs) {
-            return Err("Destination escapes workspace root".to_string());
-        }
-        resolved
-    };
-
-    if !dest_dir.is_dir() {
-        return Err("Destination is not a directory".to_string());
-    }
-
-    let name = src
-        .file_name()
-        .ok_or_else(|| "Cannot determine filename".to_string())?;
-    let requested_dest = dest_dir.join(name);
-    let final_dest = if requested_dest.exists() {
-        next_copy_destination(&requested_dest)?
-    } else {
-        requested_dest
-    };
-    copy_path_recursive(&src, &final_dest)?;
-    Ok(())
 }
 
 #[tauri::command]

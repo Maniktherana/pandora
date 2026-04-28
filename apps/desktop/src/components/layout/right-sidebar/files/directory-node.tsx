@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { cn, getParentRelPath, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
-import { scmToneTextClass } from "@/components/layout/right-sidebar/scm/scm.utils";
+import { scmToneTextClass } from "@/services/scm/scm-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 import DotGridLoader from "@/components/dot-grid-loader";
+import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
 import { FileTreeRow } from "./file-tree-row";
 import {
   DIRECTORY_STICKY_ROW_OFFSET_PX,
@@ -21,7 +22,6 @@ import {
   type PendingRenameState,
   type ScmDecorationResolver,
 } from "./files.types";
-import { useWorkspaceDirectoryQuery } from "./files-queries";
 import { TreeCreateInput } from "./tree-create-input";
 import { TreeRenameInput } from "./tree-rename-input";
 
@@ -118,14 +118,11 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   );
   const collapsibleOpen = open || keepPanelOpenForRename;
 
-  const childrenQuery = useWorkspaceDirectoryQuery({
-    workspaceId,
-    workspaceRoot,
-    relativePath: relPath,
-    enabled: collapsibleOpen,
-  });
-  const children = childrenQuery.data ?? null;
-  const loadError = childrenQuery.error ? String(childrenQuery.error) : null;
+  // Read children from the file tree store. Data arrives via runtime events after expansion.
+  const children = useFileTreeStore(
+    (s) => s.byRuntimeId[workspaceId]?.directories[relPath] ?? null,
+  );
+  const loadError = useFileTreeStore((s) => s.byRuntimeId[workspaceId]?.lastError ?? null);
 
   useEffect(() => {
     if (!collapsibleOpen) {
@@ -265,7 +262,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               {loadError}
             </div>
           )}
-          {collapsibleOpen && children === null && childrenQuery.isFetching && !loadError && (
+          {collapsibleOpen && children === null && !loadError && (
             <div
               className="flex items-center justify-center py-3"
               style={{

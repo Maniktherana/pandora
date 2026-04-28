@@ -7,7 +7,8 @@ import { tabKey } from "@/components/layout/workspace/layout-tree";
 import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { useScmStatusQuery } from "@/components/layout/right-sidebar/scm/scm-queries";
+import { useScmStore } from "@/services/scm/scm-store";
+import { flattenScmSnapshot } from "@/services/scm/scm-utils";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 
@@ -87,7 +88,8 @@ export default function WorkspaceTabBar({
       >,
     [sessions],
   );
-  const { data: scmEntries = [] } = useScmStatusQuery(workspaceRoot);
+  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspaceId]?.snapshot ?? null);
+  const scmEntries = flattenScmSnapshot(scmSnapshot);
   const pendingDragRef = useRef<{
     sourceIndex: number;
     label: string;

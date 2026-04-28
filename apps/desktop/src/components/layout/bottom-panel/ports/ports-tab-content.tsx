@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { PortDataRow } from "./port-data-row";
-import { useRuntimeStore } from "@/state/runtime-store";
+import { useRuntimeStore } from "@/services/runtime/runtime-store";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import type { DetectedPort, WorkspaceRecord } from "@/lib/shared/types";

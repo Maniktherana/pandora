@@ -1,26 +1,16 @@
-import { Effect } from "effect";
 import { useMemo } from "react";
 import { tryCloseEditorTab } from "@/components/editor/close-dirty-editor";
-import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import { useEditorStore } from "@/state/editor-store";
-import { useDesktopEffectRunner } from "./use-bootstrap-desktop";
+import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
+import { editorEnsureFileLoaded } from "@/services/editor/editor-service";
 
 export function useEditorActions() {
-  const { runPromise } = useDesktopEffectRunner();
-  const ensureFileLoaded = useEditorStore((state) => state.ensureFileLoaded);
-
   return useMemo(
     () => ({
       async openFile(workspaceId: string, workspaceRoot: string, relativePath: string) {
-        const ok = await ensureFileLoaded(workspaceId, workspaceRoot, relativePath);
+        const ok = await editorEnsureFileLoaded(workspaceId, workspaceRoot, relativePath);
         if (!ok) return;
-        await runPromise(
-          Effect.flatMap(DesktopWorkspaceService, (service) =>
-            Effect.flatMap(service.getWorkspaceSession(workspaceId), (session) =>
-              session.commands.addEditorTab(relativePath),
-            ),
-          ),
-        );
+        const session = desktopWorkspaceService.getWorkspaceSession(workspaceId);
+        session.commands.addEditorTab(relativePath);
       },
 
       async closeEditorTab(params: {
@@ -33,17 +23,13 @@ export function useEditorActions() {
       }) {
         await tryCloseEditorTab({
           ...params,
-          closeTab: (paneID, tabIndex) =>
-            runPromise(
-              Effect.flatMap(DesktopWorkspaceService, (service) =>
-                Effect.flatMap(service.getWorkspaceSession(params.workspaceId), (session) =>
-                  session.commands.closeTab(paneID, tabIndex),
-                ),
-              ),
-            ),
+          closeTab: (paneID, tabIndex) => {
+            const session = desktopWorkspaceService.getWorkspaceSession(params.workspaceId);
+            session.commands.closeTab(paneID, tabIndex);
+          },
         });
       },
     }),
-    [ensureFileLoaded, runPromise],
+    [],
   );
 }

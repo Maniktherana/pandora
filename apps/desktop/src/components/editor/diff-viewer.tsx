@@ -67,6 +67,7 @@ export default function DiffViewer({
   metrics,
   targetBranch,
   onStatsChange,
+  readWorkingCopy,
 }: {
   workspaceRoot: string;
   relativePath: string;
@@ -81,6 +82,7 @@ export default function DiffViewer({
   metrics?: VirtualFileMetrics;
   targetBranch?: string | null | undefined;
   onStatsChange?: (stats: DiffViewerStats) => void;
+  readWorkingCopy?: (relativePath: string) => Promise<string | null>;
 }) {
   const staged = source === "staged";
   const [sideBySide, setSideBySide] = useState(loadSideBySide);
@@ -106,7 +108,8 @@ export default function DiffViewer({
 
   const diffQuery = useQuery({
     queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source, targetBranch),
-    queryFn: () => fetchDiffContents(workspaceRoot, relativePath, source, targetBranch),
+    queryFn: () =>
+      fetchDiffContents(workspaceRoot, relativePath, source, targetBranch, readWorkingCopy),
     enabled: isActive,
     staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     gcTime: DIFF_CONTENTS_GC_TIME_MS,
@@ -115,7 +118,7 @@ export default function DiffViewer({
   useEffect(() => {
     if (!isActive || reloadKey === 0) return;
     void diffQuery.refetch();
-  }, [diffQuery, isActive, reloadKey]);
+  }, [diffQuery.refetch, isActive, reloadKey]);
 
   const original = diffQuery.data?.original ?? "";
   const modified = diffQuery.data?.modified ?? "";
@@ -156,7 +159,7 @@ export default function DiffViewer({
       parsedDiffCache.set(data, new Map([[relativePath, next]]));
     }
     return next;
-  }, [diffQuery.data, error, loading, modified, original, relativePath]);
+  }, [diffQuery.data, error, loading, relativePath]);
 
   const diffMetadata = parsed.diffMetadata;
   const displayError = error ?? parsed.parseError;

@@ -1,4 +1,4 @@
-import type { DaemonClient } from "../runtime/daemon-client";
+import type { RuntimeClient } from "@/services/runtime/runtime-client";
 
 function defaultShellInfo(): { shellPath: string; shellName: string } {
   const shellPath =
@@ -10,7 +10,7 @@ function defaultShellInfo(): { shellPath: string; shellName: string } {
 }
 
 export async function seedTerminalWithName(
-  client: DaemonClient,
+  client: RuntimeClient,
   runtimeId: string,
   name?: string,
 ): Promise<{ slotID: string; sessionDefID: string; shellName: string }> {
@@ -57,10 +57,10 @@ export async function seedTerminalWithName(
   return { slotID, sessionDefID, shellName: "terminal" };
 }
 
-export function seedWorkspaceTerminal(client: DaemonClient, runtimeId: string) {
+export function seedWorkspaceTerminal(client: RuntimeClient, runtimeId: string) {
   return seedTerminalWithName(client, runtimeId, "Terminal");
 }
 
-export function seedProjectTerminal(client: DaemonClient, runtimeId: string) {
+export function seedProjectTerminal(client: RuntimeClient, runtimeId: string) {
   return seedTerminalWithName(client, runtimeId, "Terminal");
 }

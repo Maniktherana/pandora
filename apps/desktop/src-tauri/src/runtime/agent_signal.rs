@@ -116,7 +116,10 @@ fn read_event_name(payload: Option<&Value>) -> Option<String> {
 ///     that no other vendor uses.
 ///   * `agentSessionID` is read from `session_id` for non-Codex vendors;
 ///     Codex doesn't expose one.
-pub fn next_agent_activity(signal: &AgentCliSignal, now_iso8601: &str) -> Option<AgentActivityState> {
+pub fn next_agent_activity(
+    signal: &AgentCliSignal,
+    now_iso8601: &str,
+) -> Option<AgentActivityState> {
     let payload = parse_payload(signal);
     let event_name = read_event_name(payload.as_ref());
     let event = event_name.as_deref();
@@ -223,7 +226,10 @@ mod tests {
         let activity = next_agent_activity(&s, NOW).unwrap();
         assert_eq!(activity.vendor, AgentVendor::ClaudeCode);
         assert_eq!(activity.phase, AgentPhase::Working);
-        assert_eq!(activity.agent_session_id.as_deref(), Some("claude-session-1"));
+        assert_eq!(
+            activity.agent_session_id.as_deref(),
+            Some("claude-session-1")
+        );
     }
 
     #[test]

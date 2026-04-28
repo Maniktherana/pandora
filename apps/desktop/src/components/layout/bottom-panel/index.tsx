@@ -10,7 +10,7 @@ import { ScriptTabContent } from "./scripts/script-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
 import DotGridLoader from "@/components/dot-grid-loader";
-import { useRuntimeStore } from "@/state/runtime-store";
+import { useRuntimeStore } from "@/services/runtime/runtime-store";
 
 type BottomPanelProps = {
   onCollapse: () => void;

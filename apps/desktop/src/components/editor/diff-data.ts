@@ -1,9 +1,8 @@
 import type { DiffSource } from "@/lib/shared/types";
 import {
-  readWorkspaceTextFile,
   scmReadGitBlob,
   scmReadGitCompareBlob,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+} from "@/services/scm/scm-api";
 
 export type DiffContentsData = {
   original: string;
@@ -27,6 +26,7 @@ export async function fetchDiffContents(
   relativePath: string,
   source: DiffSource,
   targetBranch?: string | null,
+  readWorkingCopy?: (relativePath: string) => Promise<string | null>,
 ): Promise<DiffContentsData> {
   if (source === "branch") {
     if (!targetBranch) return { original: "", modified: "" };
@@ -47,10 +47,12 @@ export async function fetchDiffContents(
 
   const original = await scmReadGitBlob(workspaceRoot, relativePath, "head");
   let modified = "";
-  try {
-    modified = await readWorkspaceTextFile(workspaceRoot, relativePath);
-  } catch {
-    modified = "";
+  if (readWorkingCopy) {
+    try {
+      modified = (await readWorkingCopy(relativePath)) ?? "";
+    } catch {
+      modified = "";
+    }
   }
   return { original, modified };
 }

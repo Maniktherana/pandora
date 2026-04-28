@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useSettingsStore } from "@/state/settings-store";
+import { useSettingsStore } from "@/services/settings/settings-store";
 
 interface UseKeyboardShortcutsParams {
   onNewTerminal: () => void;

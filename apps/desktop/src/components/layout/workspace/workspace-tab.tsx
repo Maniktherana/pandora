@@ -4,7 +4,7 @@ import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
-import { useEditorStore } from "@/state/editor-store";
+import { useEditorStore } from "@/services/editor/editor-store";
 import type {
   PaneTab,
   SessionState,
@@ -18,9 +18,9 @@ import {
   decorationForScmEntry,
   scmToneTextClass,
   statusTone,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+} from "@/services/scm/scm-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
+import type { ScmEntry } from "@/lib/shared/types";
 
 type WorkspaceTabProps = {
   tab: PaneTab;
@@ -32,7 +32,7 @@ type WorkspaceTabProps = {
   isFocused: boolean;
   isLast: boolean;
   isBeingDragged: boolean;
-  scmEntry?: ScmStatusEntry | undefined;
+  scmEntry?: ScmEntry | undefined;
   slotsMap: Record<string, SlotState | undefined>;
   sessionsMap: Record<string, SessionState | undefined>;
   displayMap: Record<string, TerminalDisplayState>;

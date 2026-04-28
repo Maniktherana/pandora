@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import { useDesktopView } from "@/hooks/use-desktop-view";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
-import { useDesktopViewStore } from "@/state/desktop-view-store";
-import { useRuntimeStore } from "@/state/runtime-store";
-import { useEditorStore } from "@/state/editor-store";
+import { useDesktopViewStore } from "@/services/workspace/desktop-view-store";
+import { useRuntimeStore } from "@/services/runtime/runtime-store";
+import { editorEnsureFileLoaded } from "@/services/editor/editor-service";
 import { findLeaf } from "@/components/layout/workspace/layout-migrate";
 import { tabsEqual } from "@/components/layout/workspace/layout-tree";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
@@ -121,9 +121,7 @@ export function TabDragOverlay({
         ) {
           return;
         }
-        void useEditorStore
-          .getState()
-          .ensureFileLoaded(drag.workspaceId, drag.workspaceRoot, drag.relativePath)
+        void editorEnsureFileLoaded(drag.workspaceId, drag.workspaceRoot, drag.relativePath)
           .then((ok) => {
             if (ok) afterLoad();
           })
