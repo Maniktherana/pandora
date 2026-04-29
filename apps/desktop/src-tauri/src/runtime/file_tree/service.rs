@@ -1,20 +1,20 @@
 //! Per-runtime file-tree service.
 //!
-//! Owns the workspace root, the set of currently-expanded directories, and
-//! the gitignore probe used to dim ignored entries. All disk I/O runs on
-//! the blocking pool. Mutations emit `FileTreeDirectoryChanged` for every
-//! affected parent so the renderer never has to refetch.
+//! Owns the workspace root and the set of currently-expanded directories.
+//! All disk I/O runs on the blocking pool. Structural snapshots contain
+//! pure filesystem layout (`is_ignored` is always `false`); Git decorations
+//! are an async overlay concern handled outside this service. Mutations emit
+//! `FileTreeDirectoryChanged` for every affected parent so the renderer
+//! never has to refetch.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use super::process_manager::RuntimeEmitter;
-use super::types::{FileTreeEntry, FileTreeSnapshot};
+use crate::runtime::terminal::process_manager::ScopeEmitter;
+use crate::runtime::types::{FileTreeEntry, FileTreeSnapshot};
 
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -22,7 +22,7 @@ const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 pub struct FileTreeService {
     inner: Arc<Mutex<Inner>>,
     runtime_id: String,
-    emitter: Arc<dyn RuntimeEmitter>,
+    emitter: Arc<dyn ScopeEmitter>,
 }
 
 struct Inner {
@@ -37,7 +37,7 @@ impl FileTreeService {
     pub fn open(
         runtime_id: String,
         workspace_root: &str,
-        emitter: Arc<dyn RuntimeEmitter>,
+        emitter: Arc<dyn ScopeEmitter>,
     ) -> Result<Self, String> {
         let root = Path::new(workspace_root)
             .canonicalize()
@@ -54,16 +54,23 @@ impl FileTreeService {
 
     // ---- subscription ---------------------------------------------------
 
-    /// Replace the expansion set (root is always retained) and emit a fresh
-    /// snapshot.
+    /// Seed the expansion hint set and emit a full-tree snapshot.
+    ///
+    /// The `expanded_paths` are stored as UI/watcher hints only — they no
+    /// longer control which directories appear in the snapshot.  The snapshot
+    /// always contains the complete normal project tree (all non-ignored
+    /// directories, excl. `.git`).
     pub async fn subscribe(&self, expanded_paths: Vec<String>) {
         self.replace_expanded(expanded_paths).await;
         self.emit_snapshot().await;
     }
 
+    /// Update the expansion hint set.  Does NOT re-emit a snapshot — the
+    /// frontend already has the full tree; the hints are for watcher
+    /// priority only.
     pub async fn set_expanded_paths(&self, paths: Vec<String>) {
         self.replace_expanded(paths).await;
-        self.emit_snapshot().await;
+        // Intentionally no emit_snapshot() call here.
     }
 
     async fn replace_expanded(&self, paths: Vec<String>) {
@@ -553,21 +560,119 @@ fn resolve_under_root(root: &Path, relative: &str, must_exist: bool) -> Result<P
     Ok(resolved)
 }
 
+/// Build a full-tree snapshot by recursively scanning every non-ignored,
+/// non-`.git` directory under `root`.  The `expanded` set is persisted in the
+/// snapshot's `expanded_paths` field for the renderer to restore UI state, but
+/// it does NOT gate which directories appear in `directories`.
 async fn compute_snapshot(root: &Path, expanded: &BTreeSet<String>) -> FileTreeSnapshot {
-    let mut directories: BTreeMap<String, Vec<FileTreeEntry>> = BTreeMap::new();
-    for rel in expanded {
-        if let Some(entries) = list_directory(root, rel).await {
-            directories.insert(rel.clone(), entries);
-        }
-    }
+    let root_clone = root.to_path_buf();
+    let directories = tokio::task::spawn_blocking(move || {
+        list_directory_tree_blocking(&root_clone)
+    })
+    .await
+    .unwrap_or_default();
+
     let mut expanded_paths: Vec<String> =
         expanded.iter().filter(|p| !p.is_empty()).cloned().collect();
     expanded_paths.sort();
+
     FileTreeSnapshot {
         root_path: root.to_string_lossy().into_owned(),
         directories,
         expanded_paths,
     }
+}
+
+/// Build a complete directory map from `root` by walking the workspace with
+/// the [`ignore`] crate.
+///
+/// `.gitignore`, `.ignore`, and global gitignore rules are all respected
+/// without spawning any git subprocess.  `.git` is always excluded via an
+/// explicit `filter_entry` guard.  `hidden(false)` ensures that dotfiles
+/// that are **not** gitignored (`.env`, `.vscode/`, etc.) still appear in
+/// the tree — only genuinely ignored paths are absent.
+///
+/// Every non-ignored directory becomes its own key in the returned map so
+/// the renderer can expand them on demand.  `is_ignored` is `false` for all
+/// included entries; ignored paths are simply not present.
+fn list_directory_tree_blocking(root: &Path) -> BTreeMap<String, Vec<FileTreeEntry>> {
+    use ignore::WalkBuilder;
+
+    let mut result: BTreeMap<String, Vec<FileTreeEntry>> = BTreeMap::new();
+    // Root is always present, even when empty.
+    result.insert(String::new(), Vec::new());
+
+    let walker = WalkBuilder::new(root)
+        // Include dotfiles that are not gitignored (.env, .vscode, etc.).
+        .hidden(false)
+        // Respect .gitignore rules (no subprocess).
+        .git_ignore(true)
+        // Respect the user's global gitignore / core.excludesFile.
+        .git_global(true)
+        // Respect .git/info/exclude.
+        .git_exclude(true)
+        // Respect .ignore files.
+        .ignore(true)
+        // Also check parent directories for ignore files.
+        .parents(true)
+        // Always exclude .git — never show it as an entry or descend into it.
+        .filter_entry(|e| e.file_name() != std::ffi::OsStr::new(".git"))
+        .build();
+
+    for item in walker {
+        let entry = match item {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        // Depth 0 is the walk root itself.
+        if entry.depth() == 0 {
+            continue;
+        }
+        let abs = entry.path();
+        let file_type = match entry.file_type() {
+            Some(ft) => ft,
+            None => continue, // stdin sentinel
+        };
+        let rel = match abs.strip_prefix(root) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if rel.is_empty() {
+            continue;
+        }
+        let name = match abs.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        let is_dir = file_type.is_dir();
+
+        // Add this entry to its parent's listing.
+        result
+            .entry(parent_of(&rel))
+            .or_default()
+            .push(FileTreeEntry {
+                path: rel.clone(),
+                name,
+                is_directory: is_dir,
+                is_ignored: false,
+            });
+
+        // Traversed directories own a key so the renderer can expand them.
+        if is_dir {
+            result.entry(rel).or_default();
+        }
+    }
+
+    // Sort every listing: directories first, then case-insensitive by name.
+    for entries in result.values_mut() {
+        entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
+    }
+
+    result
 }
 
 async fn list_directory(root: &Path, relative: &str) -> Option<Vec<FileTreeEntry>> {
@@ -585,32 +690,29 @@ fn list_directory_blocking(root: &Path, relative: &str) -> Result<Vec<FileTreeEn
         return Err("not a directory".to_string());
     }
 
-    let raw: Vec<(String, bool, String)> = std::fs::read_dir(&dir)
+    let mut entries: Vec<FileTreeEntry> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
+            // Keep single-directory listings consistent with the snapshot:
+            // .git is never surfaced.
+            if name == ".git" {
+                return None;
+            }
             let kind = entry.file_type().ok()?;
             let child = dir.join(&name);
-            let rel = child
+            let path = child
                 .strip_prefix(root)
                 .ok()?
                 .to_string_lossy()
                 .replace('\\', "/");
-            Some((name, kind.is_dir(), rel))
-        })
-        .collect();
-
-    let rels: Vec<String> = raw.iter().map(|(_, _, rel)| rel.clone()).collect();
-    let ignored = git_ignored_paths(root, &rels);
-
-    let mut entries: Vec<FileTreeEntry> = raw
-        .into_iter()
-        .map(|(name, is_directory, path)| FileTreeEntry {
-            is_ignored: ignored.contains(&path),
-            path,
-            name,
-            is_directory,
+            Some(FileTreeEntry {
+                is_ignored: false,
+                path,
+                name,
+                is_directory: kind.is_dir(),
+            })
         })
         .collect();
 
@@ -621,38 +723,6 @@ fn list_directory_blocking(root: &Path, relative: &str) -> Result<Vec<FileTreeEn
     });
 
     Ok(entries)
-}
-
-fn git_ignored_paths(root: &Path, paths: &[String]) -> std::collections::HashSet<String> {
-    use std::collections::HashSet;
-    if paths.is_empty() {
-        return HashSet::new();
-    }
-    let root = match root.to_str() {
-        Some(s) => s,
-        None => return HashSet::new(),
-    };
-    let mut child = match Command::new("git")
-        .args(["-C", root, "check-ignore", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return HashSet::new(),
-    };
-    if let Some(stdin) = child.stdin.as_mut() {
-        let _ = stdin.write_all(paths.join("\n").as_bytes());
-    }
-    let output = match child.wait_with_output() {
-        Ok(o) => o,
-        Err(_) => return HashSet::new(),
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
 }
 
 fn copy_recursive(src: &Path, dest: &Path) -> Result<(), String> {
@@ -736,7 +806,7 @@ mod tests {
     struct CapturingEmitter(Arc<StdMutex<Captured>>);
 
     #[async_trait]
-    impl RuntimeEmitter for CapturingEmitter {
+    impl ScopeEmitter for CapturingEmitter {
         async fn session_state_changed(&self, _: SessionState) {}
         async fn output_chunk(&self, _: &str, _: Bytes) {}
         async fn ports_changed(&self, _: Vec<DetectedPort>) {}
@@ -783,7 +853,7 @@ mod tests {
     fn service(prefix: &str) -> (FileTreeService, CapturingEmitter, PathBuf) {
         let workspace = temp_workspace(prefix);
         let emitter = CapturingEmitter::default();
-        let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
+        let arc: Arc<dyn ScopeEmitter> = Arc::new(emitter.clone());
         let svc = FileTreeService::open(format!("rt-{prefix}"), workspace.to_str().unwrap(), arc)
             .unwrap();
         (svc, emitter, workspace)
@@ -863,5 +933,137 @@ mod tests {
         svc.create_directory("../escape".into()).await;
         let errors = emitter.0.lock().unwrap().errors.clone();
         assert!(!errors.is_empty());
+    }
+
+    // ---- gitignore-aware snapshot tests ------------------------------------
+
+    /// Directories excluded by .gitignore must not appear in the snapshot at
+    /// all — neither as entries in the root listing nor as their own keys.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn gitignore_excluded_dir_absent_from_snapshot() {
+        let (svc, emitter, workspace) = service("gi-excl");
+        // A bare .git/ dir makes the ignore crate treat this as a git repo
+        // so that .gitignore rules are loaded.
+        std::fs::create_dir(workspace.join(".git")).unwrap();
+        std::fs::write(workspace.join(".gitignore"), "generated/\n").unwrap();
+        std::fs::create_dir(workspace.join("generated")).unwrap();
+        std::fs::write(workspace.join("generated/out.js"), "").unwrap();
+        std::fs::create_dir(workspace.join("src")).unwrap();
+        std::fs::write(workspace.join("src/main.rs"), "").unwrap();
+
+        svc.subscribe(vec![]).await;
+        let snap = emitter.0.lock().unwrap().snapshots.last().cloned().unwrap();
+
+        // src must be traversed.
+        assert!(snap.directories.contains_key("src"), "src must be traversed");
+
+        // generated must be absent from both root listing and directories map.
+        let root_names: Vec<&str> = snap.directories[""]
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            !root_names.contains(&"generated"),
+            "generated must not appear in root listing"
+        );
+        assert!(
+            !snap.directories.contains_key("generated"),
+            "generated must not be a directories key"
+        );
+    }
+
+    /// Normal (non-ignored) directories and their contents must be present.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn normal_dir_traversed_in_snapshot() {
+        let (svc, emitter, workspace) = service("normal-dir");
+        std::fs::create_dir(workspace.join("lib")).unwrap();
+        std::fs::write(workspace.join("lib/utils.rs"), "").unwrap();
+        std::fs::write(workspace.join("README.md"), "").unwrap();
+
+        svc.subscribe(vec![]).await;
+        let snap = emitter.0.lock().unwrap().snapshots.last().cloned().unwrap();
+
+        assert!(snap.directories.contains_key("lib"), "lib must be in snapshot");
+        assert!(
+            snap.directories["lib"].iter().any(|e| e.name == "utils.rs"),
+            "lib/utils.rs must be visible"
+        );
+        let root_names: Vec<&str> = snap.directories[""]
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            root_names.contains(&"README.md"),
+            "README.md must be in root listing"
+        );
+    }
+
+    /// .git must never appear as an entry or have its contents traversed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn git_dir_excluded_from_snapshot() {
+        let (svc, emitter, workspace) = service("git-excl");
+        std::fs::create_dir(workspace.join(".git")).unwrap();
+        std::fs::write(workspace.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::create_dir(workspace.join("src")).unwrap();
+        std::fs::write(workspace.join("src/lib.rs"), "").unwrap();
+
+        svc.subscribe(vec![]).await;
+        let snap = emitter.0.lock().unwrap().snapshots.last().cloned().unwrap();
+
+        let root_names: Vec<&str> = snap.directories[""]
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            !root_names.contains(&".git"),
+            ".git must not appear in root listing"
+        );
+        assert!(
+            !snap.directories.contains_key(".git"),
+            ".git must not be traversed"
+        );
+        assert!(
+            snap.directories.contains_key("src"),
+            "src must still be traversed"
+        );
+    }
+
+    /// Dotfiles that are NOT gitignored must still appear in the tree.
+    /// This confirms that `hidden(false)` is in effect and we are not
+    /// accidentally hiding all files whose names start with `.`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn non_ignored_dotfiles_visible_in_snapshot() {
+        let (svc, emitter, workspace) = service("dotfiles");
+        // .env is intentionally NOT listed in .gitignore.
+        std::fs::write(workspace.join(".env"), "SECRET=1").unwrap();
+        // .vscode/ sub-directory also not ignored.
+        std::fs::create_dir(workspace.join(".vscode")).unwrap();
+        std::fs::write(workspace.join(".vscode/settings.json"), "{}").unwrap();
+
+        svc.subscribe(vec![]).await;
+        let snap = emitter.0.lock().unwrap().snapshots.last().cloned().unwrap();
+
+        let root_names: Vec<&str> = snap.directories[""]
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            root_names.contains(&".env"),
+            ".env must appear in root listing (hidden(false) is required)"
+        );
+        assert!(
+            root_names.contains(&".vscode"),
+            ".vscode must appear in root listing"
+        );
+        assert!(
+            snap.directories.contains_key(".vscode"),
+            ".vscode must be traversed"
+        );
+        assert!(
+            snap.directories[".vscode"]
+                .iter()
+                .any(|e| e.name == "settings.json"),
+            ".vscode/settings.json must be visible"
+        );
     }
 }

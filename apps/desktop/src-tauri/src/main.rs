@@ -170,12 +170,12 @@ fn main() {
             }
             _ => {}
         })
-        .manage(runtime_ipc::new_state())
+        .manage(runtime_ipc::DomainRegistries::new())
         .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
         .manage(DbState(db))
         .invoke_handler(tauri::generate_handler![
-            // Runtime bridge
-            runtime_ipc::runtime_send,
+            // Domain command bridge
+            runtime_ipc::scope_send,
             // Native terminal surfaces (Ghostty on macOS arm64; stubs elsewhere)
             terminal_commands::terminal_surface_create,
             terminal_commands::terminal_surface_update,
@@ -209,10 +209,6 @@ fn main() {
             // Layout
             commands::save_workspace_layout,
             commands::load_workspace_layout,
-            // Runtime
-            commands::start_workspace_runtime,
-            commands::start_project_runtime,
-            commands::stop_project_runtime,
             // Full state reload
             commands::load_app_state,
             commands::native_terminal_supported,

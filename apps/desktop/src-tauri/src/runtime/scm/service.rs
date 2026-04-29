@@ -18,8 +18,8 @@ use tokio::sync::{oneshot, watch, Mutex};
 
 use crate::database::AppDatabase;
 
-use super::process_manager::RuntimeEmitter;
-use super::types::{ScmEntry, ScmLineStatsSummary, ScmSnapshot};
+use crate::runtime::terminal::process_manager::ScopeEmitter;
+use crate::runtime::types::{ScmEntry, ScmLineStatsSummary, ScmSnapshot};
 
 const WATCHER_DEBOUNCE: Duration = Duration::from_millis(350);
 
@@ -33,7 +33,7 @@ pub struct ScmService {
     runtime_id: String,
     worktree_path: String,
     db: Arc<AppDatabase>,
-    emitter: Arc<dyn RuntimeEmitter>,
+    emitter: Arc<dyn ScopeEmitter>,
     /// Sending on this channel signals the watcher task to stop.
     shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     watcher_ready: watch::Receiver<bool>,
@@ -50,7 +50,7 @@ impl ScmService {
         db: Arc<AppDatabase>,
         runtime_id: String,
         worktree_path: String,
-        emitter: Arc<dyn RuntimeEmitter>,
+        emitter: Arc<dyn ScopeEmitter>,
     ) -> Self {
         let target_branch = db
             .get_runtime_metadata(&runtime_id, "scm.target_branch")
@@ -516,7 +516,7 @@ fn get_upstream(worktree_path: &str, branch: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::database::AppDatabase;
-    use crate::runtime::process_manager::RuntimeEmitter;
+    use crate::runtime::terminal::process_manager::ScopeEmitter;
     use crate::runtime::types::{DetectedPort, ScmSnapshot, SessionState, SlotState};
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -533,7 +533,7 @@ mod tests {
     struct CapturingEmitter(Arc<StdMutex<Captured>>);
 
     #[async_trait]
-    impl RuntimeEmitter for CapturingEmitter {
+    impl ScopeEmitter for CapturingEmitter {
         async fn session_state_changed(&self, _: SessionState) {}
         async fn output_chunk(&self, _: &str, _: Bytes) {}
         async fn ports_changed(&self, _: Vec<DetectedPort>) {}
@@ -585,7 +585,7 @@ mod tests {
         let (workspace, db) = temp_db("subscribe");
         init_git(&workspace);
         let emitter = CapturingEmitter::default();
-        let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
+        let arc: Arc<dyn ScopeEmitter> = Arc::new(emitter.clone());
         let svc = ScmService::open(
             Arc::clone(&db),
             "rt-test".into(),
@@ -603,7 +603,7 @@ mod tests {
         let (workspace, db) = temp_db("target");
         init_git(&workspace);
         let emitter = CapturingEmitter::default();
-        let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
+        let arc: Arc<dyn ScopeEmitter> = Arc::new(emitter.clone());
         let svc = ScmService::open(
             Arc::clone(&db),
             "rt-target".into(),

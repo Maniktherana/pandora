@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tokio::sync::{oneshot, Mutex};
 
-use super::process_manager::RuntimeEmitter;
+use crate::runtime::terminal::process_manager::ScopeEmitter;
 
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const WATCHER_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -28,7 +28,7 @@ pub struct EditorIoService {
     inner: Arc<Mutex<EditorInner>>,
     runtime_id: String,
     root: PathBuf,
-    emitter: Arc<dyn RuntimeEmitter>,
+    emitter: Arc<dyn ScopeEmitter>,
     shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
@@ -42,7 +42,7 @@ impl EditorIoService {
     pub fn open(
         runtime_id: String,
         workspace_root: &str,
-        emitter: Arc<dyn RuntimeEmitter>,
+        emitter: Arc<dyn ScopeEmitter>,
     ) -> Result<Self, String> {
         let root = Path::new(workspace_root)
             .canonicalize()
@@ -335,7 +335,7 @@ fn resolve_under_root(root: &Path, relative: &str, must_exist: bool) -> Result<P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::process_manager::RuntimeEmitter;
+    use crate::runtime::terminal::process_manager::ScopeEmitter;
     use crate::runtime::types::{DetectedPort, SessionState};
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -353,7 +353,7 @@ mod tests {
     struct CapturingEmitter(Arc<StdMutex<Captured>>);
 
     #[async_trait]
-    impl RuntimeEmitter for CapturingEmitter {
+    impl ScopeEmitter for CapturingEmitter {
         async fn session_state_changed(&self, _: SessionState) {}
         async fn output_chunk(&self, _: &str, _: Bytes) {}
         async fn ports_changed(&self, _: Vec<DetectedPort>) {}
@@ -394,7 +394,7 @@ mod tests {
     fn service(prefix: &str) -> (EditorIoService, CapturingEmitter, PathBuf) {
         let workspace = temp_workspace(prefix);
         let emitter = CapturingEmitter::default();
-        let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
+        let arc: Arc<dyn ScopeEmitter> = Arc::new(emitter.clone());
         let svc = EditorIoService::open(format!("rt-{prefix}"), workspace.to_str().unwrap(), arc)
             .unwrap();
         (svc, emitter, workspace)

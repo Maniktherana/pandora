@@ -37,7 +37,7 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 
-use super::types::DetectedPort;
+use crate::runtime::types::DetectedPort;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(3);
 const HINT_SCAN_DELAY: Duration = Duration::from_millis(500);

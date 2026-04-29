@@ -8,7 +8,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 
-use super::types::{AgentActivityState, AgentCliSignal, AgentPhase, AgentVendor};
+use crate::runtime::types::{AgentActivityState, AgentCliSignal, AgentPhase, AgentVendor};
 
 // ---------------------------------------------------------------------------
 // Event-name classifiers.

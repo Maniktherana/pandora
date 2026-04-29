@@ -1,7 +1,7 @@
 use crate::database::{now_iso8601, AppDatabase};
 use crate::git;
 use crate::models::*;
-use crate::runtime_ipc::{self, RuntimeIpcState};
+use crate::runtime_ipc::{self, DomainRegistries};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -74,11 +74,11 @@ pub fn toggle_project(db: tauri::State<'_, DbState>, project_id: String) -> Resu
 #[tauri::command]
 pub async fn remove_project(
     db: tauri::State<'_, DbState>,
-    runtime_state: tauri::State<'_, RuntimeIpcState>,
+    runtime_state: tauri::State<'_, DomainRegistries>,
     project_id: String,
 ) -> Result<(), String> {
     let runtime_key = format!("project:{}", project_id);
-    runtime_ipc::stop_runtime(runtime_state.inner(), &runtime_key).await;
+    runtime_ipc::stop_scope(runtime_state.inner(), &runtime_key).await;
     db.0.remove_project(&project_id)
 }
 
@@ -268,7 +268,7 @@ pub async fn retry_workspace(
 pub async fn rename_workspace(
     app_handle: AppHandle,
     db: tauri::State<'_, DbState>,
-    runtime_state: tauri::State<'_, RuntimeIpcState>,
+    runtime_state: tauri::State<'_, DomainRegistries>,
     workspace_id: String,
     name: String,
 ) -> Result<WorkspaceRecord, String> {
@@ -292,7 +292,7 @@ pub async fn rename_workspace(
     let settings = db.0.load_project_settings(&project.id);
 
     if workspace.workspace_kind == WorkspaceKind::Worktree {
-        runtime_ipc::stop_runtime(runtime_state.inner(), &workspace_id).await;
+        runtime_ipc::stop_scope(runtime_state.inner(), &workspace_id).await;
     }
 
     let renamed = tokio::task::spawn_blocking(move || {
@@ -315,7 +315,7 @@ pub async fn rename_workspace(
 #[tauri::command]
 pub async fn remove_workspace(
     db: tauri::State<'_, DbState>,
-    runtime_state: tauri::State<'_, RuntimeIpcState>,
+    runtime_state: tauri::State<'_, DomainRegistries>,
     workspace_id: String,
 ) -> Result<(), String> {
     let workspaces = db.0.load_workspaces(None);
@@ -328,7 +328,7 @@ pub async fn remove_workspace(
     let project = projects.into_iter().find(|p| p.id == workspace.project_id);
 
     // Stop runtime
-    runtime_ipc::stop_runtime(runtime_state.inner(), &workspace_id).await;
+    runtime_ipc::stop_scope(runtime_state.inner(), &workspace_id).await;
 
     if workspace.workspace_kind == WorkspaceKind::Worktree {
         if let Some(project) = project {
@@ -407,38 +407,6 @@ pub fn load_workspace_layout(
 ) -> Option<serde_json::Value> {
     let raw = db.0.load_layout(&workspace_id)?;
     serde_json::from_str(&raw).ok()
-}
-
-// ─── Workspace runtime start (called when selecting a ready workspace) ───
-
-#[tauri::command]
-pub fn start_workspace_runtime(
-    app: AppHandle,
-    workspace_id: String,
-    workspace_path: String,
-    default_cwd: String,
-) {
-    runtime_ipc::start_workspace_runtime(app, workspace_id, workspace_path, default_cwd);
-}
-
-#[tauri::command]
-pub fn start_project_runtime(
-    app: AppHandle,
-    project_id: String,
-    git_root_path: String,
-    default_cwd: String,
-) {
-    runtime_ipc::start_project_runtime(app, project_id, git_root_path, default_cwd);
-}
-
-#[tauri::command]
-pub async fn stop_project_runtime(
-    runtime_state: tauri::State<'_, RuntimeIpcState>,
-    project_id: String,
-) -> Result<(), String> {
-    let key = format!("project:{}", project_id);
-    runtime_ipc::stop_runtime(runtime_state.inner(), &key).await;
-    Ok(())
 }
 
 // ─── Ghostty config ───
@@ -775,7 +743,7 @@ pub async fn can_archive_workspace(
 #[tauri::command]
 pub async fn archive_workspace(
     db: tauri::State<'_, DbState>,
-    runtime_state: tauri::State<'_, RuntimeIpcState>,
+    runtime_state: tauri::State<'_, DomainRegistries>,
     workspace_id: String,
     delete_worktree: Option<bool>,
     run_teardown: Option<bool>,
@@ -815,7 +783,7 @@ pub async fn archive_workspace(
 
 async fn archive_workspace_inner(
     db: &tauri::State<'_, DbState>,
-    runtime_state: &tauri::State<'_, RuntimeIpcState>,
+    runtime_state: &tauri::State<'_, DomainRegistries>,
     workspace: &WorkspaceRecord,
     delete_worktree: bool,
     run_teardown: bool,
@@ -841,7 +809,7 @@ async fn archive_workspace_inner(
     }
 
     // Stop runtime
-    runtime_ipc::stop_runtime(runtime_state.inner(), &workspace.id).await;
+    runtime_ipc::stop_scope(runtime_state.inner(), &workspace.id).await;
 
     // Run teardown scripts if requested
     if run_teardown {

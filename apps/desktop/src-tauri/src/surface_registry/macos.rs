@@ -6,7 +6,7 @@
 
 use crate::ghostty_app;
 use crate::ghostty_ffi::*;
-use crate::runtime_ipc::RuntimeIpcState;
+use crate::runtime_ipc::DomainRegistries;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use objc2::rc::Retained;
@@ -1540,9 +1540,9 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
     // Snapshot the bytes; the spawn closure outlives the FFI buffer.
     let owned = data_slice.to_vec();
     tauri::async_runtime::spawn(async move {
-        let runtime_state = app_handle.state::<RuntimeIpcState>();
+        let registries = app_handle.state::<DomainRegistries>();
         if let Err(err) = crate::runtime_ipc::write_to_session(
-            runtime_state.inner(),
+            registries.inner(),
             &workspace_id,
             &session_id,
             &owned,
@@ -1587,9 +1587,9 @@ unsafe extern "C" fn receive_resize_callback(
     );
 
     tauri::async_runtime::spawn(async move {
-        let runtime_state = app_handle.state::<RuntimeIpcState>();
+        let registries = app_handle.state::<DomainRegistries>();
         if let Err(err) = crate::runtime_ipc::resize_session(
-            runtime_state.inner(),
+            registries.inner(),
             &workspace_id,
             &session_id,
             cols,

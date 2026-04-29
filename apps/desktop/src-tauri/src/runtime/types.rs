@@ -1,12 +1,12 @@
 //! Wire types shared with the renderer.
 //!
 //! These structs define the Tauri IPC contract between the renderer and the
-//! in-process runtime. Treat field names and tag values as a public boundary:
-//! the renderer sends `RuntimeCommand`s through `runtime_send`, and Rust emits
-//! `RuntimeEventEnvelope`s through the `runtime-event` channel.
+//! in-process domain registries. Treat field names and tag values as a public
+//! boundary: the renderer sends `IpcCommand`s through `scope_send`, and Rust
+//! emits `ScopeEventEnvelope`s through the `runtime-event` channel.
 //!
 //! Notes on serde tagging:
-//!   * `RuntimeCommand` and `RuntimeEvent` are externally tagged with `type`,
+//!   * `IpcCommand` and `ScopeEvent` are externally tagged with `type`,
 //!     producing `{ "type": "input", ... }` payloads.
 //!   * Field renames keep `slotID`, `sessionDefIDs`, `agentSessionID` style
 //!     (uppercase ID), since serde's stock camelCase would lower the D in ID.
@@ -257,7 +257,7 @@ pub struct ScmSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum RuntimeCommand {
+pub enum IpcCommand {
     CreateSlot {
         slot: SlotDefinition,
     },
@@ -448,7 +448,7 @@ pub enum RuntimeCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum RuntimeEvent {
+pub enum ScopeEvent {
     SlotSnapshot {
         slots: Vec<SlotState>,
     },
@@ -557,26 +557,11 @@ pub enum RuntimeEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeEventEnvelope {
+pub struct ScopeEventEnvelope {
     #[serde(rename = "runtimeId")]
-    pub runtime_id: String,
+    pub scope_id: String,
     #[serde(flatten)]
-    pub event: RuntimeEvent,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeConnectionState {
-    Connected,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeConnectionEvent {
-    #[serde(rename = "runtimeId")]
-    pub runtime_id: String,
-    pub state: RuntimeConnectionState,
+    pub event: ScopeEvent,
 }
 
 // ---------------------------------------------------------------------------
@@ -706,10 +691,10 @@ mod tests {
             "sessionID": "s-1",
             "data": "hello"
         });
-        let msg: RuntimeCommand = serde_json::from_value(raw.clone()).unwrap();
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
         assert_eq!(
             msg,
-            RuntimeCommand::Input {
+            IpcCommand::Input {
                 session_id: "s-1".to_string(),
                 data: "hello".to_string(),
             }
@@ -720,16 +705,16 @@ mod tests {
     #[test]
     fn client_message_resize_round_trips() {
         let raw = json!({"type":"resize","sessionID":"s","cols":80,"rows":24});
-        let msg: RuntimeCommand = serde_json::from_value(raw.clone()).unwrap();
-        assert!(matches!(msg, RuntimeCommand::Resize { .. }));
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(msg, IpcCommand::Resize { .. }));
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 
     #[test]
     fn client_message_request_snapshot_serializes_as_unit_variant() {
         let raw = json!({"type":"request_snapshot"});
-        let msg: RuntimeCommand = serde_json::from_value(raw.clone()).unwrap();
-        assert_eq!(msg, RuntimeCommand::RequestSnapshot);
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(msg, IpcCommand::RequestSnapshot);
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 
@@ -743,8 +728,8 @@ mod tests {
                 "payloadBase64": null,
             }
         });
-        let msg: RuntimeCommand = serde_json::from_value(raw.clone()).unwrap();
-        if let RuntimeCommand::AgentCliSignal { signal } = &msg {
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        if let IpcCommand::AgentCliSignal { signal } = &msg {
             assert_eq!(signal.slot_id, "slot-1");
             assert_eq!(signal.source, AgentVendor::ClaudeCode);
         } else {
@@ -760,8 +745,8 @@ mod tests {
             "sessionID": "s",
             "data": "aGVsbG8=",
         });
-        let msg: RuntimeEvent = serde_json::from_value(raw.clone()).unwrap();
-        assert!(matches!(msg, RuntimeEvent::OutputChunk { .. }));
+        let msg: ScopeEvent = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(msg, ScopeEvent::OutputChunk { .. }));
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 

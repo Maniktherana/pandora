@@ -1,52 +1,69 @@
-//! In-process runtime IPC.
+//! Renderer-facing IPC boundary for domain registries.
 //!
-//! This is the renderer-facing boundary for runtime commands and events.
-//! It routes Tauri commands into [`crate::runtime::registry::RuntimeRegistry`]
-//! and emits typed runtime events back to the renderer.
+//! Holds four domain registries as a single `DomainRegistries` Tauri state
+//! value and routes incoming `IpcCommand`s to the correct domain service.
 //!
-//! Two flavors of runtime are supported, distinguished only by their key:
-//! - **Workspace runtime** — key = workspace UUID; `workspace_path` is the worktree.
-//! - **Project runtime** — key = `project:<project_id>`; `workspace_path` is the git root.
+//! Two scope flavors, distinguished by key convention:
+//! - **Workspace scope** — key = workspace UUID; root is the workspace worktree.
+//! - **Project scope**  — key = `project:<project_id>`; root is the project git root.
 
 use crate::commands::DbState;
 use crate::database::{AppDatabase, SessionDefinitionPatch, SlotDefinitionPatch};
-use crate::runtime::process_manager::RuntimeEmitter;
-use crate::runtime::registry::{Runtime, RuntimeRegistry};
+use crate::runtime::editor_io::registry::{open_editor_io, EditorIoRegistry};
+use crate::runtime::file_tree::registry::{open_file_tree, FileTreeRegistry};
+use crate::runtime::scm::registry::{open_scm, ScmRegistry};
+use crate::runtime::terminal::process_manager::ScopeEmitter;
+use crate::runtime::terminal::registry::{open_terminal_scope, TerminalRegistry};
 use crate::runtime::types::{
-    DetectedPort, FileTreeEntry, FileTreeSnapshot, RuntimeCommand, RuntimeConnectionEvent,
-    RuntimeConnectionState, RuntimeEvent, RuntimeEventEnvelope, SessionState, SlotState,
+    DetectedPort, FileTreeEntry, FileTreeSnapshot, IpcCommand, ScopeEvent, ScopeEventEnvelope,
+    SessionState, SlotState,
 };
 use crate::surface_registry::SurfaceRegistry;
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use bytes::Bytes;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub type RuntimeIpcState = Arc<RuntimeRegistry>;
+// ---------------------------------------------------------------------------
+// State type
+// ---------------------------------------------------------------------------
 
-pub fn new_state() -> RuntimeIpcState {
-    Arc::new(RuntimeRegistry::new())
+/// Four domain registries bundled as a single Tauri-managed value.
+/// Each registry is cheaply cloneable (inner `Arc<Mutex<…>>`).
+#[derive(Clone, Default)]
+pub struct DomainRegistries {
+    pub terminal: TerminalRegistry,
+    pub file_tree: FileTreeRegistry,
+    pub scm: ScmRegistry,
+    pub editor_io: EditorIoRegistry,
+}
+
+impl DomainRegistries {
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Tauri event emission
 // ---------------------------------------------------------------------------
 
-/// Publishes runtime state changes and terminal output as typed Tauri events.
+/// Publishes domain state changes and terminal output as typed Tauri events.
 /// Output also fans out into the surface registry so native terminals receive
 /// the same bytes as renderer-side terminals.
 struct TauriEventEmitter {
     app: AppHandle,
-    runtime_id: String,
+    scope_id: String,
     surface_registry: Arc<SurfaceRegistry>,
 }
 
 impl TauriEventEmitter {
-    fn emit_event(&self, event: RuntimeEvent) {
-        let envelope = RuntimeEventEnvelope {
-            runtime_id: self.runtime_id.clone(),
+    fn emit_event(&self, event: ScopeEvent) {
+        let envelope = ScopeEventEnvelope {
+            scope_id: self.scope_id.clone(),
             event,
         };
         if let Err(err) = self.app.emit("runtime-event", envelope) {
@@ -56,55 +73,49 @@ impl TauriEventEmitter {
 }
 
 #[async_trait]
-impl RuntimeEmitter for TauriEventEmitter {
+impl ScopeEmitter for TauriEventEmitter {
     async fn session_state_changed(&self, state: SessionState) {
         tracing::debug!(
-            runtime_id = %self.runtime_id,
+            scope_id = %self.scope_id,
             session_id = %state.instance.id,
             status = ?state.instance.status,
             "session state changed"
         );
-        self.emit_event(RuntimeEvent::SessionStateChanged { session: state });
+        self.emit_event(ScopeEvent::SessionStateChanged { session: state });
     }
 
     async fn output_chunk(&self, session_id: &str, data: Bytes) {
         // Native terminal surfaces expect raw bytes — feed the registry
         // first so Ghostty doesn't fall behind the renderer event stream.
-        // If no surface is currently routed to this session the registry
-        // buffers the data internally (bounded), so this is safe to call
-        // unconditionally.
         self.surface_registry
             .feed_output(&self.app, session_id, &data);
 
-        // Renderer-side terminals (xterm.js etc.) receive the same bytes
-        // base64-encoded so the IPC layer doesn't have to reckon with
-        // ANSI escape sequences that include lone surrogates.
-        self.emit_event(RuntimeEvent::OutputChunk {
+        self.emit_event(ScopeEvent::OutputChunk {
             session_id: session_id.to_string(),
             data: BASE64_STANDARD.encode(&data),
         });
     }
 
     async fn ports_changed(&self, ports: Vec<DetectedPort>) {
-        self.emit_event(RuntimeEvent::PortsSnapshot { ports });
+        self.emit_event(ScopeEvent::PortsSnapshot { ports });
     }
 
     async fn slot_snapshot(&self, slots: Vec<SlotState>) {
-        tracing::info!(runtime_id = %self.runtime_id, count = slots.len(), "emitting slot_snapshot");
-        self.emit_event(RuntimeEvent::SlotSnapshot { slots });
+        tracing::info!(scope_id = %self.scope_id, count = slots.len(), "emitting slot_snapshot");
+        self.emit_event(ScopeEvent::SlotSnapshot { slots });
     }
 
     async fn session_snapshot(&self, sessions: Vec<SessionState>) {
-        tracing::info!(runtime_id = %self.runtime_id, count = sessions.len(), "emitting session_snapshot");
-        self.emit_event(RuntimeEvent::SessionSnapshot { sessions });
+        tracing::info!(scope_id = %self.scope_id, count = sessions.len(), "emitting session_snapshot");
+        self.emit_event(ScopeEvent::SessionSnapshot { sessions });
     }
 
     async fn file_tree_snapshot(&self, snapshot: FileTreeSnapshot) {
-        self.emit_event(RuntimeEvent::FileTreeSnapshot { snapshot });
+        self.emit_event(ScopeEvent::FileTreeSnapshot { snapshot });
     }
 
     async fn file_tree_directory_changed(&self, path: String, entries: Vec<FileTreeEntry>) {
-        self.emit_event(RuntimeEvent::FileTreeDirectoryChanged { path, entries });
+        self.emit_event(ScopeEvent::FileTreeDirectoryChanged { path, entries });
     }
 
     async fn file_tree_file_read(
@@ -113,7 +124,7 @@ impl RuntimeEmitter for TauriEventEmitter {
         relative_path: String,
         contents: Option<String>,
     ) {
-        self.emit_event(RuntimeEvent::FileTreeFileRead {
+        self.emit_event(ScopeEvent::FileTreeFileRead {
             request_id,
             relative_path,
             contents,
@@ -121,33 +132,33 @@ impl RuntimeEmitter for TauriEventEmitter {
     }
 
     async fn file_tree_file_written(&self, request_id: String, relative_path: String) {
-        self.emit_event(RuntimeEvent::FileTreeFileWritten {
+        self.emit_event(ScopeEvent::FileTreeFileWritten {
             request_id,
             relative_path,
         });
     }
 
     async fn file_tree_error(&self, request_id: Option<String>, message: String) {
-        self.emit_event(RuntimeEvent::FileTreeError {
+        self.emit_event(ScopeEvent::FileTreeError {
             request_id,
             message,
         });
     }
 
     async fn scm_snapshot(&self, snapshot: crate::runtime::types::ScmSnapshot) {
-        self.emit_event(RuntimeEvent::ScmSnapshot { snapshot });
+        self.emit_event(ScopeEvent::ScmSnapshot { snapshot });
     }
 
     async fn scm_refreshing(&self) {
-        self.emit_event(RuntimeEvent::ScmRefreshing);
+        self.emit_event(ScopeEvent::ScmRefreshing);
     }
 
     async fn scm_operation_started(&self, op_id: String) {
-        self.emit_event(RuntimeEvent::ScmOperationStarted { op_id });
+        self.emit_event(ScopeEvent::ScmOperationStarted { op_id });
     }
 
     async fn scm_error(&self, message: String) {
-        self.emit_event(RuntimeEvent::ScmError { message });
+        self.emit_event(ScopeEvent::ScmError { message });
     }
 
     async fn editor_file_read(
@@ -156,7 +167,7 @@ impl RuntimeEmitter for TauriEventEmitter {
         relative_path: String,
         contents: Option<String>,
     ) {
-        self.emit_event(RuntimeEvent::EditorFileRead {
+        self.emit_event(ScopeEvent::EditorFileRead {
             request_id,
             relative_path,
             contents,
@@ -164,18 +175,18 @@ impl RuntimeEmitter for TauriEventEmitter {
     }
 
     async fn editor_file_written(&self, request_id: String, relative_path: String) {
-        self.emit_event(RuntimeEvent::EditorFileWritten {
+        self.emit_event(ScopeEvent::EditorFileWritten {
             request_id,
             relative_path,
         });
     }
 
     async fn editor_file_changed(&self, relative_path: String) {
-        self.emit_event(RuntimeEvent::EditorFileChanged { relative_path });
+        self.emit_event(ScopeEvent::EditorFileChanged { relative_path });
     }
 
     async fn editor_error(&self, request_id: Option<String>, message: String) {
-        self.emit_event(RuntimeEvent::EditorError {
+        self.emit_event(ScopeEvent::EditorError {
             request_id,
             message,
         });
@@ -183,182 +194,87 @@ impl RuntimeEmitter for TauriEventEmitter {
 }
 
 // ---------------------------------------------------------------------------
-// Connection-state event helper
-// ---------------------------------------------------------------------------
-
-fn emit_connection_state(app: &AppHandle, runtime_id: &str, state: RuntimeConnectionState) {
-    tracing::info!(runtime_id, ?state, "emitting runtime-connection");
-    let payload = RuntimeConnectionEvent {
-        runtime_id: runtime_id.to_string(),
-        state,
-    };
-    if let Err(err) = app.emit("runtime-connection", payload) {
-        tracing::error!(runtime_id, %err, "emit runtime-connection failed");
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
 
-/// Open or hydrate the workspace runtime, then push initial snapshots so the
-/// renderer can render its slot/session list immediately. Idempotent —
-/// repeated calls return the cached runtime.
-pub fn start_workspace_runtime(
+pub async fn stop_scope(registries: &DomainRegistries, scope_id: &str) {
+    registries.terminal.close(scope_id).await;
+    registries.file_tree.remove(scope_id).await;
+    registries.scm.remove(scope_id).await;
+    registries.editor_io.remove(scope_id).await;
+}
+
+/// Parse a JSON `IpcCommand` and dispatch it to the correct domain service.
+pub async fn send_domain_command(
     app: AppHandle,
-    workspace_id: String,
-    workspace_path: String,
-    default_cwd: String,
-) {
-    spawn_start(app, workspace_id, workspace_path, default_cwd);
-}
-
-pub fn start_project_runtime(
-    app: AppHandle,
-    project_id: String,
-    git_root_path: String,
-    default_cwd: String,
-) {
-    let runtime_id = format!("project:{}", project_id);
-    spawn_start(app, runtime_id, git_root_path, default_cwd);
-}
-
-fn spawn_start(app: AppHandle, runtime_id: String, workspace_path: String, default_cwd: String) {
-    // Heavy work (DB seed, autostart) goes off the main thread.
-    tauri::async_runtime::spawn(async move {
-        let registry = app.state::<RuntimeIpcState>().inner().clone();
-        let db = app.state::<DbState>().inner().0.clone();
-        let surface_registry = app.state::<Arc<SurfaceRegistry>>().inner().clone();
-
-        let app_for_emitter = app.clone();
-        let runtime_id_for_emitter = runtime_id.clone();
-        let surface_registry_for_emitter = Arc::clone(&surface_registry);
-        let factory = || {
-            let emitter: Arc<dyn RuntimeEmitter> = Arc::new(TauriEventEmitter {
-                app: app_for_emitter,
-                runtime_id: runtime_id_for_emitter,
-                surface_registry: surface_registry_for_emitter,
-            });
-            Runtime::open(
-                Arc::clone(&db),
-                &runtime_id,
-                &workspace_path,
-                &default_cwd,
-                emitter,
-            )
-        };
-
-        let (runtime, was_new) = match registry.get_or_create(&runtime_id, factory).await {
-            Ok(rt) => rt,
-            Err(err) => {
-                eprintln!("[runtime-ipc] start_runtime({runtime_id}) failed: {err}");
-                emit_connection_state(&app, &runtime_id, RuntimeConnectionState::Error);
-                return;
-            }
-        };
-
-        emit_connection_state(&app, &runtime_id, RuntimeConnectionState::Connected);
-        tracing::info!(runtime_id, was_new, "runtime ready, emitting snapshots");
-
-        // Always re-emit the initial snapshots so a renderer reload can
-        // rehydrate from the cached runtime without re-running spawn work.
-        runtime.process_manager.emit_snapshots().await;
-
-        // Autostart only on first creation. Reopening a workspace window
-        // hits the cached runtime, whose autostart slots are already
-        // running — re-firing them would duplicate sessions.
-        if was_new {
-            runtime.process_manager.autostart_slots().await;
-            // The dormant terminal slot is seeded with autostart=false, but
-            // the frontend expects at least one running terminal session
-            // before it removes the loader. Open a session instance for
-            // every terminal_slot that has definitions but no open sessions.
-            runtime
-                .process_manager
-                .open_dormant_terminal_sessions()
-                .await;
-        }
-    });
-}
-
-pub async fn stop_runtime(state: &RuntimeIpcState, runtime_id: &str) {
-    state.close(runtime_id).await;
-}
-
-/// Parse a JSON `RuntimeCommand` and dispatch it to the named runtime's
-/// process manager. Used by `runtime_send` (renderer → backend) for everything
-/// the surface-registry / agent-CLI fast paths don't already cover.
-pub async fn send_runtime_command(
-    state: &RuntimeIpcState,
-    db: &AppDatabase,
-    runtime_id: &str,
+    registries: &DomainRegistries,
+    db: Arc<AppDatabase>,
+    scope_id: &str,
     message: &str,
 ) -> Result<(), String> {
-    let parsed: RuntimeCommand =
-        serde_json::from_str(message).map_err(|e| format!("invalid runtime command: {e}"))?;
-    let runtime = state
-        .get(runtime_id)
-        .await
-        .ok_or_else(|| format!("no runtime: {runtime_id}"))?;
-    dispatch(&runtime, db, runtime_id, parsed).await
+    let cmd: IpcCommand =
+        serde_json::from_str(message).map_err(|e| format!("invalid command: {e}"))?;
+    dispatch(app, registries, db, scope_id, cmd).await
 }
 
-/// Synchronous-style helpers used by the macOS surface registry hot path —
-/// it has the runtime_id and session_id but doesn't want to round-trip
-/// through JSON for every keystroke.
+/// Write raw bytes to a session's PTY — used by the native surface hot path.
 pub async fn write_to_session(
-    state: &RuntimeIpcState,
-    runtime_id: &str,
+    registries: &DomainRegistries,
+    scope_id: &str,
     session_id: &str,
     data: &[u8],
 ) -> Result<(), String> {
-    let runtime = state
-        .get(runtime_id)
+    let scope = registries
+        .terminal
+        .get(scope_id)
         .await
-        .ok_or_else(|| format!("no runtime: {runtime_id}"))?;
-    runtime
-        .process_manager
-        .write_to_session(session_id, data)
-        .await;
+        .ok_or_else(|| format!("no terminal scope: {scope_id}"))?;
+    scope.process_manager.write_to_session(session_id, data).await;
     Ok(())
 }
 
 pub async fn resize_session(
-    state: &RuntimeIpcState,
-    runtime_id: &str,
+    registries: &DomainRegistries,
+    scope_id: &str,
     session_id: &str,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let runtime = state
-        .get(runtime_id)
+    let scope = registries
+        .terminal
+        .get(scope_id)
         .await
-        .ok_or_else(|| format!("no runtime: {runtime_id}"))?;
-    runtime
+        .ok_or_else(|| format!("no terminal scope: {scope_id}"))?;
+    scope
         .process_manager
         .resize_session(session_id, cols, rows)
         .await;
     Ok(())
 }
 
-/// Translate one parsed `RuntimeCommand` into the corresponding
-/// `ProcessManager` call.
+// ---------------------------------------------------------------------------
+// Command dispatch
+// ---------------------------------------------------------------------------
+
 async fn dispatch(
-    runtime: &Runtime,
-    db: &AppDatabase,
-    runtime_id: &str,
-    message: RuntimeCommand,
+    app: AppHandle,
+    registries: &DomainRegistries,
+    db: Arc<AppDatabase>,
+    scope_id: &str,
+    cmd: IpcCommand,
 ) -> Result<(), String> {
-    let pm = &runtime.process_manager;
-    match message {
-        RuntimeCommand::CreateSlot { slot } => {
-            db.create_slot_definition(runtime_id, &slot)?;
-            pm.register_slot(slot).await;
-            pm.emit_snapshots().await;
+    match cmd {
+        // ---- Terminal --------------------------------------------------
+        IpcCommand::CreateSlot { slot } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            db.create_slot_definition(scope_id, &slot)?;
+            scope.process_manager.register_slot(slot).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::UpdateSlot { slot } => {
+        IpcCommand::UpdateSlot { slot } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
             db.update_slot_definition(
-                runtime_id,
+                scope_id,
                 &slot.id,
                 SlotDefinitionPatch {
                     kind: slot.kind,
@@ -370,32 +286,39 @@ async fn dispatch(
                     sort_order: slot.sort_order,
                 },
             )?;
-            pm.update_slot_definition(crate::runtime::process_manager::SlotDefinitionMutation {
-                id: slot.id,
-                kind: slot.kind,
-                name: slot.name,
-                autostart: slot.autostart,
-                presentation_mode: slot.presentation_mode,
-                primary_session_def_id: slot.primary_session_def_id,
-                persisted: slot.persisted,
-                sort_order: slot.sort_order,
-            })
-            .await;
-            pm.emit_snapshots().await;
+            scope
+                .process_manager
+                .update_slot_definition(
+                    crate::runtime::terminal::process_manager::SlotDefinitionMutation {
+                        id: slot.id,
+                        kind: slot.kind,
+                        name: slot.name,
+                        autostart: slot.autostart,
+                        presentation_mode: slot.presentation_mode,
+                        primary_session_def_id: slot.primary_session_def_id,
+                        persisted: slot.persisted,
+                        sort_order: slot.sort_order,
+                    },
+                )
+                .await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::RemoveSlot { slot_id } => {
-            pm.remove_slot(&slot_id).await;
-            db.remove_slot_definition(runtime_id, &slot_id)?;
-            pm.emit_snapshots().await;
+        IpcCommand::RemoveSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.remove_slot(&slot_id).await;
+            db.remove_slot_definition(scope_id, &slot_id)?;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::CreateSessionDef { session } => {
-            db.create_session_definition(runtime_id, &session)?;
-            pm.register_session_definition(session).await;
-            pm.emit_snapshots().await;
+        IpcCommand::CreateSessionDef { session } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            db.create_session_definition(scope_id, &session)?;
+            scope.process_manager.register_session_definition(session).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::UpdateSessionDef { session } => {
+        IpcCommand::UpdateSessionDef { session } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
             db.update_session_definition(
-                runtime_id,
+                scope_id,
                 &session.id,
                 SessionDefinitionPatch {
                     slot_id: session.slot_id.clone(),
@@ -410,252 +333,415 @@ async fn dispatch(
                     resume_supported: session.resume_supported,
                 },
             )?;
-            pm.update_session_definition(
-                crate::runtime::process_manager::SessionDefinitionMutation {
-                    id: session.id,
-                    slot_id: session.slot_id,
-                    kind: session.kind,
-                    name: session.name,
-                    command: session.command,
-                    cwd: session.cwd,
-                    port: session.port,
-                    env_overrides: session.env_overrides,
-                    restart_policy: session.restart_policy,
-                    pause_supported: session.pause_supported,
-                    resume_supported: session.resume_supported,
-                },
-            )
-            .await;
-            pm.emit_snapshots().await;
+            scope
+                .process_manager
+                .update_session_definition(
+                    crate::runtime::terminal::process_manager::SessionDefinitionMutation {
+                        id: session.id,
+                        slot_id: session.slot_id,
+                        kind: session.kind,
+                        name: session.name,
+                        command: session.command,
+                        cwd: session.cwd,
+                        port: session.port,
+                        env_overrides: session.env_overrides,
+                        restart_policy: session.restart_policy,
+                        pause_supported: session.pause_supported,
+                        resume_supported: session.resume_supported,
+                    },
+                )
+                .await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::RemoveSessionDef { session_def_id } => {
-            pm.remove_session_definition(&session_def_id).await;
-            db.remove_session_definition(runtime_id, &session_def_id)?;
-            pm.emit_snapshots().await;
+        IpcCommand::RemoveSessionDef { session_def_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope
+                .process_manager
+                .remove_session_definition(&session_def_id)
+                .await;
+            db.remove_session_definition(scope_id, &session_def_id)?;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::StartSlot { slot_id } => {
-            pm.start_slot(&slot_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::StartSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.start_slot(&slot_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::StopSlot { slot_id } => {
-            pm.stop_slot(&slot_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::StopSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.stop_slot(&slot_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::RestartSlot { slot_id } => {
-            pm.restart_slot(&slot_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::RestartSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.restart_slot(&slot_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::PauseSlot { slot_id } => {
-            pm.pause_slot(&slot_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::PauseSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.pause_slot(&slot_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::ResumeSlot { slot_id } => {
-            pm.resume_slot(&slot_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::ResumeSlot { slot_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.resume_slot(&slot_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::StartSession { session_id } => {
-            pm.start_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::StartSession { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.start_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::StopSession { session_id } => {
-            pm.stop_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::StopSession { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.stop_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::RestartSession { session_id } => {
-            pm.restart_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::RestartSession { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.restart_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::PauseSession { session_id } => {
-            pm.pause_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::PauseSession { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.pause_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::ResumeSession { session_id } => {
-            pm.resume_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::ResumeSession { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.resume_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::OpenSessionInstance { session_def_id } => {
-            pm.open_session_instance(&session_def_id).await?;
-            pm.emit_snapshots().await;
+        IpcCommand::OpenSessionInstance { session_def_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope
+                .process_manager
+                .open_session_instance(&session_def_id)
+                .await?;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::CloseSessionInstance { session_id } => {
-            pm.close_session(&session_id).await;
-            pm.emit_snapshots().await;
+        IpcCommand::CloseSessionInstance { session_id } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.close_session(&session_id).await;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::Input { session_id, data } => {
+        IpcCommand::Input { session_id, data } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
             let bytes = BASE64_STANDARD
                 .decode(data.as_bytes())
                 .map_err(|e| format!("invalid input payload: {e}"))?;
-            pm.write_to_session(&session_id, &bytes).await;
+            scope
+                .process_manager
+                .write_to_session(&session_id, &bytes)
+                .await;
         }
-        RuntimeCommand::Resize {
+        IpcCommand::Resize {
             session_id,
             cols,
             rows,
         } => {
-            pm.resize_session(&session_id, cols, rows).await;
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope
+                .process_manager
+                .resize_session(&session_id, cols, rows)
+                .await;
         }
-        RuntimeCommand::RequestSnapshot => {
-            // Re-emit current snapshots through the runtime's own emitter
-            // so the renderer can rehydrate after a reload.
-            pm.emit_snapshots().await;
+        IpcCommand::RequestSnapshot => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.emit_snapshots().await;
         }
-        RuntimeCommand::AgentCliSignal { signal } => {
-            pm.record_agent_cli_signal(&signal).await;
+        IpcCommand::AgentCliSignal { signal } => {
+            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
+            scope.process_manager.record_agent_cli_signal(&signal).await;
         }
 
         // ---- File tree -------------------------------------------------
-        RuntimeCommand::FileTreeSubscribe { expanded_paths } => {
-            runtime.file_tree.subscribe(expanded_paths).await;
+        IpcCommand::FileTreeSubscribe { expanded_paths } => {
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.subscribe(expanded_paths).await;
         }
-        RuntimeCommand::FileTreeSetExpandedPaths { paths } => {
-            runtime.file_tree.set_expanded_paths(paths).await;
+        IpcCommand::FileTreeSetExpandedPaths { paths } => {
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.set_expanded_paths(paths).await;
         }
-        RuntimeCommand::FileTreeRefresh { path } => {
-            runtime.file_tree.refresh(path).await;
+        IpcCommand::FileTreeRefresh { path } => {
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.refresh(path).await;
         }
-        RuntimeCommand::FileTreeCreateFile {
+        IpcCommand::FileTreeCreateFile {
             parent_relative_path,
             name,
             contents,
         } => {
-            runtime
-                .file_tree
-                .create_file(parent_relative_path, name, contents)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.create_file(parent_relative_path, name, contents).await;
         }
-        RuntimeCommand::FileTreeCreateDirectory { relative_path } => {
-            runtime.file_tree.create_directory(relative_path).await;
+        IpcCommand::FileTreeCreateDirectory { relative_path } => {
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.create_directory(relative_path).await;
         }
-        RuntimeCommand::FileTreeRename {
+        IpcCommand::FileTreeRename {
             source_relative_path,
             new_name,
         } => {
-            runtime
-                .file_tree
-                .rename(source_relative_path, new_name)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.rename(source_relative_path, new_name).await;
         }
-        RuntimeCommand::FileTreeDelete { relative_path } => {
-            runtime.file_tree.delete(relative_path).await;
+        IpcCommand::FileTreeDelete { relative_path } => {
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.delete(relative_path).await;
         }
-        RuntimeCommand::FileTreeMove {
+        IpcCommand::FileTreeMove {
             source_relative_path,
             dest_relative_path,
         } => {
-            runtime
-                .file_tree
-                .move_entry(source_relative_path, dest_relative_path)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.move_entry(source_relative_path, dest_relative_path).await;
         }
-        RuntimeCommand::FileTreeCopy {
+        IpcCommand::FileTreeCopy {
             source_relative_path,
             dest_relative_path,
         } => {
-            runtime
-                .file_tree
-                .copy_entry(source_relative_path, dest_relative_path)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.copy_entry(source_relative_path, dest_relative_path).await;
         }
-        RuntimeCommand::FileTreeImport {
+        IpcCommand::FileTreeImport {
             dest_relative_path,
             source_absolute_paths,
         } => {
-            runtime
-                .file_tree
-                .import_external(dest_relative_path, source_absolute_paths)
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.import_external(dest_relative_path, source_absolute_paths)
                 .await;
         }
-        RuntimeCommand::FileTreeReadTextFile {
+        IpcCommand::FileTreeReadTextFile {
             request_id,
             relative_path,
         } => {
-            runtime
-                .file_tree
-                .read_text_file(request_id, relative_path)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.read_text_file(request_id, relative_path).await;
         }
-        RuntimeCommand::FileTreeWriteTextFile {
+        IpcCommand::FileTreeWriteTextFile {
             request_id,
             relative_path,
             contents,
         } => {
-            runtime
-                .file_tree
-                .write_text_file(request_id, relative_path, contents)
-                .await;
+            let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
+            ft.write_text_file(request_id, relative_path, contents).await;
         }
 
-        // ---- SCM -----------------------------------------------------------
-        RuntimeCommand::ScmSubscribe { target_branch } => {
-            runtime.scm.subscribe(target_branch).await;
+        // ---- SCM -------------------------------------------------------
+        IpcCommand::ScmSubscribe { target_branch } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.subscribe(target_branch).await;
         }
-        RuntimeCommand::ScmRefresh => {
-            runtime.scm.refresh().await;
+        IpcCommand::ScmRefresh => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.refresh().await;
         }
-        RuntimeCommand::ScmStage { paths } => {
-            runtime.scm.stage(paths).await;
+        IpcCommand::ScmStage { paths } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.stage(paths).await;
         }
-        RuntimeCommand::ScmStageAll => {
-            runtime.scm.stage_all().await;
+        IpcCommand::ScmStageAll => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.stage_all().await;
         }
-        RuntimeCommand::ScmUnstage { paths } => {
-            runtime.scm.unstage(paths).await;
+        IpcCommand::ScmUnstage { paths } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.unstage(paths).await;
         }
-        RuntimeCommand::ScmUnstageAll => {
-            runtime.scm.unstage_all().await;
+        IpcCommand::ScmUnstageAll => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.unstage_all().await;
         }
-        RuntimeCommand::ScmDiscardTracked { paths } => {
-            runtime.scm.discard_tracked(paths).await;
+        IpcCommand::ScmDiscardTracked { paths } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.discard_tracked(paths).await;
         }
-        RuntimeCommand::ScmDiscardUntracked { paths } => {
-            runtime.scm.discard_untracked(paths).await;
+        IpcCommand::ScmDiscardUntracked { paths } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.discard_untracked(paths).await;
         }
-        RuntimeCommand::ScmCommit { message, push } => {
-            runtime.scm.commit(message, push).await;
+        IpcCommand::ScmCommit { message, push } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.commit(message, push).await;
         }
-        RuntimeCommand::ScmPush => {
-            runtime.scm.push().await;
+        IpcCommand::ScmPush => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.push().await;
         }
-        RuntimeCommand::ScmFetch => {
-            runtime.scm.fetch().await;
+        IpcCommand::ScmFetch => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.fetch().await;
         }
-        RuntimeCommand::ScmPull => {
-            runtime.scm.pull().await;
+        IpcCommand::ScmPull => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.pull().await;
         }
-        RuntimeCommand::ScmSetTargetBranch { branch } => {
-            runtime.scm.set_target_branch(branch).await;
+        IpcCommand::ScmSetTargetBranch { branch } => {
+            let scm = ensure_scm(registries, &db, &app, scope_id).await?;
+            scm.set_target_branch(branch).await;
         }
 
-        // ---- Editor IO -----------------------------------------------------
-        RuntimeCommand::EditorReadTextFile {
+        // ---- Editor IO -------------------------------------------------
+        IpcCommand::EditorReadTextFile {
             request_id,
             relative_path,
         } => {
-            runtime
-                .editor_io
-                .read_text_file(request_id, relative_path)
-                .await;
+            let eio = ensure_editor_io(registries, &db, &app, scope_id).await?;
+            eio.read_text_file(request_id, relative_path).await;
         }
-        RuntimeCommand::EditorWriteTextFile {
+        IpcCommand::EditorWriteTextFile {
             request_id,
             relative_path,
             contents,
         } => {
-            runtime
-                .editor_io
-                .write_text_file(request_id, relative_path, contents)
-                .await;
+            let eio = ensure_editor_io(registries, &db, &app, scope_id).await?;
+            eio.write_text_file(request_id, relative_path, contents).await;
         }
     }
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Domain lookup helpers
+// ---------------------------------------------------------------------------
+
+struct ScopeContext {
+    root: String,
+    default_cwd: String,
+}
+
+fn resolve_scope_context(db: &AppDatabase, scope_id: &str) -> Result<ScopeContext, String> {
+    if let Some(project_id) = scope_id.strip_prefix("project:") {
+        let project = db
+            .load_projects()
+            .into_iter()
+            .find(|p| p.id == project_id)
+            .ok_or_else(|| format!("project not found for terminal scope: {project_id}"))?;
+        return Ok(ScopeContext {
+            root: project.git_root_path.clone(),
+            default_cwd: project.git_root_path,
+        });
+    }
+
+    let workspace = db
+        .load_workspaces(None)
+        .into_iter()
+        .find(|w| w.id == scope_id)
+        .ok_or_else(|| format!("workspace not found for scope: {scope_id}"))?;
+    let default_cwd = match workspace.workspace_context_subpath.as_deref() {
+        Some(subpath) if !subpath.is_empty() => PathBuf::from(&workspace.worktree_path)
+            .join(subpath)
+            .to_string_lossy()
+            .into_owned(),
+        _ => workspace.worktree_path.clone(),
+    };
+
+    Ok(ScopeContext {
+        root: workspace.worktree_path,
+        default_cwd,
+    })
+}
+
+fn make_emitter(app: &AppHandle, scope_id: &str) -> Arc<dyn ScopeEmitter> {
+    let surface_registry = app.state::<Arc<SurfaceRegistry>>().inner().clone();
+    Arc::new(TauriEventEmitter {
+        app: app.clone(),
+        scope_id: scope_id.to_string(),
+        surface_registry,
+    })
+}
+
+async fn ensure_terminal(
+    registries: &DomainRegistries,
+    db: &Arc<AppDatabase>,
+    app: &AppHandle,
+    scope_id: &str,
+) -> Result<crate::runtime::terminal::registry::TerminalScope, String> {
+    let context = resolve_scope_context(db.as_ref(), scope_id)?;
+    let emitter = make_emitter(app, scope_id);
+    let (scope, was_new) = registries
+        .terminal
+        .get_or_create(scope_id, || {
+            open_terminal_scope(
+                Arc::clone(db),
+                scope_id,
+                &context.default_cwd,
+                Arc::clone(&emitter),
+            )
+        })
+        .await
+        .map_err(|err| format!("open terminal scope failed for {scope_id}: {err}"))?;
+
+    scope.process_manager.emit_snapshots().await;
+    if was_new {
+        scope.process_manager.autostart_slots().await;
+        scope.process_manager.open_dormant_terminal_sessions().await;
+    }
+    Ok(scope)
+}
+
+async fn ensure_file_tree(
+    registries: &DomainRegistries,
+    db: &Arc<AppDatabase>,
+    app: &AppHandle,
+    scope_id: &str,
+) -> Result<crate::runtime::file_tree::service::FileTreeService, String> {
+    let context = resolve_scope_context(db.as_ref(), scope_id)?;
+    let emitter = make_emitter(app, scope_id);
+    let (service, _) = registries
+        .file_tree
+        .get_or_create(scope_id, || open_file_tree(scope_id, &context.root, emitter))
+        .await
+        .map_err(|err| format!("open file tree scope failed for {scope_id}: {err}"))?;
+    Ok(service)
+}
+
+async fn ensure_scm(
+    registries: &DomainRegistries,
+    db: &Arc<AppDatabase>,
+    app: &AppHandle,
+    scope_id: &str,
+) -> Result<crate::runtime::scm::service::ScmService, String> {
+    let context = resolve_scope_context(db.as_ref(), scope_id)?;
+    let emitter = make_emitter(app, scope_id);
+    let (service, _) = registries
+        .scm
+        .get_or_create(scope_id, || {
+            open_scm(Arc::clone(db), scope_id, &context.root, emitter)
+        })
+        .await;
+    Ok(service)
+}
+
+async fn ensure_editor_io(
+    registries: &DomainRegistries,
+    db: &Arc<AppDatabase>,
+    app: &AppHandle,
+    scope_id: &str,
+) -> Result<crate::runtime::editor_io::service::EditorIoService, String> {
+    let context = resolve_scope_context(db.as_ref(), scope_id)?;
+    let emitter = make_emitter(app, scope_id);
+    let (service, _) = registries
+        .editor_io
+        .get_or_create(scope_id, || open_editor_io(scope_id, &context.root, emitter))
+        .await
+        .map_err(|err| format!("open editor IO scope failed for {scope_id}: {err}"))?;
+    Ok(service)
+}
+
+// ---------------------------------------------------------------------------
+// Tauri command
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
-pub async fn runtime_send(
-    state: tauri::State<'_, RuntimeIpcState>,
+pub async fn scope_send(
+    app: AppHandle,
+    state: tauri::State<'_, DomainRegistries>,
     db: tauri::State<'_, DbState>,
     runtime_id: String,
     message: String,
 ) -> Result<(), String> {
-    send_runtime_command(state.inner(), db.0.as_ref(), &runtime_id, &message).await
+    send_domain_command(app, state.inner(), db.0.clone(), &runtime_id, &message).await
 }

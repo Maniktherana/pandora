@@ -1,7 +1,7 @@
 //! Session lifecycle, restart policy, pause/resume, output coalescing.
 //!
 //! One in-process `Pty` per session, one tokio task per session owning its
-//! output stream and feeding it through the configured `RuntimeEmitter`.
+//! output stream and feeding it through the configured `ScopeEmitter`.
 //!
 //! State model
 //! -----------
@@ -43,7 +43,7 @@ use crate::models::{RestartPolicy, SessionDefinition, SlotDefinition};
 
 use super::port_manager::PortManager;
 use super::pty::{Pty, PtySpawnSpec};
-use super::types::{
+use crate::runtime::types::{
     aggregate_slot_status, capabilities_for, ActionCapabilities, AgentCliSignal, AgentPhase,
     DetectedPort, FileTreeEntry, FileTreeSnapshot, SessionInstance, SessionState, SessionStatus,
     SlotState,
@@ -71,7 +71,7 @@ const DEFAULT_ROWS: u16 = 40;
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-pub trait RuntimeEmitter: Send + Sync {
+pub trait ScopeEmitter: Send + Sync {
     async fn session_state_changed(&self, state: SessionState);
     async fn output_chunk(&self, session_id: &str, data: Bytes);
     async fn ports_changed(&self, ports: Vec<DetectedPort>);
@@ -93,7 +93,7 @@ pub trait RuntimeEmitter: Send + Sync {
     async fn file_tree_error(&self, _request_id: Option<String>, _message: String) {}
 
     // ---- SCM ----------------------------------------------------------------
-    async fn scm_snapshot(&self, _snapshot: super::types::ScmSnapshot) {}
+    async fn scm_snapshot(&self, _snapshot: crate::runtime::types::ScmSnapshot) {}
     async fn scm_refreshing(&self) {}
     async fn scm_operation_started(&self, _op_id: String) {}
     async fn scm_error(&self, _message: String) {}
@@ -171,7 +171,7 @@ impl ManagedSession {
 #[derive(Clone)]
 pub struct ProcessManager {
     inner: Arc<Mutex<Inner>>,
-    emitter: Arc<dyn RuntimeEmitter>,
+    emitter: Arc<dyn ScopeEmitter>,
     port_manager: PortManager,
     /// `_port_join` keeps the PortManager scan loop alive for the lifetime
     /// of the ProcessManager. Dropped with us.
@@ -195,14 +195,14 @@ impl ProcessManager {
     pub fn new(
         slot_definitions: Vec<SlotDefinition>,
         session_definitions: Vec<SessionDefinition>,
-        emitter: Arc<dyn RuntimeEmitter>,
+        emitter: Arc<dyn ScopeEmitter>,
         default_cwd: String,
         runtime_id: String,
     ) -> Self {
         let (port_manager, mut ports_rx, port_join) = PortManager::spawn();
         let emit_for_ports = Arc::clone(&emitter);
         // Bridge port-change events into the emitter without coupling
-        // PortManager directly to RuntimeEmitter (it's reusable from anything
+        // PortManager directly to ScopeEmitter (it's reusable from anything
         // that wants per-session listening-port awareness).
         tokio::spawn(async move {
             while let Some(ports) = ports_rx.recv().await {
@@ -967,7 +967,7 @@ impl ProcessManager {
     /// `session_state_changed` only on transitions, so the steady-state cost
     /// is one lock + N `process_group_leader` calls per second (N = open
     /// sessions) regardless of how many sessions exist.
-    fn start_fg_poll(inner: Arc<Mutex<Inner>>, emitter: Arc<dyn RuntimeEmitter>) -> JoinHandle<()> {
+    fn start_fg_poll(inner: Arc<Mutex<Inner>>, emitter: Arc<dyn ScopeEmitter>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut last_names: HashMap<String, Option<String>> = HashMap::new();
             let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -1387,7 +1387,7 @@ mod tests {
     struct TestEmitter(Arc<StdMutex<CapturedEvent>>);
 
     #[async_trait::async_trait]
-    impl RuntimeEmitter for TestEmitter {
+    impl ScopeEmitter for TestEmitter {
         async fn session_state_changed(&self, state: SessionState) {
             self.0.lock().unwrap().states.push(state);
         }
@@ -1436,7 +1436,7 @@ mod tests {
         defs: Vec<SessionDefinition>,
     ) -> (ProcessManager, TestEmitter) {
         let emitter = TestEmitter::default();
-        let arc: Arc<dyn RuntimeEmitter> = Arc::new(emitter.clone());
+        let arc: Arc<dyn ScopeEmitter> = Arc::new(emitter.clone());
         let pm = ProcessManager::new(
             slots,
             defs,
@@ -1569,7 +1569,7 @@ mod tests {
         let (pm, _emitter) = make_pm(slots, defs);
         let signal = AgentCliSignal {
             slot_id: "slot-1".to_string(),
-            source: super::super::types::AgentVendor::ClaudeCode,
+            source: crate::runtime::types::AgentVendor::ClaudeCode,
             payload_base64: None,
         };
         // No open sessions yet.
