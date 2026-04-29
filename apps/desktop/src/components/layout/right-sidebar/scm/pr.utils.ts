@@ -1,32 +1,45 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PrContext, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { PrContext, LayoutNode, TerminalPanelState } from "@/lib/shared/types";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
 import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import type { AgentTerminalTarget } from "./pr.types";
+import type { TerminalScopeState } from "@/services/terminal/terminal-scope-store";
+import type { WorkspaceLayoutState } from "@/services/workspace/layout-store";
 
 const AGENT_LABEL_PATTERN =
   /\b(?:claude(?:[- ]code)?|codex|opencode|pi[- ]agent|gemini(?:[- ]cli)?|cursor[- ]agent|(?:github[- ])?copilot|ampcode|amp[- ]code)\b/i;
 
+export type ScopeTerminalInfo = {
+  scopeId: string;
+  scope: TerminalScopeState | null;
+  layout: Pick<WorkspaceLayoutState, "root" | "focusedPaneID"> | null;
+};
+
 /**
- * Find a running coding agent terminal in the workspace or project runtime.
+ * Find a running coding agent terminal in the workspace or project scope.
  * Checks focused pane first, then all panes, then the bottom terminal panel.
  */
 export function findAgentTerminal(
-  workspaceRuntime: WorkspaceRuntimeState | null,
-  projectRuntime: WorkspaceRuntimeState | null,
+  workspace: ScopeTerminalInfo | null,
+  project: ScopeTerminalInfo | null,
 ): AgentTerminalTarget | null {
-  for (const runtime of [workspaceRuntime, projectRuntime]) {
-    if (!runtime) continue;
-
-    const result = findAgentInRuntime(runtime);
+  for (const info of [workspace, project]) {
+    if (!info?.scope) continue;
+    const result = findAgentInScope(info.scopeId, info.scope, info.layout);
     if (result) return result;
   }
   return null;
 }
 
-function findAgentInRuntime(runtime: WorkspaceRuntimeState): AgentTerminalTarget | null {
-  const { slots, terminalDisplayBySlotId, sessions, root, focusedPaneID } = runtime;
+function findAgentInScope(
+  scopeId: string,
+  scope: TerminalScopeState,
+  layout: Pick<WorkspaceLayoutState, "root" | "focusedPaneID"> | null,
+): AgentTerminalTarget | null {
+  const { slots, terminalDisplayBySlotId, sessions } = scope;
+  const root: LayoutNode | null = layout?.root ?? null;
+  const focusedPaneID: string | null = layout?.focusedPaneID ?? null;
 
   const trySlotId = (slotId: string): AgentTerminalTarget | null => {
     const slot = slots.find((item) => item.id === slotId);
@@ -37,7 +50,7 @@ function findAgentInRuntime(runtime: WorkspaceRuntimeState): AgentTerminalTarget
     return {
       slotId,
       sessionId: session.id,
-      runtimeId: runtime.workspaceId,
+      scopeId: scopeId,
     };
   };
 
@@ -66,8 +79,9 @@ function findAgentInRuntime(runtime: WorkspaceRuntimeState): AgentTerminalTarget
   }
 
   // 3. Check terminal panel groups
-  if (runtime.terminalPanel) {
-    for (const group of runtime.terminalPanel.groups) {
+  const terminalPanel: TerminalPanelState | null = scope.terminalPanel;
+  if (terminalPanel) {
+    for (const group of terminalPanel.groups) {
       for (const slotId of group.children) {
         const result = trySlotId(slotId);
         if (result) return result;

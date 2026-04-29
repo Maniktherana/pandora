@@ -1,11 +1,11 @@
 import { useEditorStore } from "./editor-store";
 import { pendingEditorReads, pendingEditorWrites } from "./editor-request-registry";
-import type { RuntimeQueueEvent } from "@/services/runtime/runtime-event-queue";
+import type { IpcQueueEvent } from "@/services/ipc/ipc-event-queue";
 
 export function isEditorEvent(
-  event: RuntimeQueueEvent,
+  event: IpcQueueEvent,
 ): event is Extract<
-  RuntimeQueueEvent,
+  IpcQueueEvent,
   {
     type:
       | "editor_file_read"
@@ -22,7 +22,7 @@ export function isEditorEvent(
   );
 }
 
-export function applyEditorRuntimeEvent(event: RuntimeQueueEvent): void {
+export function applyEditorRuntimeEvent(event: IpcQueueEvent): void {
   switch (event.type) {
     case "editor_file_read": {
       const resolver = pendingEditorReads.get(event.requestID);
@@ -43,7 +43,7 @@ export function applyEditorRuntimeEvent(event: RuntimeQueueEvent): void {
     case "editor_file_changed":
       useEditorStore
         .getState()
-        .markDiskModified(event.runtimeId, event.relative_path);
+        .markDiskModified(event.scopeId, event.relative_path);
       break;
     case "editor_error":
       if (event.requestID) {

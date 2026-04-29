@@ -5,11 +5,14 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { cn, getParentRelPath, joinAbsolutePath, joinRel } from "@/lib/shared/utils";
-import { scmToneTextClass } from "@/services/scm/scm-utils";
+import { gitToneTextClass } from "@/services/git/git-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import DotGridLoader from "@/components/dot-grid-loader";
 import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
+import type { FileTreeEntry } from "@/lib/shared/types";
 import { FileTreeRow } from "./file-tree-row";
+
+// Stable module-level empty fallback for the directory entries selector.
+const EMPTY_DIRECTORY_ENTRIES: FileTreeEntry[] = [];
 import {
   DIRECTORY_STICKY_ROW_OFFSET_PX,
   DIRECTORY_STICKY_Z_INDEX_BASE,
@@ -20,12 +23,12 @@ import {
   type FileTreeRowHandle,
   type PendingCreateState,
   type PendingRenameState,
-  type ScmDecorationResolver,
+  type GitDecorationResolver,
 } from "./files.types";
 import { TreeCreateInput } from "./tree-create-input";
 import { TreeRenameInput } from "./tree-rename-input";
 
-function scmExpandedToneTextClass(
+function gitExpandedToneTextClass(
   tone: "added" | "modified" | "deleted" | "renamed" | "conflict" | "ignored" | null,
   dimmed = false,
 ): string {
@@ -54,7 +57,7 @@ type DirectoryNodeProps = {
   name: string;
   depth: number;
   isIgnored?: boolean | undefined;
-  resolveDecoration: ScmDecorationResolver;
+  resolveDecoration: GitDecorationResolver;
   isExpanded: boolean;
   isPathExpanded: (relPath: string) => boolean;
   setPathExpanded: (relPath: string, expanded: boolean) => void;
@@ -118,11 +121,12 @@ export const DirectoryNode = React.memo(function DirectoryNode({
   );
   const collapsibleOpen = open || keepPanelOpenForRename;
 
-  // Read children from the file tree store. Data arrives via runtime events after expansion.
+  // Read children from the file tree store. After boot the full tree is present,
+  // so missing directories are treated as empty — no loader, no fetch.
   const children = useFileTreeStore(
-    (s) => s.byRuntimeId[workspaceId]?.directories[relPath] ?? null,
+    (s) => s.byScopeId[workspaceId]?.directories[relPath] ?? EMPTY_DIRECTORY_ENTRIES,
   );
-  const loadError = useFileTreeStore((s) => s.byRuntimeId[workspaceId]?.lastError ?? null);
+  const loadError = useFileTreeStore((s) => s.byScopeId[workspaceId]?.lastError ?? null);
 
   useEffect(() => {
     if (!collapsibleOpen) {
@@ -177,8 +181,8 @@ export const DirectoryNode = React.memo(function DirectoryNode({
                 "hover:bg-[var(--theme-panel-hover)] dark:hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)] aria-expanded:hover:bg-[var(--theme-panel-hover)] dark:aria-expanded:hover:bg-[var(--theme-panel-hover)]":
                   !isStickyActive,
               },
-              scmToneTextClass(decoration.tone, decoration.dimmed),
-              scmExpandedToneTextClass(decoration.tone, decoration.dimmed),
+              gitToneTextClass(decoration.tone, decoration.dimmed),
+              gitExpandedToneTextClass(decoration.tone, decoration.dimmed),
               decoration.dimmed && "opacity-55",
               isTargetedDirectory && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
             )}
@@ -262,23 +266,7 @@ export const DirectoryNode = React.memo(function DirectoryNode({
               {loadError}
             </div>
           )}
-          {collapsibleOpen && children === null && !loadError && (
-            <div
-              className="flex items-center justify-center py-3"
-              style={{
-                paddingLeft:
-                  TREE_ROW_PADDING_LEFT_PX + TREE_ROW_INDENT_PX + depth * TREE_ROW_INDENT_PX,
-              }}
-            >
-              <DotGridLoader
-                variant="default"
-                gridSize={3}
-                sizeClassName="h-5 w-5"
-                className="opacity-80"
-              />
-            </div>
-          )}
-          {children?.map((entry) =>
+          {children.map((entry) =>
             (() => {
               const childRelPath = joinRel(relPath, entry.name);
               if (pendingRename?.relPath === childRelPath) {

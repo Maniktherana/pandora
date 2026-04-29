@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
+import { useSelectedProject, useSelectedWorkspace, useSelectedWorkspaceId } from "@/hooks/use-navigation";
 import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
@@ -9,8 +9,7 @@ import { PortsTabContent } from "./ports/ports-tab-content";
 import { ScriptTabContent } from "./scripts/script-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
-import DotGridLoader from "@/components/dot-grid-loader";
-import { useRuntimeStore } from "@/services/runtime/runtime-store";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 
 type BottomPanelProps = {
   onCollapse: () => void;
@@ -19,21 +18,21 @@ type BottomPanelProps = {
 
 export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: BottomPanelProps) {
   const [tab, setTab] = useState<BottomTab>("terminal");
-  const project = useDesktopView((view) => view.selectedProject);
-  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const workspaceRuntime = useRuntimeState(selectedWorkspaceID ?? "");
+  const project = useSelectedProject();
+  const selectedWs = useSelectedWorkspace();
+  const selectedWorkspaceID = useSelectedWorkspaceId();
   const projectKey = project ? projectRuntimeKey(project.id) : "";
-  const projectRuntime = useRuntimeState(projectKey);
   const projectTerminalCommands = useProjectTerminalActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
-  const hasTerminalGroups = (projectRuntime?.terminalPanel?.groups.length ?? 0) > 0;
-  const activePortCount = useRuntimeStore((s) => {
+
+  const hasTerminalGroups = useTerminalScopeStore(
+    (s) => (s.byScopeId[projectKey]?.terminalPanel?.groups.length ?? 0) > 0,
+  );
+  const activePortCount = useTerminalScopeStore((s) => {
     const seen = new Set<number>();
-    for (const runtime of Object.values(s.runtimeState)) {
-      if (!runtime.detectedPorts?.length) continue;
-      for (const p of runtime.detectedPorts) seen.add(p.port);
+    for (const scope of Object.values(s.byScopeId)) {
+      for (const p of scope.detectedPorts) seen.add(p.port);
     }
     return seen.size;
   });
@@ -44,27 +43,14 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
   }, [projectKey, projectTerminalCommands]);
 
   const splitActiveGroup = useCallback(() => {
-    const activeGroup =
-      projectRuntime?.terminalPanel?.groups[projectRuntime.terminalPanel.activeGroupIndex] ?? null;
+    const panel = useTerminalScopeStore.getState().byScopeId[projectKey]?.terminalPanel;
+    const activeGroup = panel?.groups[panel.activeGroupIndex] ?? null;
     if (!projectKey || !activeGroup) return;
     projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id);
-  }, [projectKey, projectRuntime?.terminalPanel, projectTerminalCommands]);
+  }, [projectKey, projectTerminalCommands]);
 
   if (!project || selectedWs?.status !== "ready") {
     return <div className="h-full min-h-[120px] bg-[var(--theme-bg)]" />;
-  }
-
-  if (!projectRuntime) {
-    return (
-      <div className="flex h-full min-h-[120px] items-center justify-center bg-[var(--theme-bg)] text-[var(--theme-text-muted)]">
-        <DotGridLoader
-          variant="default"
-          gridSize={5}
-          sizeClassName="h-8 w-8"
-          className="opacity-90"
-        />
-      </div>
-    );
   }
 
   const handleTabChange = (next: BottomTab) => {
@@ -87,7 +73,7 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
         }
       }}
       onPointerDownCapture={() => {
-        workspaceCommands.setLayoutTargetRuntimeId(projectKey);
+        workspaceCommands.setLayoutTargetScopeId(projectKey);
       }}
     >
       <BottomPanelHeader
@@ -114,7 +100,7 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
         />
       </TabsContent>
       <TabsContent value="terminal" className="min-h-0 flex-1 overflow-hidden m-0">
-        <ProjectTerminalView workspaceId={projectKey} runtime={projectRuntime} />
+        <ProjectTerminalView scopeId={projectKey} />
       </TabsContent>
       <TabsContent value="ports" className="min-h-0 flex-1 overflow-hidden m-0">
         <PortsTabContent />

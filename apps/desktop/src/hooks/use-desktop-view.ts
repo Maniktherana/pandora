@@ -1,43 +1,17 @@
-import type {
-  DesktopView,
-  UiPreferencesView,
-  WorkspaceView,
-} from "@/services/workspace/desktop-view-projections";
-import { buildWorkspaceView } from "@/services/workspace/desktop-view-projections";
-import { useDesktopViewStore } from "@/services/workspace/desktop-view-store";
-import { useRuntimeStore } from "@/services/runtime/runtime-store";
-import type { WorkspaceRuntimeState } from "@/lib/shared/types";
-
-export function useDesktopView<T = DesktopView>(selector?: (view: DesktopView) => T) {
-  return useDesktopViewStore((state) =>
-    selector ? selector(state.desktopView) : (state.desktopView as T),
-  );
-}
-
-export function useUiPreferencesView<T = UiPreferencesView>(
-  selector?: (view: UiPreferencesView) => T,
-) {
-  return useDesktopViewStore((state) =>
-    selector ? selector(state.uiPreferences) : (state.uiPreferences as T),
-  );
-}
+import type { WorkspaceView } from "@/services/workspace/desktop-view-projections";
+import { useNavigationStore } from "@/services/workspace/navigation-store";
+import { useCatalogStore } from "@/services/workspace/catalog-store";
 
 export function useWorkspaceView<T = WorkspaceView>(
   workspaceId: string,
   selector?: (view: WorkspaceView) => T,
 ) {
-  return useDesktopViewStore((state) => {
-    const view = buildWorkspaceView(state.desktopView, workspaceId);
-    return selector ? selector(view) : (view as T);
-  });
-}
-
-export function useRuntimeState<T = WorkspaceRuntimeState | null>(
-  runtimeId: string,
-  selector?: (runtime: WorkspaceRuntimeState | null) => T,
-) {
-  return useRuntimeStore((state) => {
-    const runtime = runtimeId ? (state.runtimeState[runtimeId] ?? null) : null;
-    return selector ? selector(runtime) : (runtime as T);
-  });
+  const workspace = useCatalogStore((s) => s.workspaces.find((w) => w.id === workspaceId) ?? null);
+  const selectedWorkspaceID = useNavigationStore((s) => s.selectedWorkspaceID);
+  const view: WorkspaceView = {
+    workspaceId,
+    workspace,
+    isSelected: selectedWorkspaceID === workspaceId,
+  };
+  return selector ? selector(view) : (view as T);
 }

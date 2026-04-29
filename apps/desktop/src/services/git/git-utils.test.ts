@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
-  compareScmPathsByTreeOrder,
-  optimisticallyStageAllScmEntries,
-  optimisticallyStageScmEntries,
-  optimisticallyUnstageAllScmEntries,
-  optimisticallyUnstageScmEntries,
-  sortScmEntriesByTreeOrder,
-} from "@/services/scm/scm-utils";
+  compareGitPathsByTreeOrder,
+  optimisticallyStageAllEntries,
+  optimisticallyStageEntries,
+  optimisticallyUnstageAllEntries,
+  optimisticallyUnstageEntries,
+  sortGitEntriesByTreeOrder,
+} from "@/services/git/git-utils";
 import type { ScmEntry } from "@/lib/shared/types";
 
 function entry(path: string, overrides: Partial<ScmEntry> = {}): ScmEntry {
@@ -21,11 +21,11 @@ function entry(path: string, overrides: Partial<ScmEntry> = {}): ScmEntry {
   };
 }
 
-describe("compareScmPathsByTreeOrder", () => {
+describe("compareGitPathsByTreeOrder", () => {
   test("matches file-tree ordering for nested folders and root files", () => {
     expect(
       ["zeta.ts", "src/app.ts", "src/components/button.tsx", "README.md"].sort(
-        compareScmPathsByTreeOrder,
+        compareGitPathsByTreeOrder,
       ),
     ).toEqual(["src/components/button.tsx", "src/app.ts", "README.md", "zeta.ts"]);
   });
@@ -33,15 +33,15 @@ describe("compareScmPathsByTreeOrder", () => {
   test("keeps sibling files in name order within the same folder", () => {
     expect(
       ["src/z.ts", "src/a.ts", "src/components/card.tsx", "src/components/alert.tsx"].sort(
-        compareScmPathsByTreeOrder,
+        compareGitPathsByTreeOrder,
       ),
     ).toEqual(["src/components/alert.tsx", "src/components/card.tsx", "src/a.ts", "src/z.ts"]);
   });
 });
 
-describe("sortScmEntriesByTreeOrder", () => {
-  test("sorts SCM entries by their tree path", () => {
-    expect(sortScmEntriesByTreeOrder([entry("b.ts"), entry("a/x.ts"), entry("a/a.ts")])).toEqual([
+describe("sortGitEntriesByTreeOrder", () => {
+  test("sorts git entries by their tree path", () => {
+    expect(sortGitEntriesByTreeOrder([entry("b.ts"), entry("a/x.ts"), entry("a/a.ts")])).toEqual([
       entry("a/a.ts"),
       entry("a/x.ts"),
       entry("b.ts"),
@@ -49,10 +49,10 @@ describe("sortScmEntriesByTreeOrder", () => {
   });
 });
 
-describe("optimistic SCM status transforms", () => {
+describe("optimistic git status transforms", () => {
   test("stages tracked and untracked paths immediately", () => {
     expect(
-      optimisticallyStageScmEntries(
+      optimisticallyStageEntries(
         [
           entry("src/modified.ts"),
           entry("src/new.ts", { worktreeKind: "?", untracked: true }),
@@ -69,7 +69,7 @@ describe("optimistic SCM status transforms", () => {
 
   test("unstages modified and newly added paths immediately", () => {
     expect(
-      optimisticallyUnstageScmEntries(
+      optimisticallyUnstageEntries(
         [
           entry("src/modified.ts", { stagedKind: "M", worktreeKind: null }),
           entry("src/new.ts", { stagedKind: "A", worktreeKind: null }),
@@ -89,13 +89,13 @@ describe("optimistic SCM status transforms", () => {
       entry("both.ts", { stagedKind: "M", worktreeKind: "M" }),
     ];
 
-    expect(optimisticallyStageAllScmEntries(current)).toEqual([
+    expect(optimisticallyStageAllEntries(current)).toEqual([
       entry("both.ts", { stagedKind: "M", worktreeKind: null }),
       entry("staged.ts", { stagedKind: "M", worktreeKind: null }),
       entry("unstaged.ts", { stagedKind: "M", worktreeKind: null }),
     ]);
 
-    expect(optimisticallyUnstageAllScmEntries(current)).toEqual([
+    expect(optimisticallyUnstageAllEntries(current)).toEqual([
       entry("both.ts", { stagedKind: null, worktreeKind: "M" }),
       entry("staged.ts", { stagedKind: null, worktreeKind: "M" }),
       entry("unstaged.ts"),

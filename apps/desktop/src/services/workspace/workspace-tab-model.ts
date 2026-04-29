@@ -1,43 +1,33 @@
-import type { DiffSource, LayoutNode, PaneTab, WorkspaceRuntimeState } from "@/lib/shared/types";
-import {
-  addTerminalTabToNode,
-  createLeaf,
-  findLeaf,
-  getAllLeaves,
-  insertTabInPane,
-  splitPaneAroundTab,
-  tabsEqual,
-} from "@/components/layout/workspace/layout-tree";
+import type { DiffSource, LayoutNode, PaneTab } from "@/lib/shared/types";
+import { createLeaf, findLeaf, getAllLeaves, insertTabInPane, splitPaneAroundTab, tabsEqual } from "@/components/layout/workspace/layout-tree";
+import { useLayoutStore } from "@/services/workspace/layout-store";
 
-type RuntimeLayoutSnapshot = {
-  root: LayoutNode;
-  focusedPaneID: string;
-};
+function readLayout(workspaceId: string) {
+  return useLayoutStore.getState().getLayout(workspaceId);
+}
 
-function ensureWorkspaceRoot(runtime: WorkspaceRuntimeState): RuntimeLayoutSnapshot {
-  if (runtime.root) {
-    const leaves = getAllLeaves(runtime.root);
+function commitLayout(workspaceId: string, root: LayoutNode | null, focusedPaneID: string | null) {
+  useLayoutStore.getState().setLayout(workspaceId, { root, focusedPaneID });
+}
+
+function ensureWorkspaceRoot(workspaceId: string) {
+  const layout = readLayout(workspaceId);
+  if (layout.root) {
+    const leaves = getAllLeaves(layout.root);
     const focusedPaneID =
-      runtime.focusedPaneID && findLeaf(runtime.root, runtime.focusedPaneID)
-        ? runtime.focusedPaneID
-        : (leaves[0]?.id ?? (runtime.root.type === "leaf" ? runtime.root.id : ""));
-    return {
-      root: runtime.root,
-      focusedPaneID,
-    };
+      layout.focusedPaneID && findLeaf(layout.root, layout.focusedPaneID)
+        ? layout.focusedPaneID
+        : (leaves[0]?.id ?? null);
+    return { root: layout.root, focusedPaneID };
   }
 
   const root = createLeaf([]);
-  return {
-    root,
-    focusedPaneID: root.id,
-  };
+  return { root, focusedPaneID: root.id };
 }
 
 function selectInsertionPane(root: LayoutNode, focusedPaneID: string | null): string | null {
   if (focusedPaneID && findLeaf(root, focusedPaneID)) return focusedPaneID;
-  const leaves = getAllLeaves(root);
-  return leaves[0]?.id ?? null;
+  return getAllLeaves(root)[0]?.id ?? null;
 }
 
 function selectTabInLayout(root: LayoutNode, paneID: string, index: number): LayoutNode {
@@ -57,12 +47,12 @@ function selectTabInLayout(root: LayoutNode, paneID: string, index: number): Lay
 }
 
 function insertTab(
-  runtime: WorkspaceRuntimeState,
+  workspaceId: string,
   tab: PaneTab,
   matchesExisting: (candidate: PaneTab) => boolean,
 ): boolean {
-  const layout = ensureWorkspaceRoot(runtime);
-  const paneID = selectInsertionPane(layout.root, runtime.focusedPaneID ?? layout.focusedPaneID);
+  const layout = ensureWorkspaceRoot(workspaceId);
+  const paneID = selectInsertionPane(layout.root, layout.focusedPaneID);
   if (!paneID) return false;
 
   const leaf = findLeaf(layout.root, paneID);
@@ -70,122 +60,120 @@ function insertTab(
 
   const dupIndex = leaf.tabs.findIndex(matchesExisting);
   if (dupIndex >= 0) {
-    runtime.root = selectTabInLayout(layout.root, paneID, dupIndex);
-    runtime.focusedPaneID = paneID;
+    commitLayout(workspaceId, selectTabInLayout(layout.root, paneID, dupIndex), paneID);
     return false;
   }
 
   const insertAt = leaf.tabs.length;
-  runtime.root = insertTabInPane(layout.root, paneID, tab, insertAt);
-  runtime.focusedPaneID = paneID;
+  commitLayout(workspaceId, insertTabInPane(layout.root, paneID, tab, insertAt), paneID);
   return true;
 }
 
-export function addEditorTabToWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function addEditorTabToWorkspaceLayout(
+  workspaceId: string,
   relativePath: string,
 ): boolean {
   return insertTab(
-    runtime,
+    workspaceId,
     { kind: "editor", path: relativePath },
     (candidate) => candidate.kind === "editor" && candidate.path === relativePath,
   );
 }
 
-export function addDiffTabToWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function addDiffTabToWorkspaceLayout(
+  workspaceId: string,
   relativePath: string,
   source: DiffSource,
 ): boolean {
   return insertTab(
-    runtime,
+    workspaceId,
     { kind: "diff", path: relativePath, source },
     (candidate) =>
       candidate.kind === "diff" && candidate.path === relativePath && candidate.source === source,
   );
 }
 
-export function addTerminalTabToWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function addTerminalTabToWorkspaceLayout(
+  workspaceId: string,
   slotId: string,
 ): boolean {
-  if (!runtime.root) {
+  const layout = readLayout(workspaceId);
+  if (!layout.root) {
     const root = createLeaf([{ kind: "terminal", slotId }]);
-    runtime.root = root;
-    runtime.focusedPaneID = root.id;
+    commitLayout(workspaceId, root, root.id);
     return true;
   }
 
-  const paneID = selectInsertionPane(runtime.root, runtime.focusedPaneID);
+  const paneID = selectInsertionPane(layout.root, layout.focusedPaneID);
   if (!paneID) {
     const root = createLeaf([{ kind: "terminal", slotId }]);
-    runtime.root = root;
-    runtime.focusedPaneID = root.id;
+    commitLayout(workspaceId, root, root.id);
     return true;
   }
 
-  const existingLeaf = findLeaf(runtime.root, paneID);
+  const existingLeaf = findLeaf(layout.root, paneID);
   if (!existingLeaf) return false;
   if (existingLeaf.tabs.some((tab) => tab.kind === "terminal" && tab.slotId === slotId)) {
-    runtime.focusedPaneID = paneID;
+    commitLayout(workspaceId, layout.root, paneID);
     return false;
   }
 
-  runtime.root = addTerminalTabToNode(runtime.root, paneID, slotId);
-  runtime.focusedPaneID = paneID;
+  commitLayout(workspaceId, insertTabInPane(layout.root, paneID, { kind: "terminal", slotId }, existingLeaf.tabs.length), paneID);
   return true;
 }
 
 function addTabToSpecificPane(
-  runtime: WorkspaceRuntimeState,
+  workspaceId: string,
   paneID: string,
   tab: PaneTab,
   insertIndex?: number,
 ): boolean {
-  const layout = ensureWorkspaceRoot(runtime);
+  const layout = ensureWorkspaceRoot(workspaceId);
   const leaf = findLeaf(layout.root, paneID);
   if (!leaf) return false;
 
   const dupIndex = leaf.tabs.findIndex((candidate) => tabsEqual(candidate, tab));
   if (dupIndex >= 0) {
-    runtime.root = selectTabInLayout(layout.root, paneID, dupIndex);
-    runtime.focusedPaneID = paneID;
+    commitLayout(workspaceId, selectTabInLayout(layout.root, paneID, dupIndex), paneID);
     return false;
   }
 
-  runtime.root = insertTabInPane(layout.root, paneID, tab, insertIndex ?? leaf.tabs.length);
-  runtime.focusedPaneID = paneID;
+  commitLayout(
+    workspaceId,
+    insertTabInPane(layout.root, paneID, tab, insertIndex ?? leaf.tabs.length),
+    paneID,
+  );
   return true;
 }
 
-export function addEditorTabToPaneInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function addEditorTabToPaneInWorkspaceLayout(
+  workspaceId: string,
   paneID: string,
   relativePath: string,
   insertIndex?: number,
 ): boolean {
-  return addTabToSpecificPane(runtime, paneID, { kind: "editor", path: relativePath }, insertIndex);
+  return addTabToSpecificPane(workspaceId, paneID, { kind: "editor", path: relativePath }, insertIndex);
 }
 
-export function splitPaneWithEditorInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function splitPaneWithEditorInWorkspaceLayout(
+  workspaceId: string,
   targetPaneID: string,
   relativePath: string,
   axis: "horizontal" | "vertical",
   position: "before" | "after",
 ): boolean {
-  if (!runtime.root) return false;
-  if (!findLeaf(runtime.root, targetPaneID)) return false;
+  const layout = readLayout(workspaceId);
+  if (!layout.root) return false;
+  if (!findLeaf(layout.root, targetPaneID)) return false;
 
   const tab: PaneTab = { kind: "editor", path: relativePath };
-  const previousLeafIds = new Set(getAllLeaves(runtime.root).map((leaf) => leaf.id));
-  const nextRoot = splitPaneAroundTab(runtime.root, targetPaneID, tab, axis, position);
+  const previousLeafIds = new Set(getAllLeaves(layout.root).map((leaf) => leaf.id));
+  const nextRoot = splitPaneAroundTab(layout.root, targetPaneID, tab, axis, position);
   const insertedLeaf = getAllLeaves(nextRoot).find(
     (leaf) =>
       !previousLeafIds.has(leaf.id) && leaf.tabs.some((candidate) => tabsEqual(candidate, tab)),
   );
 
-  runtime.root = nextRoot;
-  runtime.focusedPaneID = insertedLeaf?.id ?? targetPaneID;
+  commitLayout(workspaceId, nextRoot, insertedLeaf?.id ?? targetPaneID);
   return true;
 }

@@ -8,14 +8,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { useScmController } from "@/services/scm/use-scm";
+import type { useGitController } from "@/services/git/use-git";
 
 type CommitDropdownProps = {
   onCommit: () => void;
   canCommit: boolean;
   busy: boolean;
-  runtimeId: string;
-  scm: ReturnType<typeof useScmController>;
+  scopeId: string;
+  scm: ReturnType<typeof useGitController>;
 };
 
 export function CommitDropdown({ onCommit, canCommit, busy, scm }: CommitDropdownProps) {

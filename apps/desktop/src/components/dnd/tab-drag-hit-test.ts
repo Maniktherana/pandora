@@ -100,7 +100,7 @@ export function hitTestBottomTerminalSidebar(
       const midY = rect.top + rect.height / 2;
       return {
         kind: "bottom-terminal-slot",
-        runtimeId: slotRow.dataset.bottomTerminalRuntimeId!,
+        scopeId: slotRow.dataset.bottomTerminalScopeId!,
         groupId: slotRow.dataset.bottomTerminalGroupId!,
         groupIndex: Number.parseInt(slotRow.dataset.bottomTerminalGroupIndex ?? "0", 10),
         insertIndex:
@@ -122,7 +122,7 @@ export function hitTestBottomTerminalSidebar(
     if (y < midY) {
       return {
         kind: "bottom-terminal-insert",
-        runtimeId: groupRow.dataset.bottomTerminalRuntimeId!,
+        scopeId: groupRow.dataset.bottomTerminalScopeId!,
         insertIndex: Number.parseInt(groupRow.dataset.bottomTerminalGroupIndex ?? "0", 10),
         barRect,
         lineY: rect.top,
@@ -134,7 +134,7 @@ export function hitTestBottomTerminalSidebar(
   const lastRect = last.getBoundingClientRect();
   return {
     kind: "bottom-terminal-insert",
-    runtimeId: last.dataset.bottomTerminalRuntimeId!,
+    scopeId: last.dataset.bottomTerminalScopeId!,
     insertIndex: Number.parseInt(last.dataset.bottomTerminalGroupIndex ?? "0", 10) + 1,
     barRect,
     lineY: lastRect.bottom,
@@ -155,7 +155,7 @@ export function hitTestBottomTerminalPanes(
     else if (rx > 0.75) zone = "right";
     return {
       kind: "bottom-terminal-pane",
-      runtimeId: pane.dataset.bottomTerminalRuntimeId!,
+      scopeId: pane.dataset.bottomTerminalScopeId!,
       groupId: pane.dataset.bottomTerminalGroupId!,
       slotId: pane.dataset.bottomTerminalPaneId!,
       zone,

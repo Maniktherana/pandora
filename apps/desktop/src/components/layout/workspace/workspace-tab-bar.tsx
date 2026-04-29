@@ -1,14 +1,13 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { useRuntimeState } from "@/hooks/use-desktop-view";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
-import type { PaneTab, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import type { PaneTab, ScmEntry, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { useScmStore } from "@/services/scm/scm-store";
-import { flattenScmSnapshot } from "@/services/scm/scm-utils";
+import { useGitStore } from "@/services/git/git-store";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 
@@ -22,6 +21,7 @@ interface WorkspaceTabBarProps {
 }
 
 const DRAG_THRESHOLD = 5;
+const EMPTY_GIT_ENTRIES: readonly ScmEntry[] = [];
 
 function terminalTabDisplay(
   tab: PaneTab,
@@ -69,17 +69,17 @@ export default function WorkspaceTabBar({
   const { startDrag, dragState } = useTabDrag();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
-  const runtime = useRuntimeState(workspaceId);
+  const scope = useTerminalScopeStore((s) => s.byScopeId[workspaceId] ?? null);
   const slotsMap = useMemo(
     () =>
-      Object.fromEntries((runtime?.slots ?? []).map((slot) => [slot.id, slot] as const)) as Record<
+      Object.fromEntries((scope?.slots ?? []).map((slot) => [slot.id, slot] as const)) as Record<
         string,
         SlotState | undefined
       >,
-    [runtime?.slots],
+    [scope?.slots],
   );
-  const displayMap = runtime?.terminalDisplayBySlotId ?? {};
-  const sessions = runtime?.sessions ?? [];
+  const displayMap = scope?.terminalDisplayBySlotId ?? {};
+  const sessions = scope?.sessions ?? [];
   const sessionsMap = useMemo(
     () =>
       Object.fromEntries(sessions.map((session) => [session.slotID, session] as const)) as Record<
@@ -88,8 +88,7 @@ export default function WorkspaceTabBar({
       >,
     [sessions],
   );
-  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspaceId]?.snapshot ?? null);
-  const scmEntries = flattenScmSnapshot(scmSnapshot);
+  const gitEntries = useGitStore((s) => s.byScopeId[workspaceId]?.entries ?? EMPTY_GIT_ENTRIES);
   const pendingDragRef = useRef<{
     sourceIndex: number;
     label: string;
@@ -159,9 +158,9 @@ export default function WorkspaceTabBar({
     [layoutCommands, paneID],
   );
 
-  const scmByPath = useMemo(
-    () => new Map(scmEntries.map((entry) => [entry.path, entry])),
-    [scmEntries],
+  const gitByPath = useMemo(
+    () => new Map(gitEntries.map((entry) => [entry.path, entry])),
+    [gitEntries],
   );
   const selectedTab = tabs[selectedIndex] ?? tabs[0];
 
@@ -239,15 +238,15 @@ export default function WorkspaceTabBar({
                 dragState.sourcePaneID === paneID &&
                 dragState.sourceIndex === index
               }
-              scmEntry={
-                tab.kind === "editor" || tab.kind === "diff" ? scmByPath.get(tab.path) : undefined
+              gitEntry={
+                tab.kind === "editor" || tab.kind === "diff" ? gitByPath.get(tab.path) : undefined
               }
               slotsMap={slotsMap}
               sessionsMap={sessionsMap}
               displayMap={displayMap}
               terminalAgentStatus={
                 tab.kind === "terminal"
-                  ? (runtime?.terminalAgentStatusBySlotId?.[tab.slotId] ?? "idle")
+                  ? (scope?.terminalAgentStatusBySlotId?.[tab.slotId] ?? "idle")
                   : "idle"
               }
               onPointerDown={handlePointerDown}

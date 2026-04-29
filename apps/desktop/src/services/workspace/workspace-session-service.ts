@@ -1,21 +1,21 @@
 import type { DiffSource } from "@/lib/shared/types";
 import {
-  addDiffTabToWorkspaceRuntime,
-  addEditorTabToWorkspaceRuntime,
-  addEditorTabToPaneInWorkspaceRuntime,
-  addTerminalTabToWorkspaceRuntime,
-  splitPaneWithEditorInWorkspaceRuntime,
+  addDiffTabToWorkspaceLayout,
+  addEditorTabToWorkspaceLayout,
+  addEditorTabToPaneInWorkspaceLayout,
+  addTerminalTabToWorkspaceLayout,
+  splitPaneWithEditorInWorkspaceLayout,
 } from "@/services/workspace/workspace-tab-model";
 import {
-  addTabToPaneInWorkspaceRuntime,
-  cycleRuntimeTabs,
-  moveTabInWorkspaceRuntime,
-  openReviewTabInWorkspaceRuntime,
-  removeTabFromWorkspaceRuntime,
-  reorderTabInWorkspaceRuntime,
-  selectTabInPaneInWorkspaceRuntime,
-  setFocusedPaneInWorkspaceRuntime,
-  splitPaneInWorkspaceRuntime,
+  addTabToPaneInWorkspaceLayout,
+  cycleWorkspaceTabs,
+  moveTabInWorkspaceLayout,
+  openReviewTabInWorkspaceLayout,
+  removeTabFromWorkspaceLayout,
+  reorderTabInWorkspaceLayout,
+  selectTabInPaneInWorkspaceLayout,
+  setFocusedPaneInWorkspaceLayout,
+  splitPaneInWorkspaceLayout,
 } from "@/services/workspace/workspace-layout-model";
 
 export interface WorkspaceSessionService {
@@ -64,44 +64,37 @@ export interface WorkspaceSessionService {
   };
 }
 
-type UpdateWorkspaceRuntimeFn = (
+type UpdateWorkspaceLayoutFn = (
   workspaceId: string,
-  mutate: (runtime: Parameters<typeof setFocusedPaneInWorkspaceRuntime>[0]) => boolean | void,
+  mutate: () => boolean | void,
 ) => void;
 
-type MutateRuntimeStateFn = <T>(
-  workspaceId: string,
-  mutate: (runtime: Parameters<typeof cycleRuntimeTabs>[0]) => T,
-) => T;
+type MutateWorkspaceLayoutFn = <T>(workspaceId: string, mutate: () => T) => T;
 
 export function createWorkspaceSessionService(
   workspaceId: string,
-  updateWorkspaceRuntime: UpdateWorkspaceRuntimeFn,
-  mutateRuntimeState: MutateRuntimeStateFn,
+  updateWorkspaceLayout: UpdateWorkspaceLayoutFn,
+  mutateWorkspaceLayout: MutateWorkspaceLayoutFn,
 ): WorkspaceSessionService {
   return {
     workspaceId,
     commands: {
       focusPane: (paneId) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          setFocusedPaneInWorkspaceRuntime(runtime, paneId),
-        ),
+        updateWorkspaceLayout(workspaceId, () => setFocusedPaneInWorkspaceLayout(workspaceId, paneId)),
       addTabToPane: (targetPaneID, sourcePaneID, sourceTabIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          addTabToPaneInWorkspaceRuntime(runtime, targetPaneID, sourcePaneID, sourceTabIndex),
+        updateWorkspaceLayout(workspaceId, () =>
+          addTabToPaneInWorkspaceLayout(workspaceId, targetPaneID, sourcePaneID, sourceTabIndex),
         ),
       removeTab: (paneID, tabIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex),
-        ),
+        updateWorkspaceLayout(workspaceId, () => removeTabFromWorkspaceLayout(workspaceId, paneID, tabIndex)),
       selectTabInPane: (paneID, index) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          selectTabInPaneInWorkspaceRuntime(runtime, paneID, index),
+        updateWorkspaceLayout(workspaceId, () =>
+          selectTabInPaneInWorkspaceLayout(workspaceId, paneID, index),
         ),
       splitPane: (targetPaneID, sourcePaneID, sourceTabIndex, axis, position) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          splitPaneInWorkspaceRuntime(
-            runtime,
+        updateWorkspaceLayout(workspaceId, () =>
+          splitPaneInWorkspaceLayout(
+            workspaceId,
             targetPaneID,
             sourcePaneID,
             sourceTabIndex,
@@ -110,44 +103,40 @@ export function createWorkspaceSessionService(
           ),
         ),
       moveTab: (fromPaneID, toPaneID, fromIndex, toIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          moveTabInWorkspaceRuntime(runtime, fromPaneID, toPaneID, fromIndex, toIndex),
+        updateWorkspaceLayout(workspaceId, () =>
+          moveTabInWorkspaceLayout(workspaceId, fromPaneID, toPaneID, fromIndex, toIndex),
         ),
       reorderTab: (paneID, fromIndex, toIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          reorderTabInWorkspaceRuntime(runtime, paneID, fromIndex, toIndex),
+        updateWorkspaceLayout(workspaceId, () =>
+          reorderTabInWorkspaceLayout(workspaceId, paneID, fromIndex, toIndex),
         ),
       closeTab: (paneID, tabIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          removeTabFromWorkspaceRuntime(runtime, paneID, tabIndex),
-        ),
+        updateWorkspaceLayout(workspaceId, () => removeTabFromWorkspaceLayout(workspaceId, paneID, tabIndex)),
       addEditorTab: (relativePath) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          addEditorTabToWorkspaceRuntime(runtime, relativePath),
-        ),
+        updateWorkspaceLayout(workspaceId, () => addEditorTabToWorkspaceLayout(workspaceId, relativePath)),
       addEditorTabToPane: (paneID, relativePath, insertIndex) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          addEditorTabToPaneInWorkspaceRuntime(runtime, paneID, relativePath, insertIndex),
+        updateWorkspaceLayout(workspaceId, () =>
+          addEditorTabToPaneInWorkspaceLayout(workspaceId, paneID, relativePath, insertIndex),
         ),
       splitPaneWithEditor: (targetPaneID, relativePath, axis, position) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          splitPaneWithEditorInWorkspaceRuntime(runtime, targetPaneID, relativePath, axis, position),
+        updateWorkspaceLayout(workspaceId, () =>
+          splitPaneWithEditorInWorkspaceLayout(
+            workspaceId,
+            targetPaneID,
+            relativePath,
+            axis,
+            position,
+          ),
         ),
       addDiffTab: (relativePath, source) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          addDiffTabToWorkspaceRuntime(runtime, relativePath, source),
-        ),
+        updateWorkspaceLayout(workspaceId, () => addDiffTabToWorkspaceLayout(workspaceId, relativePath, source)),
       addReviewTab: () =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          openReviewTabInWorkspaceRuntime(runtime),
-        ),
+        updateWorkspaceLayout(workspaceId, () => openReviewTabInWorkspaceLayout(workspaceId)),
       addTerminalTab: (slotId) =>
-        updateWorkspaceRuntime(workspaceId, (runtime) =>
-          addTerminalTabToWorkspaceRuntime(runtime, slotId),
-        ),
+        updateWorkspaceLayout(workspaceId, () => addTerminalTabToWorkspaceLayout(workspaceId, slotId)),
       seedTerminal: () => {},
       cycleTab: (direction) =>
-        mutateRuntimeState(workspaceId, (runtime) => cycleRuntimeTabs(runtime, direction)),
+        mutateWorkspaceLayout(workspaceId, () => cycleWorkspaceTabs(workspaceId, direction)),
     },
   };
 }
@@ -156,12 +145,12 @@ const workspaceSessions = new Map<string, WorkspaceSessionService>();
 
 export function getWorkspaceSession(
   workspaceId: string,
-  updateWorkspaceRuntime: UpdateWorkspaceRuntimeFn,
-  mutateRuntimeState: MutateRuntimeStateFn,
+  updateWorkspaceLayout: UpdateWorkspaceLayoutFn,
+  mutateWorkspaceLayout: MutateWorkspaceLayoutFn,
 ): WorkspaceSessionService {
   let session = workspaceSessions.get(workspaceId);
   if (!session) {
-    session = createWorkspaceSessionService(workspaceId, updateWorkspaceRuntime, mutateRuntimeState);
+    session = createWorkspaceSessionService(workspaceId, updateWorkspaceLayout, mutateWorkspaceLayout);
     workspaceSessions.set(workspaceId, session);
   }
   return session;

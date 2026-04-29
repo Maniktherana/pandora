@@ -2,10 +2,10 @@ export class RuntimeConnectionError extends Error {
   readonly _tag = "RuntimeConnectionError";
   override readonly cause: unknown;
   constructor(
-    readonly runtimeId: string,
+    readonly scopeId: string,
     cause: unknown,
   ) {
-    super(`Runtime connection error for ${runtimeId}`);
+    super(`Runtime connection error for ${scopeId}`);
     this.cause = cause;
   }
 }
@@ -14,10 +14,10 @@ export class RuntimeSendError extends Error {
   readonly _tag = "RuntimeSendError";
   override readonly cause: unknown;
   constructor(
-    readonly runtimeId: string,
+    readonly scopeId: string,
     cause: unknown,
   ) {
-    super(`Runtime send error for ${runtimeId}`);
+    super(`Runtime send error for ${scopeId}`);
     this.cause = cause;
   }
 }

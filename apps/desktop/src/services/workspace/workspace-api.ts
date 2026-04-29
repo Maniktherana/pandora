@@ -21,9 +21,6 @@ export function removeProject(projectId: string): Promise<void> {
   return invoke("remove_project", { projectId });
 }
 
-export function stopProjectRuntime(projectId: string): Promise<void> {
-  return invoke("stop_project_runtime", { projectId });
-}
 
 export function createWorkspace(
   projectId: string,
@@ -73,13 +70,6 @@ export function markWorkspaceOpened(workspaceId: string): Promise<void> {
   return invoke("mark_workspace_opened", { workspaceId });
 }
 
-export function startWorkspaceRuntime(
-  workspaceId: string,
-  workspacePath: string,
-  defaultCwd: string,
-): Promise<void> {
-  return invoke("start_workspace_runtime", { workspaceId, workspacePath, defaultCwd });
-}
 
 export function saveWorkspaceLayout(workspaceId: string, layout: unknown): Promise<void> {
   return invoke("save_workspace_layout", { workspaceId, layout });

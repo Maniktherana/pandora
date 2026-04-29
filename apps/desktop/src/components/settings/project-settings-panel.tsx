@@ -37,7 +37,7 @@ export default function ProjectSettingsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+      onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

@@ -1,125 +1,106 @@
-import { useCallback, useEffect, useRef } from "react";
-import {
-  fileTreeInitExpansion,
-  fileTreeFlushExpansion,
-  fileTreeSetPathExpanded,
-  fileTreeSetAllExpandedPaths,
-  fileTreeRefresh,
-  fileTreeCreateFile,
-  fileTreeCreateDirectory,
-  fileTreeRename,
-  fileTreeDelete,
-  fileTreeMove,
-  fileTreeCopy,
-  fileTreeImport,
-  fileTreeReadTextFile,
-  fileTreeWriteTextFile,
-} from "@/services/file-tree/file-tree-service";
+import { useCallback, useEffect } from "react";
+import { fileTreeService } from "@/services/file-tree/file-tree-service";
+import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
 
-export function useFileTreeController(runtimeId: string) {
-  const expansionLoadedRef = useRef(false);
+/**
+ * Exposes file tree actions for a given workspace scope.
+ *
+ * Subscription and boot are owned by workspace-startup-service.
+ * This hook exposes action callbacks and flushes expansion on unmount.
+ */
+export function useFileTreeController(scopeId: string) {
+  const bootStatus = useFileTreeStore((s) => s.byScopeId[scopeId]?.bootStatus ?? "idle");
 
   useEffect(() => {
-    let cancelled = false;
-    expansionLoadedRef.current = false;
-
-    void fileTreeInitExpansion(runtimeId).then(() => {
-      if (!cancelled) expansionLoadedRef.current = true;
-    });
-
+    const id = scopeId;
     return () => {
-      cancelled = true;
+      if (bootStatus === "loaded") {
+        fileTreeService.flushExpansion(id);
+      }
     };
-  }, [runtimeId]);
-
-  useEffect(() => {
-    const id = runtimeId;
-    return () => {
-      if (!expansionLoadedRef.current) return;
-      fileTreeFlushExpansion(id);
-    };
-  }, [runtimeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeId]);
 
   const setPathExpanded = useCallback(
     (relPath: string, expanded: boolean) => {
-      fileTreeSetPathExpanded(runtimeId, relPath, expanded, expansionLoadedRef.current);
+      fileTreeService.setExpanded(scopeId, relPath, expanded);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const setAllExpandedPaths = useCallback(
     (paths: Set<string>) => {
-      fileTreeSetAllExpandedPaths(runtimeId, paths, expansionLoadedRef.current);
+      fileTreeService.setExpandedPaths(scopeId, paths);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const refresh = useCallback(
     (path?: string) => {
-      fileTreeRefresh(runtimeId, path);
+      fileTreeService.refresh(scopeId, path);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const createFile = useCallback(
     (parentRelPath: string, name: string, contents = "") => {
-      fileTreeCreateFile(runtimeId, parentRelPath, name, contents);
+      fileTreeService.createFile(scopeId, parentRelPath, name, contents);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const createDirectory = useCallback(
     (relativePath: string) => {
-      fileTreeCreateDirectory(runtimeId, relativePath);
+      fileTreeService.createDirectory(scopeId, relativePath);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const rename = useCallback(
     (sourceRelPath: string, newName: string) => {
-      fileTreeRename(runtimeId, sourceRelPath, newName);
+      fileTreeService.rename(scopeId, sourceRelPath, newName);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const deleteEntry = useCallback(
     (relativePath: string) => {
-      fileTreeDelete(runtimeId, relativePath);
+      fileTreeService.delete(scopeId, relativePath);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const move = useCallback(
     (sourceRelPath: string, destRelPath: string) => {
-      fileTreeMove(runtimeId, sourceRelPath, destRelPath);
+      fileTreeService.move(scopeId, sourceRelPath, destRelPath);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const copy = useCallback(
     (sourceRelPath: string, destRelPath: string) => {
-      fileTreeCopy(runtimeId, sourceRelPath, destRelPath);
+      fileTreeService.copy(scopeId, sourceRelPath, destRelPath);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const importFiles = useCallback(
     (destRelPath: string, sourcePaths: string[]) => {
-      fileTreeImport(runtimeId, destRelPath, sourcePaths);
+      fileTreeService.importFiles(scopeId, destRelPath, sourcePaths);
     },
-    [runtimeId],
+    [scopeId],
   );
 
   const readTextFile = useCallback(
     (relativePath: string): Promise<string | null> =>
-      fileTreeReadTextFile(runtimeId, relativePath),
-    [runtimeId],
+      fileTreeService.readTextFile(scopeId, relativePath),
+    [scopeId],
   );
 
   const writeTextFile = useCallback(
     (relativePath: string, contents: string): Promise<void> =>
-      fileTreeWriteTextFile(runtimeId, relativePath, contents),
-    [runtimeId],
+      fileTreeService.writeTextFile(scopeId, relativePath, contents),
+    [scopeId],
   );
 
   return {

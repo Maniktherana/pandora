@@ -26,12 +26,10 @@ export default function PaneEditor({
   workspaceId,
   workspaceRoot,
   relativePath,
-  isVisible,
 }: {
   workspaceId: string;
   workspaceRoot: string;
   relativePath: string | null;
-  isVisible: boolean;
 }) {
   const monoFontFamily = useSettingsStore((s) => s.monoFontFamily);
   const monoFontCustom = useSettingsStore((s) => s.monoFontCustom);
@@ -143,7 +141,7 @@ export default function PaneEditor({
 
       // --- Focus handler ---
       const focusDisposable = editor.onDidFocusEditorWidget(() => {
-        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setLayoutTargetScopeId(null);
         workspaceCommands.setNavigationArea("workspace");
       });
 
@@ -203,14 +201,28 @@ export default function PaneEditor({
     [workspaceId, workspaceRoot, workspaceCommands],
   );
 
-  // Cleanup on unmount
+  // Cleanup on unmount — flush any pending buffer sync so EditorStore is current
+  // before the Monaco model becomes inaccessible via editorRef.
   useEffect(() => {
     return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        const editor = editorRef.current;
+        const path = currentPathRef.current;
+        if (editor && path) {
+          const content = editor.getModel()?.getValue();
+          if (content !== undefined) {
+            useEditorStore.getState().setBuffer(workspaceId, path, content);
+          }
+        }
+      }
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
-      if (debounceRef.current) clearTimeout(debounceRef.current);
       editorRef.current = null;
     };
+  // workspaceId is stable for the lifetime of a PaneEditor instance
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Apply large-file optimizations when path (model) changes
@@ -243,25 +255,14 @@ export default function PaneEditor({
     return () => cancelAnimationFrame(id);
   }, [relativePath]);
 
-  if (!relativePath) {
-    return (
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{ visibility: "hidden", pointerEvents: "none", backgroundColor: PANDORA_EDITOR_BG }}
-        aria-hidden
-      />
-    );
-  }
+  // Should not happen: PaneEditor is only rendered when active tab is an editor.
+  if (!relativePath) return null;
 
   return (
     <div
       ref={containerRef}
       className="absolute inset-0 min-h-0"
-      style={{
-        backgroundColor: PANDORA_EDITOR_BG,
-        visibility: isVisible ? "visible" : "hidden",
-        pointerEvents: isVisible ? "auto" : "none",
-      }}
+      style={{ backgroundColor: PANDORA_EDITOR_BG }}
     >
       {editorReady ? (
         <Editor

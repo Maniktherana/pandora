@@ -5,7 +5,7 @@ import {
 } from "@/lib/terminal/lazy-terminal-connections";
 
 export function useLazyTerminalSlotConnections(
-  runtimeId: string,
+  scopeId: string,
   visibleSlotIds: readonly string[],
   liveSlotIds: readonly string[],
 ): ReadonlySet<string> {
@@ -15,7 +15,7 @@ export function useLazyTerminalSlotConnections(
 
   useEffect(() => {
     setConnectedSlotIds(new Set(visibleSlotIds));
-  }, [runtimeId]);
+  }, [scopeId]);
 
   useEffect(() => {
     setConnectedSlotIds((current) => {

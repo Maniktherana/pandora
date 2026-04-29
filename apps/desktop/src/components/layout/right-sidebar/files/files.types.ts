@@ -1,4 +1,4 @@
-import type { TreeScmDecoration } from "@/services/scm/scm-types";
+import type { TreeGitDecoration } from "@/services/git/git-types";
 
 export const TREE_ROW_SELECTOR = "[data-tree-row-path]";
 export const INTERNAL_DRAG_THRESHOLD_PX = 4;
@@ -69,11 +69,11 @@ export type ExpansionCtx = {
   setPathExpanded: (relPath: string, expanded: boolean) => void;
 };
 
-export type ScmDecorationResolver = (
+export type GitDecorationResolver = (
   relPath: string,
   isDirectory: boolean,
   isIgnored?: boolean,
-) => TreeScmDecoration;
+) => TreeGitDecoration;
 
 export type PendingCreateState = {
   kind: "file" | "directory";

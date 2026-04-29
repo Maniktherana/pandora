@@ -5,7 +5,7 @@ interface EditorStoreState {
   savedContentByWorkspace: Record<string, Record<string, string>>;
   /** Fast dirty flags set synchronously from Monaco model changes. */
   dirtyFlags: Record<string, Record<string, boolean>>;
-  /** Paths modified on disk while open in the editor (runtimeId -> Set<relativePath>). */
+  /** Paths modified on disk while open in the editor (scopeId -> Set<relativePath>). */
   diskModifiedByWorkspace: Record<string, Set<string>>;
 
   setBuffer: (workspaceId: string, relativePath: string, value: string) => void;

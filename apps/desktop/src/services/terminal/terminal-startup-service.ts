@@ -1,6 +1,5 @@
-import type { WritableDraft } from "immer";
-import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
+import type { SlotState } from "@/lib/shared/types";
+import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import {
   getOrderedProjectTerminalSlotIds,
   getOrderedWorkspaceTerminalSlotIds,
@@ -12,7 +11,13 @@ import {
   seedWorkspaceTerminal,
 } from "@/lib/terminal/terminal-seed";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import { addProjectTerminalGroupInRuntime, setProjectTerminalPanelVisibleInRuntime } from "@/services/terminal/project-terminal-panel-model";
+import {
+  addProjectTerminalGroup,
+  setProjectTerminalPanelVisible,
+} from "@/services/terminal/project-terminal-panel-model";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useLayoutStore } from "@/services/workspace/layout-store";
+import { persistProjectTerminalPanel } from "@/services/workspace/workspace-persistence";
 
 export const HIDDEN_WARMUP_DELAY_MS = 120;
 
@@ -26,15 +31,14 @@ export function shouldAutoOpenTerminalSlot(slot: SlotState | undefined): boolean
 }
 
 export interface TerminalStartupContext {
-  getRuntimes: () => Record<string, WorkspaceRuntimeState>;
   getSelectedWorkspaceId: () => string | null;
   getSelectedProjectId: () => string | null;
   getWorkspaceRecord: (workspaceId: string) => { projectId: string } | undefined;
-  mutateRuntimeState: <T>(
-    runtimeId: string,
-    mutate: (runtime: WritableDraft<WorkspaceRuntimeState>) => T,
-  ) => T;
   scheduleTerminalStartupRefresh: () => void;
+}
+
+function getScopeSlots(scopeId: string): SlotState[] {
+  return useTerminalScopeStore.getState().byScopeId[scopeId]?.slots ?? [];
 }
 
 export function createTerminalStartupService(ctx: TerminalStartupContext) {
@@ -45,11 +49,11 @@ export function createTerminalStartupService(ctx: TerminalStartupContext) {
   const pendingDefaultTerminalSeeds = new Set<string>();
   const pendingInitialTerminalWorkspaceIds = new Set<string>();
 
-  function terminalStartupKey(runtimeId: string, slotId: string) {
-    return `${runtimeId}:${slotId}`;
+  function terminalStartupKey(scopeId: string, slotId: string) {
+    return `${scopeId}:${slotId}`;
   }
 
-  function selectedRuntimeIds(): string[] {
+  function selectedScopeIds(): string[] {
     const ids: string[] = [];
     const selectedWorkspaceId = ctx.getSelectedWorkspaceId();
     const selectedProjectId = ctx.getSelectedProjectId();
@@ -58,212 +62,208 @@ export function createTerminalStartupService(ctx: TerminalStartupContext) {
     return ids;
   }
 
-  function isRuntimeStartupActive(runtimeId: string): boolean {
-    if (isProjectRuntimeKey(runtimeId)) {
+  function isScopeStartupActive(scopeId: string): boolean {
+    if (isProjectRuntimeKey(scopeId)) {
       const pid = ctx.getSelectedProjectId();
-      return pid !== null && runtimeId === projectRuntimeKey(pid);
+      return pid !== null && scopeId === projectRuntimeKey(pid);
     }
-    return ctx.getSelectedWorkspaceId() === runtimeId;
+    return ctx.getSelectedWorkspaceId() === scopeId;
   }
 
-  function getRuntimeSlotState(runtimeId: string, slotId: string): SlotState | undefined {
-    return ctx.getRuntimes()[runtimeId]?.slots.find((slot) => slot.id === slotId);
+  function getScopeSlotState(scopeId: string, slotId: string): SlotState | undefined {
+    return getScopeSlots(scopeId).find((slot) => slot.id === slotId);
   }
 
-  function clearPendingSessionOpensForRuntime(runtimeId: string) {
+  function clearPendingSessionOpensForScope(scopeId: string) {
     for (const key of Array.from(pendingSessionOpens)) {
-      if (key.startsWith(`${runtimeId}:`)) pendingSessionOpens.delete(key);
+      if (key.startsWith(`${scopeId}:`)) pendingSessionOpens.delete(key);
     }
   }
 
-  function reconcilePendingSessionOpens(runtimeId: string) {
+  function reconcilePendingSessionOpens(scopeId: string) {
     for (const key of Array.from(pendingSessionOpens)) {
-      if (!key.startsWith(`${runtimeId}:`)) continue;
-      const slotId = key.slice(runtimeId.length + 1);
-      if (!shouldAutoOpenTerminalSlot(getRuntimeSlotState(runtimeId, slotId))) {
+      if (!key.startsWith(`${scopeId}:`)) continue;
+      const slotId = key.slice(scopeId.length + 1);
+      if (!shouldAutoOpenTerminalSlot(getScopeSlotState(scopeId, slotId))) {
         pendingSessionOpens.delete(key);
       }
     }
   }
 
-  function reconcileHiddenWarmupPendingSlot(runtimeId: string) {
-    const pendingSlotId = hiddenWarmupPendingSlots.get(runtimeId);
+  function reconcileHiddenWarmupPendingSlot(scopeId: string) {
+    const pendingSlotId = hiddenWarmupPendingSlots.get(scopeId);
     if (!pendingSlotId) return;
-    if (!shouldAutoOpenTerminalSlot(getRuntimeSlotState(runtimeId, pendingSlotId))) {
-      hiddenWarmupPendingSlots.delete(runtimeId);
+    if (!shouldAutoOpenTerminalSlot(getScopeSlotState(scopeId, pendingSlotId))) {
+      hiddenWarmupPendingSlots.delete(scopeId);
     }
   }
 
-  function cancelHiddenWarmup(runtimeId: string) {
-    hiddenWarmupGeneration.set(runtimeId, (hiddenWarmupGeneration.get(runtimeId) ?? 0) + 1);
-    hiddenWarmupPendingSlots.delete(runtimeId);
-    const timer = hiddenWarmupTimers.get(runtimeId);
+  function cancelHiddenWarmup(scopeId: string) {
+    hiddenWarmupGeneration.set(scopeId, (hiddenWarmupGeneration.get(scopeId) ?? 0) + 1);
+    hiddenWarmupPendingSlots.delete(scopeId);
+    const timer = hiddenWarmupTimers.get(scopeId);
     if (timer != null) {
-      hiddenWarmupTimers.delete(runtimeId);
+      hiddenWarmupTimers.delete(scopeId);
       clearTimeout(timer);
     }
   }
 
-  function getVisibleRuntimeTerminalSlotIds(runtimeId: string): string[] {
-    if (!isRuntimeStartupActive(runtimeId)) return [];
-    const runtime = ctx.getRuntimes()[runtimeId];
-    if (!runtime || runtime.connectionState !== "connected") return [];
-    return isProjectRuntimeKey(runtimeId)
-      ? getVisibleProjectTerminalSlotIds(runtime.terminalPanel)
-      : getVisibleWorkspaceTerminalSlotIds(runtime.root);
+  function getVisibleScopeTerminalSlotIds(scopeId: string): string[] {
+    if (!isScopeStartupActive(scopeId)) return [];
+    const scopeState = useTerminalScopeStore.getState().byScopeId[scopeId];
+    return isProjectRuntimeKey(scopeId)
+      ? getVisibleProjectTerminalSlotIds(scopeState?.terminalPanel ?? null)
+      : getVisibleWorkspaceTerminalSlotIds(
+          useLayoutStore.getState().byWorkspaceId[scopeId]?.root ?? null,
+        );
   }
 
-  function getOrderedRuntimeTerminalSlotIds(runtimeId: string): string[] {
-    if (!isRuntimeStartupActive(runtimeId)) return [];
-    const runtime = ctx.getRuntimes()[runtimeId];
-    if (!runtime || runtime.connectionState !== "connected") return [];
-    return isProjectRuntimeKey(runtimeId)
-      ? getOrderedProjectTerminalSlotIds(runtime.terminalPanel)
-      : getOrderedWorkspaceTerminalSlotIds(runtime.root);
+  function getOrderedScopeTerminalSlotIds(scopeId: string): string[] {
+    if (!isScopeStartupActive(scopeId)) return [];
+    const scopeState = useTerminalScopeStore.getState().byScopeId[scopeId];
+    return isProjectRuntimeKey(scopeId)
+      ? getOrderedProjectTerminalSlotIds(scopeState?.terminalPanel ?? null)
+      : getOrderedWorkspaceTerminalSlotIds(
+          useLayoutStore.getState().byWorkspaceId[scopeId]?.root ?? null,
+        );
   }
 
-  async function ensureTerminalSlotSession(runtimeId: string, slotId: string): Promise<boolean> {
-    const runtime = ctx.getRuntimes()[runtimeId];
-    if (!runtime || runtime.connectionState !== "connected") return false;
-
-    reconcilePendingSessionOpens(runtimeId);
-    const slot = runtime.slots.find((candidate) => candidate.id === slotId);
+  async function ensureTerminalSlotSession(scopeId: string, slotId: string): Promise<boolean> {
+    reconcilePendingSessionOpens(scopeId);
+    const slots = getScopeSlots(scopeId);
+    const slot = slots.find((candidate) => candidate.id === slotId);
     if (!shouldAutoOpenTerminalSlot(slot)) return false;
     if (!slot) return false;
 
-    const requestKey = terminalStartupKey(runtimeId, slotId);
+    const requestKey = terminalStartupKey(scopeId, slotId);
     if (pendingSessionOpens.has(requestKey)) return false;
 
     const sessionDefID = slot.sessionDefIDs[0];
     if (!sessionDefID) return false;
 
     pendingSessionOpens.add(requestKey);
-    const client = runtimeGateway.getClient();
+    const client = getIpcClient();
     if (!client) {
       pendingSessionOpens.delete(requestKey);
       return false;
     }
 
-    await client.send(runtimeId, { type: "open_session_instance", sessionDefID });
+    try {
+      await client.send(scopeId, { type: "open_session_instance", sessionDefID });
+    } catch (err) {
+      pendingSessionOpens.delete(requestKey);
+      console.warn(`Failed to open session for scope ${scopeId} slot ${slotId}:`, err);
+      return false;
+    }
     return true;
   }
 
-  async function ensureVisibleTerminalSessions(runtimeId: string): Promise<void> {
+  async function ensureVisibleTerminalSessions(scopeId: string): Promise<void> {
     await Promise.all(
-      [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))].map((slotId) =>
-        ensureTerminalSlotSession(runtimeId, slotId),
+      [...new Set(getVisibleScopeTerminalSlotIds(scopeId))].map((slotId) =>
+        ensureTerminalSlotSession(scopeId, slotId),
       ),
     );
   }
 
-  async function scheduleHiddenWarmup(runtimeId: string): Promise<void> {
-    const runtime = ctx.getRuntimes()[runtimeId];
-    if (
-      !runtime ||
-      runtime.connectionState !== "connected" ||
-      !isRuntimeStartupActive(runtimeId)
-    ) {
-      cancelHiddenWarmup(runtimeId);
+  async function scheduleHiddenWarmup(scopeId: string): Promise<void> {
+    if (!isScopeStartupActive(scopeId)) {
+      cancelHiddenWarmup(scopeId);
       return;
     }
 
-    reconcilePendingSessionOpens(runtimeId);
-    reconcileHiddenWarmupPendingSlot(runtimeId);
+    reconcilePendingSessionOpens(scopeId);
+    reconcileHiddenWarmupPendingSlot(scopeId);
 
-    if (hiddenWarmupTimers.has(runtimeId) || hiddenWarmupPendingSlots.has(runtimeId)) return;
+    if (hiddenWarmupTimers.has(scopeId) || hiddenWarmupPendingSlots.has(scopeId)) return;
 
-    const visibleSlotIds = [...new Set(getVisibleRuntimeTerminalSlotIds(runtimeId))];
+    const visibleSlotIds = [...new Set(getVisibleScopeTerminalSlotIds(scopeId))];
+    const slots = getScopeSlots(scopeId);
     if (
       visibleSlotIds.some((slotId) =>
-        shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId)),
+        shouldAutoOpenTerminalSlot(slots.find((slot) => slot.id === slotId)),
       )
     ) {
       return;
     }
 
     const visibleSlotIdSet = new Set(visibleSlotIds);
-    const hiddenSlotId = getOrderedRuntimeTerminalSlotIds(runtimeId).find(
+    const hiddenSlotId = getOrderedScopeTerminalSlotIds(scopeId).find(
       (slotId) =>
         !visibleSlotIdSet.has(slotId) &&
-        shouldAutoOpenTerminalSlot(runtime.slots.find((slot) => slot.id === slotId)),
+        shouldAutoOpenTerminalSlot(slots.find((slot) => slot.id === slotId)),
     );
     if (!hiddenSlotId) return;
 
-    const generation = hiddenWarmupGeneration.get(runtimeId) ?? 0;
+    const generation = hiddenWarmupGeneration.get(scopeId) ?? 0;
     const timer = setTimeout(() => {
-      hiddenWarmupTimers.delete(runtimeId);
-      reconcilePendingSessionOpens(runtimeId);
-      reconcileHiddenWarmupPendingSlot(runtimeId);
-      if ((hiddenWarmupGeneration.get(runtimeId) ?? 0) !== generation) return;
-      if (!isRuntimeStartupActive(runtimeId)) return;
-      void ensureTerminalSlotSession(runtimeId, hiddenSlotId).then((opened) => {
-        if (opened) hiddenWarmupPendingSlots.set(runtimeId, hiddenSlotId);
-      });
+      hiddenWarmupTimers.delete(scopeId);
+      reconcilePendingSessionOpens(scopeId);
+      reconcileHiddenWarmupPendingSlot(scopeId);
+      if ((hiddenWarmupGeneration.get(scopeId) ?? 0) !== generation) return;
+      if (!isScopeStartupActive(scopeId)) return;
+      ensureTerminalSlotSession(scopeId, hiddenSlotId)
+        .then((opened) => {
+          if (opened) hiddenWarmupPendingSlots.set(scopeId, hiddenSlotId);
+        })
+        .catch((err) => console.warn("Hidden warmup session open failed:", err));
     }, HIDDEN_WARMUP_DELAY_MS);
-    hiddenWarmupTimers.set(runtimeId, timer);
+    hiddenWarmupTimers.set(scopeId, timer);
   }
 
-  async function refreshRuntimeTerminalStartup(
-    runtimeId: string,
+  async function refreshScopeTerminalStartup(
+    scopeId: string,
     options?: { rebuildHiddenQueue?: boolean },
   ): Promise<void> {
-    const runtime = ctx.getRuntimes()[runtimeId];
-    if (options?.rebuildHiddenQueue) cancelHiddenWarmup(runtimeId);
+    if (options?.rebuildHiddenQueue) cancelHiddenWarmup(scopeId);
 
-    if (
-      !runtime ||
-      runtime.connectionState !== "connected" ||
-      !isRuntimeStartupActive(runtimeId)
-    ) {
-      if (!runtime || runtime.connectionState !== "connected") {
-        clearPendingSessionOpensForRuntime(runtimeId);
-      }
-      cancelHiddenWarmup(runtimeId);
+    if (!isScopeStartupActive(scopeId)) {
+      cancelHiddenWarmup(scopeId);
       return;
     }
 
-    reconcilePendingSessionOpens(runtimeId);
-    reconcileHiddenWarmupPendingSlot(runtimeId);
-    await ensureVisibleTerminalSessions(runtimeId);
-    await scheduleHiddenWarmup(runtimeId);
+    reconcilePendingSessionOpens(scopeId);
+    reconcileHiddenWarmupPendingSlot(scopeId);
+    await ensureVisibleTerminalSessions(scopeId);
+    await scheduleHiddenWarmup(scopeId);
   }
 
-  async function refreshActiveRuntimeTerminalStartup(options?: {
+  async function refreshActiveScopeTerminalStartup(options?: {
     rebuildHiddenQueues?: boolean;
   }): Promise<void> {
-    const activeRuntimeIds = selectedRuntimeIds();
-    const activeRuntimeIdSet = new Set(activeRuntimeIds);
+    const activeScopeIds = selectedScopeIds();
+    const activeScopeIdSet = new Set(activeScopeIds);
 
-    for (const runtimeId of new Set([
+    for (const scopeId of new Set([
       ...hiddenWarmupTimers.keys(),
       ...hiddenWarmupPendingSlots.keys(),
     ])) {
-      if (!activeRuntimeIdSet.has(runtimeId)) cancelHiddenWarmup(runtimeId);
+      if (!activeScopeIdSet.has(scopeId)) cancelHiddenWarmup(scopeId);
     }
 
     await Promise.all(
-      activeRuntimeIds.map((runtimeId) =>
-        refreshRuntimeTerminalStartup(runtimeId, {
+      activeScopeIds.map((scopeId) =>
+        refreshScopeTerminalStartup(scopeId, {
           rebuildHiddenQueue: options?.rebuildHiddenQueues === true,
         }),
       ),
     );
   }
 
-  function clearRuntimeTerminalStartupTracking(runtimeId: string) {
-    cancelHiddenWarmup(runtimeId);
-    clearPendingSessionOpensForRuntime(runtimeId);
-    hiddenWarmupPendingSlots.delete(runtimeId);
-    hiddenWarmupGeneration.delete(runtimeId);
+  function clearScopeTerminalStartupTracking(scopeId: string) {
+    cancelHiddenWarmup(scopeId);
+    clearPendingSessionOpensForScope(scopeId);
+    hiddenWarmupPendingSlots.delete(scopeId);
+    hiddenWarmupGeneration.delete(scopeId);
   }
 
   function markPendingInitialTerminal(workspaceId: string) {
     pendingInitialTerminalWorkspaceIds.add(workspaceId);
   }
 
-  function cleanupAllowedRuntimeIds(allowedRuntimeIds: Set<string>) {
+  function cleanupAllowedScopeIds(allowedScopeIds: Set<string>) {
     for (const workspaceId of pendingInitialTerminalWorkspaceIds) {
-      if (!allowedRuntimeIds.has(workspaceId))
+      if (!allowedScopeIds.has(workspaceId))
         pendingInitialTerminalWorkspaceIds.delete(workspaceId);
     }
   }
@@ -274,28 +274,27 @@ export function createTerminalStartupService(ctx: TerminalStartupContext) {
   ): void {
     if (isProjectRuntimeKey(workspaceId)) return;
     if (!pendingInitialTerminalWorkspaceIds.has(workspaceId)) return;
-    const runtime = ctx.getRuntimes()[workspaceId];
-    if (!runtime) return;
-    if (runtime.layoutLoading) return;
-    if (runtime.connectionState !== "connected") return;
-    if (runtime.slots.some((s) => s.kind === "terminal_slot")) {
+    const slots = getScopeSlots(workspaceId);
+    const layoutState = useLayoutStore.getState().byWorkspaceId[workspaceId];
+    if (layoutState?.layoutLoading) return;
+    if (slots.some((s) => s.kind === "terminal_slot")) {
       pendingInitialTerminalWorkspaceIds.delete(workspaceId);
       return;
     }
     if (pendingDefaultTerminalSeeds.has(workspaceId)) return;
     pendingDefaultTerminalSeeds.add(workspaceId);
 
-    void (async () => {
+    (async () => {
       try {
-        const alreadySeeded =
-          (ctx.getRuntimes()[workspaceId]?.slots.some((slot) => slot.kind === "terminal_slot") ??
-            false);
+        const alreadySeeded = getScopeSlots(workspaceId).some(
+          (slot) => slot.kind === "terminal_slot",
+        );
         if (alreadySeeded) {
           pendingInitialTerminalWorkspaceIds.delete(workspaceId);
           return;
         }
 
-        const client = runtimeGateway.getClient();
+        const client = getIpcClient();
         if (!client) return;
 
         const seeded = await seedWorkspaceTerminal(client, workspaceId);
@@ -303,17 +302,20 @@ export function createTerminalStartupService(ctx: TerminalStartupContext) {
 
         const workspaceRecord = ctx.getWorkspaceRecord(workspaceId);
         if (workspaceRecord) {
-          const projectRuntimeId = projectRuntimeKey(workspaceRecord.projectId);
-          await waitForRuntimeConnected(projectRuntimeId, 10_000, ctx.getRuntimes);
-          const projRuntime = ctx.getRuntimes()[projectRuntimeId];
-          if (projRuntime && (projRuntime.terminalPanel?.groups.length ?? 0) === 0) {
+          const projectScopeId = projectRuntimeKey(workspaceRecord.projectId);
+          const projectPanel = useTerminalScopeStore.getState().byScopeId[projectScopeId]?.terminalPanel;
+          if ((projectPanel?.groups.length ?? 0) === 0) {
             try {
-              const seededProj = await seedProjectTerminal(client, projectRuntimeId);
-              ctx.mutateRuntimeState(projectRuntimeId, (runtime) => {
-                addProjectTerminalGroupInRuntime(runtime, seededProj.slotID);
-                setProjectTerminalPanelVisibleInRuntime(runtime, true);
-              });
-              void refreshRuntimeTerminalStartup(projectRuntimeId, { rebuildHiddenQueue: true });
+              const seededProj = await seedProjectTerminal(client, projectScopeId);
+              addProjectTerminalGroup(projectScopeId, seededProj.slotID);
+              setProjectTerminalPanelVisible(projectScopeId, true);
+              const panel = useTerminalScopeStore.getState().byScopeId[projectScopeId]?.terminalPanel ?? null;
+              persistProjectTerminalPanel(projectScopeId, panel).catch((err) =>
+                console.warn("Failed to persist project terminal panel after seed:", err),
+              );
+              refreshScopeTerminalStartup(projectScopeId, { rebuildHiddenQueue: true }).catch(
+                (err) => console.warn("Failed to refresh project scope terminal startup:", err),
+              );
             } catch (err) {
               console.warn("Failed to seed default project bottom terminal:", err);
             }
@@ -326,42 +328,16 @@ export function createTerminalStartupService(ctx: TerminalStartupContext) {
       } finally {
         pendingDefaultTerminalSeeds.delete(workspaceId);
       }
-    })();
+    })().catch((err) => console.warn("ensureWorkspaceDefaultTerminal async error:", err));
   }
 
   return {
-    refreshRuntimeTerminalStartup,
-    refreshActiveRuntimeTerminalStartup,
-    clearRuntimeTerminalStartupTracking,
+    refreshScopeTerminalStartup,
+    refreshActiveScopeTerminalStartup,
+    clearScopeTerminalStartupTracking,
     ensureWorkspaceDefaultTerminal,
     markPendingInitialTerminal,
-    cleanupAllowedRuntimeIds,
+    cleanupAllowedScopeIds,
     cancelHiddenWarmup,
   };
-}
-
-/** Wait up to `timeoutMs` for a runtime to become connected. Resolves when connected, rejects on timeout. */
-export function waitForRuntimeConnected(
-  runtimeId: string,
-  timeoutMs: number,
-  getRuntimes: () => Record<string, WorkspaceRuntimeState> = () => ({}),
-): Promise<void> {
-  if (getRuntimes()[runtimeId]?.connectionState === "connected") {
-    return Promise.resolve();
-  }
-  return new Promise<void>((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
-    const poll = () => {
-      if (getRuntimes()[runtimeId]?.connectionState === "connected") {
-        resolve();
-        return;
-      }
-      if (Date.now() >= deadline) {
-        reject(new Error(`Runtime ${runtimeId} did not connect within ${timeoutMs}ms`));
-        return;
-      }
-      setTimeout(poll, 50);
-    };
-    setTimeout(poll, 50);
-  });
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
+import { startIpcEventRouting, stopIpcEventRouting } from "@/services/ipc/ipc-lifecycle";
 import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 import { uiPreferencesService } from "@/services/preferences/ui-preferences-service";
 import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
@@ -12,7 +12,7 @@ export function useBootstrapDesktop() {
     didBootstrap.current = true;
 
     const init = async () => {
-      await runtimeGateway.connect();
+      await startIpcEventRouting();
 
       desktopWorkspaceService.init({
         removeWorkspaceSurfaces: (workspaceId) =>
@@ -27,7 +27,7 @@ export function useBootstrapDesktop() {
     const teardown = () => {
       void terminalSurfaceService.removeAllSurfaces().catch(console.error);
       desktopWorkspaceService.dispose();
-      void runtimeGateway.disconnect();
+      stopIpcEventRouting();
     };
 
     window.addEventListener("beforeunload", teardown);

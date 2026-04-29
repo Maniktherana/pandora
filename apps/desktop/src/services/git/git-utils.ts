@@ -1,7 +1,7 @@
 import type { ScmEntry, ScmSnapshot } from "@/lib/shared/types";
-import type { TreeScmDecoration, TreeScmTone } from "./scm-types";
+import type { GitDecorationIndex, TreeGitDecoration, TreeGitTone } from "./git-types";
 
-export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
+export function gitToneTextClass(tone: TreeGitTone, dimmed = false): string {
   if (dimmed || tone === "ignored") return "text-[var(--theme-text-faint)]";
   switch (tone) {
     case "added":
@@ -19,7 +19,7 @@ export function scmToneTextClass(tone: TreeScmTone, dimmed = false): string {
   }
 }
 
-export function statusTone(entry: ScmEntry): TreeScmTone {
+export function statusTone(entry: ScmEntry): TreeGitTone {
   const staged = entry.stagedKind ?? "";
   const worktree = entry.worktreeKind ?? "";
   const combined = `${staged}${worktree}`;
@@ -32,10 +32,10 @@ export function statusTone(entry: ScmEntry): TreeScmTone {
   return null;
 }
 
-export function decorationForScmEntry(
+export function decorationForGitEntry(
   entry: ScmEntry,
   opts?: { includeDeleted?: boolean },
-): TreeScmDecoration {
+): TreeGitDecoration {
   const includeDeleted = opts?.includeDeleted ?? true;
   if (entry.untracked) {
     return { badge: "A", tone: "added", dimmed: false };
@@ -64,7 +64,7 @@ function comparePathSegment(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-export function compareScmPathsByTreeOrder(aPath: string, bPath: string): number {
+export function compareGitPathsByTreeOrder(aPath: string, bPath: string): number {
   const aSegments = pathSegments(aPath);
   const bSegments = pathSegments(bPath);
   const sharedDepth = Math.min(aSegments.length, bSegments.length);
@@ -92,8 +92,8 @@ export function compareScmPathsByTreeOrder(aPath: string, bPath: string): number
   return comparePathSegment(aPath, bPath);
 }
 
-export function sortScmEntriesByTreeOrder(entries: ScmEntry[]): ScmEntry[] {
-  return [...entries].sort((a, b) => compareScmPathsByTreeOrder(a.path, b.path));
+export function sortGitEntriesByTreeOrder(entries: ScmEntry[]): ScmEntry[] {
+  return [...entries].sort((a, b) => compareGitPathsByTreeOrder(a.path, b.path));
 }
 
 function stagedKindAfterStage(entry: ScmEntry): string {
@@ -107,13 +107,13 @@ function worktreeKindAfterUnstage(entry: ScmEntry): string {
   return entry.worktreeKind ?? entry.stagedKind ?? "M";
 }
 
-export function optimisticallyStageScmEntries(
+export function optimisticallyStageEntries(
   entries: ScmEntry[],
   paths: string[],
 ): ScmEntry[] {
   if (paths.length === 0) return entries;
   const pathSet = new Set(paths);
-  return sortScmEntriesByTreeOrder(
+  return sortGitEntriesByTreeOrder(
     entries.map((entry) => {
       if (!pathSet.has(entry.path) || (!entry.untracked && !entry.worktreeKind)) {
         return entry;
@@ -129,13 +129,13 @@ export function optimisticallyStageScmEntries(
   );
 }
 
-export function optimisticallyUnstageScmEntries(
+export function optimisticallyUnstageEntries(
   entries: ScmEntry[],
   paths: string[],
 ): ScmEntry[] {
   if (paths.length === 0) return entries;
   const pathSet = new Set(paths);
-  return sortScmEntriesByTreeOrder(
+  return sortGitEntriesByTreeOrder(
     entries.map((entry) => {
       if (!pathSet.has(entry.path) || !entry.stagedKind) {
         return entry;
@@ -152,22 +152,88 @@ export function optimisticallyUnstageScmEntries(
   );
 }
 
-export function optimisticallyStageAllScmEntries(entries: ScmEntry[]): ScmEntry[] {
-  return optimisticallyStageScmEntries(
+export function optimisticallyStageAllEntries(entries: ScmEntry[]): ScmEntry[] {
+  return optimisticallyStageEntries(
     entries,
     entries.filter((entry) => entry.untracked || entry.worktreeKind).map((entry) => entry.path),
   );
 }
 
-export function optimisticallyUnstageAllScmEntries(entries: ScmEntry[]): ScmEntry[] {
-  return optimisticallyUnstageScmEntries(
+export function optimisticallyUnstageAllEntries(entries: ScmEntry[]): ScmEntry[] {
+  return optimisticallyUnstageEntries(
     entries,
     entries.filter((entry) => entry.stagedKind).map((entry) => entry.path),
   );
 }
 
-/** Flatten a ScmSnapshot into a unified entry list compatible with the SCM panel UI. */
-export function flattenScmSnapshot(snapshot: ScmSnapshot | null): ScmEntry[] {
+/** Tone strength for directory decoration aggregation (higher = stronger). */
+function tonePriority(tone: TreeGitDecoration["tone"]): number {
+  switch (tone) {
+    case "conflict":
+      return 6;
+    case "deleted":
+      return 5;
+    case "modified":
+      return 4;
+    case "renamed":
+      return 3;
+    case "added":
+      return 2;
+    case "ignored":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Build pre-computed decoration lookup tables from a flat entry list.
+ *
+ * - `byPath`      — exact decoration for each changed file
+ * - `byDirectory` — strongest-tone decoration for every ancestor directory
+ *
+ * This lets file tree rows look up decorations in O(1) instead of scanning
+ * the full entry list on every render.
+ */
+export function buildGitDecorationIndex(entries: readonly ScmEntry[]): GitDecorationIndex {
+  const byPath: Record<string, TreeGitDecoration> = {};
+  const byDirectory: Record<string, TreeGitDecoration> = {};
+
+  for (const entry of entries) {
+    const decoration = decorationForGitEntry(entry, { includeDeleted: false });
+    if (decoration.tone === null) continue;
+
+    byPath[entry.path] = decoration;
+
+    // Walk every ancestor directory and propagate the strongest tone.
+    const segments = entry.path.split("/");
+    // segments.length - 1 because the last segment is the file name.
+    for (let depth = 1; depth < segments.length; depth++) {
+      const dirPath = segments.slice(0, depth).join("/");
+      const existing = byDirectory[dirPath];
+      if (!existing || tonePriority(decoration.tone) > tonePriority(existing.tone)) {
+        byDirectory[dirPath] = decoration;
+      }
+    }
+
+    // Also handle renames: the original path's directories get the same tone.
+    if (entry.origPath) {
+      const origSegments = entry.origPath.split("/");
+      for (let depth = 1; depth < origSegments.length; depth++) {
+        const dirPath = origSegments.slice(0, depth).join("/");
+        const existing = byDirectory[dirPath];
+        if (!existing || tonePriority(decoration.tone) > tonePriority(existing.tone)) {
+          byDirectory[dirPath] = decoration;
+        }
+      }
+    }
+  }
+
+  return { byPath, byDirectory };
+}
+
+/** Flatten a ScmSnapshot into a unified entry list compatible with the Git panel UI. */
+export function flattenGitSnapshot(snapshot: ScmSnapshot | null): ScmEntry[] {
   if (!snapshot) return [];
   const byPath = new Map<string, ScmEntry>();
   for (const entry of snapshot.staged) {

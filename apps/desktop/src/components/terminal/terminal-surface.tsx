@@ -37,15 +37,6 @@ export default function TerminalSurface({
     if (!sessionID) return;
     const currentAnchor = anchorElement ?? containerRef.current;
     if (!currentAnchor) return;
-    console.debug("[terminal-surface]", "upsertSurface", {
-      workspaceId,
-      sessionID,
-      surfaceId,
-      visible,
-      focused,
-      hasAnchorElement: Boolean(anchorElement),
-    });
-
     void terminalSurfaceService
       .upsertSurface({
         workspaceId,

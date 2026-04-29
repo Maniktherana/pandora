@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import { useDesktopView } from "./use-desktop-view";
+import { useSelectedWorkspaceId } from "@/hooks/use-navigation";
 import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
 
 export function useLayoutActions() {
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const selectedWorkspaceID = useSelectedWorkspaceId();
 
   return useMemo(
     () => ({

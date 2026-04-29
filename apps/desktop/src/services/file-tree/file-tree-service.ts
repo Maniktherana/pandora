@@ -1,170 +1,162 @@
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
+import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
-import {
-  loadFileTreeExpandedPaths,
-  persistFileTreeExpandedPaths,
-} from "@/services/file-tree/file-tree-preferences";
+import { loadFileTreeExpandedPaths } from "@/services/file-tree/file-tree-preferences";
 import {
   pendingFileTreeReads,
   pendingFileTreeWrites,
 } from "@/services/file-tree/file-tree-request-registry";
+import { fileTreeExpansionCommitter } from "@/services/file-tree/file-tree-expansion-committer";
 
-const subscribedRuntimeIds = new Set<string>();
+const subscribedScopeIds = new Set<string>();
 
 /**
- * Load persisted expansion, apply to store, and subscribe the runtime.
- * Always resolves — errors fall back to subscribing without paths.
+ * Set boot loading state, load persisted expansion, and subscribe the scope.
+ * Navigation does NOT wait for this — it fires from workspace startup and
+ * resolves in the background.  Always resolves — errors fall back to
+ * subscribing without paths.
  */
-export async function fileTreeInitExpansion(runtimeId: string): Promise<void> {
-  const current = useFileTreeStore.getState().byRuntimeId[runtimeId];
-  if (current && subscribedRuntimeIds.has(runtimeId)) {
+export async function fileTreeInitExpansion(scopeId: string): Promise<void> {
+  const current = useFileTreeStore.getState().byScopeId[scopeId];
+  if (current?.bootStatus === "loaded" && subscribedScopeIds.has(scopeId)) {
     return;
   }
-  const client = runtimeGateway.getClient();
+
+  useFileTreeStore.getState().setBootLoading(scopeId);
+
+  const client = getIpcClient();
   if (!client) return;
   try {
     const paths = current
       ? Array.from(current.expandedPaths)
-      : await loadFileTreeExpandedPaths(runtimeId);
+      : await loadFileTreeExpandedPaths(scopeId);
     if (!current) {
-      useFileTreeStore.getState().setExpandedPaths(runtimeId, new Set(paths));
+      useFileTreeStore.getState().setExpandedPaths(scopeId, new Set(paths));
     }
-    subscribedRuntimeIds.add(runtimeId);
-    void client.fileTreeSubscribe(runtimeId, paths).catch(() => {
-      subscribedRuntimeIds.delete(runtimeId);
+    subscribedScopeIds.add(scopeId);
+    void client.fileTreeSubscribe(scopeId, paths).catch(() => {
+      subscribedScopeIds.delete(scopeId);
     });
   } catch {
-    subscribedRuntimeIds.add(runtimeId);
-    void client.fileTreeSubscribe(runtimeId).catch(() => {
-      subscribedRuntimeIds.delete(runtimeId);
+    subscribedScopeIds.add(scopeId);
+    void client.fileTreeSubscribe(scopeId).catch(() => {
+      subscribedScopeIds.delete(scopeId);
     });
   }
 }
 
-/** Persist the current expanded paths for a runtime to local storage. */
-export function fileTreeFlushExpansion(runtimeId: string): void {
-  const paths =
-    useFileTreeStore.getState().byRuntimeId[runtimeId]?.expandedPaths ?? new Set<string>();
-  void persistFileTreeExpandedPaths(runtimeId, paths);
-}
+/**
+ * Clean service object for all file tree user actions.
+ *
+ * setExpanded / setExpandedPaths update the store synchronously, then
+ * schedule FileTreeExpansionCommitter which trailing-debounces the single
+ * persist + IPC write.  No IPC or persistence in the click path.
+ */
+export const fileTreeService = {
+  ensureSubscribed: fileTreeInitExpansion,
 
-export function fileTreeSetPathExpanded(
-  runtimeId: string,
-  relPath: string,
-  expanded: boolean,
-  persistNow: boolean,
-): void {
-  const current =
-    useFileTreeStore.getState().byRuntimeId[runtimeId]?.expandedPaths ?? new Set<string>();
-  const next = new Set(current);
-  if (expanded) next.add(relPath);
-  else next.delete(relPath);
-  useFileTreeStore.getState().setExpandedPaths(runtimeId, next);
-  if (persistNow) {
-    void persistFileTreeExpandedPaths(runtimeId, next);
-  }
-  void runtimeGateway.getClient()?.fileTreeSetExpandedPaths(runtimeId, Array.from(next));
-}
+  setExpanded(scopeId: string, relPath: string, expanded: boolean): void {
+    const current =
+      useFileTreeStore.getState().byScopeId[scopeId]?.expandedPaths ?? new Set<string>();
+    const next = new Set(current);
+    if (expanded) next.add(relPath);
+    else next.delete(relPath);
+    useFileTreeStore.getState().setExpandedPaths(scopeId, next);
+    fileTreeExpansionCommitter.schedule(scopeId);
+  },
 
-export function fileTreeSetAllExpandedPaths(
-  runtimeId: string,
-  paths: Set<string>,
-  persistNow: boolean,
-): void {
-  useFileTreeStore.getState().setExpandedPaths(runtimeId, paths);
-  if (persistNow) {
-    void persistFileTreeExpandedPaths(runtimeId, paths);
-  }
-  void runtimeGateway.getClient()?.fileTreeSetExpandedPaths(runtimeId, Array.from(paths));
-}
+  setExpandedPaths(scopeId: string, paths: Set<string>): void {
+    useFileTreeStore.getState().setExpandedPaths(scopeId, paths);
+    fileTreeExpansionCommitter.schedule(scopeId);
+  },
 
-export function fileTreeRefresh(runtimeId: string, path?: string): void {
-  void runtimeGateway.getClient()?.fileTreeRefresh(runtimeId, path);
-}
+  flushExpansion(scopeId: string): void {
+    fileTreeExpansionCommitter.flush(scopeId);
+  },
 
-export function fileTreeCreateFile(
-  runtimeId: string,
-  parentRelPath: string,
-  name: string,
-  contents = "",
-): void {
-  void runtimeGateway.getClient()?.fileTreeCreateFile(runtimeId, parentRelPath, name, contents);
-}
+  refresh(scopeId: string, path?: string): void {
+    getIpcClient()?.fileTreeRefresh(scopeId, path).catch(console.error);
+  },
 
-export function fileTreeCreateDirectory(runtimeId: string, relativePath: string): void {
-  void runtimeGateway.getClient()?.fileTreeCreateDirectory(runtimeId, relativePath);
-}
+  createFile(scopeId: string, parentRelPath: string, name: string, contents = ""): void {
+    getIpcClient()?.fileTreeCreateFile(scopeId, parentRelPath, name, contents).catch(console.error);
+  },
 
-export function fileTreeRename(runtimeId: string, sourceRelPath: string, newName: string): void {
-  void runtimeGateway.getClient()?.fileTreeRename(runtimeId, sourceRelPath, newName);
-}
+  createDirectory(scopeId: string, relativePath: string): void {
+    getIpcClient()?.fileTreeCreateDirectory(scopeId, relativePath).catch(console.error);
+  },
 
-export function fileTreeDelete(runtimeId: string, relativePath: string): void {
-  void runtimeGateway.getClient()?.fileTreeDelete(runtimeId, relativePath);
-}
+  rename(scopeId: string, sourceRelPath: string, newName: string): void {
+    getIpcClient()?.fileTreeRename(scopeId, sourceRelPath, newName).catch(console.error);
+  },
 
-export function fileTreeMove(
-  runtimeId: string,
-  sourceRelPath: string,
-  destRelPath: string,
-): void {
-  void runtimeGateway.getClient()?.fileTreeMove(runtimeId, sourceRelPath, destRelPath);
-}
+  delete(scopeId: string, relativePath: string): void {
+    getIpcClient()?.fileTreeDelete(scopeId, relativePath).catch(console.error);
+  },
 
-export function fileTreeCopy(
-  runtimeId: string,
-  sourceRelPath: string,
-  destRelPath: string,
-): void {
-  void runtimeGateway.getClient()?.fileTreeCopy(runtimeId, sourceRelPath, destRelPath);
-}
+  move(scopeId: string, sourceRelPath: string, destRelPath: string): void {
+    getIpcClient()?.fileTreeMove(scopeId, sourceRelPath, destRelPath).catch(console.error);
+  },
 
-export function fileTreeImport(
-  runtimeId: string,
-  destRelPath: string,
-  sourcePaths: string[],
-): void {
-  void runtimeGateway.getClient()?.fileTreeImport(runtimeId, destRelPath, sourcePaths);
+  copy(scopeId: string, sourceRelPath: string, destRelPath: string): void {
+    getIpcClient()?.fileTreeCopy(scopeId, sourceRelPath, destRelPath).catch(console.error);
+  },
+
+  importFiles(scopeId: string, destRelPath: string, sourcePaths: string[]): void {
+    getIpcClient()?.fileTreeImport(scopeId, destRelPath, sourcePaths).catch(console.error);
+  },
+
+  readTextFile(scopeId: string, relativePath: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+      const client = getIpcClient();
+      if (!client) {
+        reject(new Error("IPC client not available"));
+        return;
+      }
+      const requestID = crypto.randomUUID();
+      pendingFileTreeReads.set(requestID, resolve);
+      client.fileTreeReadTextFile(scopeId, requestID, relativePath).catch((err) => {
+        pendingFileTreeReads.delete(requestID);
+        reject(err as Error);
+      });
+    });
+  },
+
+  writeTextFile(scopeId: string, relativePath: string, contents: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const client = getIpcClient();
+      if (!client) {
+        reject(new Error("IPC client not available"));
+        return;
+      }
+      const requestID = crypto.randomUUID();
+      pendingFileTreeWrites.set(requestID, (error?: Error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+      client.fileTreeWriteTextFile(scopeId, requestID, relativePath, contents).catch((err) => {
+        pendingFileTreeWrites.delete(requestID);
+        reject(err as Error);
+      });
+    });
+  },
+};
+
+// Named function re-exports for external callers.
+export function fileTreeRefresh(scopeId: string, path?: string): void {
+  fileTreeService.refresh(scopeId, path);
 }
 
 export function fileTreeReadTextFile(
-  runtimeId: string,
+  scopeId: string,
   relativePath: string,
 ): Promise<string | null> {
-  return new Promise((resolve, reject) => {
-    const client = runtimeGateway.getClient();
-    if (!client) {
-      reject(new Error("Runtime not connected"));
-      return;
-    }
-    const requestID = crypto.randomUUID();
-    pendingFileTreeReads.set(requestID, resolve);
-    void client.fileTreeReadTextFile(runtimeId, requestID, relativePath).catch((err) => {
-      pendingFileTreeReads.delete(requestID);
-      reject(err as Error);
-    });
-  });
+  return fileTreeService.readTextFile(scopeId, relativePath);
 }
 
 export function fileTreeWriteTextFile(
-  runtimeId: string,
+  scopeId: string,
   relativePath: string,
   contents: string,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const client = runtimeGateway.getClient();
-    if (!client) {
-      reject(new Error("Runtime not connected"));
-      return;
-    }
-    const requestID = crypto.randomUUID();
-    pendingFileTreeWrites.set(requestID, (error?: Error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-    void client.fileTreeWriteTextFile(runtimeId, requestID, relativePath, contents).catch((err) => {
-      pendingFileTreeWrites.delete(requestID);
-      reject(err as Error);
-    });
-  });
+  return fileTreeService.writeTextFile(scopeId, relativePath, contents);
 }

@@ -5,6 +5,6 @@ export function projectRuntimeKey(projectId: string): string {
   return `${PROJECT_RUNTIME_PREFIX}${projectId}`;
 }
 
-export function isProjectRuntimeKey(runtimeId: string): boolean {
-  return runtimeId.startsWith(PROJECT_RUNTIME_PREFIX);
+export function isProjectRuntimeKey(scopeId: string): boolean {
+  return scopeId.startsWith(PROJECT_RUNTIME_PREFIX);
 }

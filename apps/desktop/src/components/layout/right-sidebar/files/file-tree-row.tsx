@@ -1,8 +1,8 @@
 import React from "react";
 import { cn } from "@/lib/shared/utils";
-import { scmToneTextClass } from "@/services/scm/scm-utils";
+import { gitToneTextClass } from "@/services/git/git-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import type { TreeScmDecoration } from "@/services/scm/scm-types";
+import type { TreeGitDecoration } from "@/services/git/git-types";
 import {
   TREE_ROW_HEIGHT_PX,
   TREE_ROW_INDENT_PX,
@@ -15,7 +15,7 @@ type FileTreeRowProps = {
   depth: number;
   icon: React.ReactNode;
   label: string;
-  decoration: TreeScmDecoration;
+  decoration: TreeGitDecoration;
   className?: string;
   onOpen?: () => void;
   onPointerDown?: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
@@ -72,7 +72,7 @@ export const FileTreeRow = React.memo(function FileTreeRow({
   const rowClassName = cn(
     "relative flex min-w-0 w-full select-none items-center gap-2 rounded-md py-1 pr-2 text-left text-xs",
     !isHoverSuppressed && "hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
-    scmToneTextClass(decoration.tone, decoration.dimmed),
+    gitToneTextClass(decoration.tone, decoration.dimmed),
     decoration.dimmed && "opacity-55",
     active && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
     isHighlightedLeaf && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",

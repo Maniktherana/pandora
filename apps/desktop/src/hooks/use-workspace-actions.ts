@@ -1,7 +1,6 @@
 import { useMemo } from "react";
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
 import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import type { DesktopViewStateSnapshot } from "@/services/workspace/desktop-view-projections";
+import type { NavigationArea } from "@/services/workspace/desktop-view-projections";
 
 export function useWorkspaceActions() {
   return useMemo(
@@ -20,18 +19,15 @@ export function useWorkspaceActions() {
       activateSidebarSelection: () =>
         void desktopWorkspaceService.activateSidebarSelection().catch(console.error),
       navigateSidebar: (offset: number) => desktopWorkspaceService.navigateSidebar(offset),
-      switchWorkspaceRelative: (
-        offset: number,
-        navigationArea?: DesktopViewStateSnapshot["navigationArea"],
-      ) =>
+      switchWorkspaceRelative: (offset: number, navigationArea?: NavigationArea) =>
         void desktopWorkspaceService
           .switchWorkspaceRelative(offset, navigationArea)
           .catch(console.error),
-      setNavigationArea: (area: DesktopViewStateSnapshot["navigationArea"]) =>
+      setNavigationArea: (area: NavigationArea) =>
         desktopWorkspaceService.setNavigationArea(area),
       setSearchText: (text: string) => desktopWorkspaceService.setSearchText(text),
-      setLayoutTargetRuntimeId: (runtimeId: string | null) =>
-        desktopWorkspaceService.setLayoutTargetRuntimeId(runtimeId),
+      setLayoutTargetScopeId: (scopeId: string | null) =>
+        desktopWorkspaceService.setLayoutTargetScopeId(scopeId),
       createWorkspace: (projectId: string, workspaceKind?: "worktree" | "linked") =>
         void desktopWorkspaceService.createWorkspace(projectId, workspaceKind).catch(console.error),
       retryWorkspace: (workspaceId: string) =>
@@ -48,8 +44,6 @@ export function useWorkspaceActions() {
         desktopWorkspaceService.restoreWorkspace(workspaceId),
       removeWorkspace: (workspaceId: string) =>
         desktopWorkspaceService.removeWorkspace(workspaceId),
-      connectRuntime: () => void runtimeGateway.connect(),
-      disconnectRuntime: () => runtimeGateway.disconnect(),
     }),
     [],
   );

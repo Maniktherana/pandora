@@ -2,10 +2,12 @@ import { findLeaf } from "@/components/layout/workspace/layout-migrate";
 import { isProjectRuntimeKey, projectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import { tryCloseEditorTab } from "@/components/editor/close-dirty-editor";
 import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
+import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalCommandError } from "@/services/service-errors";
 import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useLayoutStore } from "@/services/workspace/layout-store";
 
 export function encodeTerminalInput(text: string): string {
   const bytes = new TextEncoder().encode(text);
@@ -13,161 +15,152 @@ export function encodeTerminalInput(text: string): string {
   return btoa(binary);
 }
 
-export function resolveNewTerminalRuntimeId(state: {
-  effectiveLayoutRuntimeId: () => string | null;
+export function resolveNewTerminalScopeId(state: {
+  effectiveLayoutScopeId: () => string | null;
   selectedWorkspaceID: string | null;
 }) {
-  return state.effectiveLayoutRuntimeId() ?? state.selectedWorkspaceID;
+  return state.effectiveLayoutScopeId() ?? state.selectedWorkspaceID;
 }
 
-function getClient(runtimeId?: string) {
-  const client = runtimeGateway.getClient();
+function requireIpcClient(scopeId?: string) {
+  const client = getIpcClient();
   if (!client) {
     throw new TerminalCommandError({
-      cause: new Error("Terminal runtime not connected"),
-      ...(runtimeId === undefined ? {} : { runtimeId }),
+      cause: new Error("IPC client not available"),
+      ...(scopeId === undefined ? {} : { scopeId }),
     });
   }
   return client;
 }
 
-async function createProjectTerminal(runtimeId: string, index?: number): Promise<void> {
-  const client = getClient(runtimeId);
+async function createProjectTerminal(scopeId: string, index?: number): Promise<void> {
+  const client = requireIpcClient(scopeId);
   let seeded;
   try {
-    seeded = await seedProjectTerminal(client, runtimeId);
+    seeded = await seedProjectTerminal(client, scopeId);
   } catch (cause) {
-    throw new TerminalCommandError({ cause, runtimeId });
+    throw new TerminalCommandError({ cause, scopeId });
   }
-  desktopWorkspaceService.addProjectTerminalGroup(runtimeId, seeded.slotID, index);
-  desktopWorkspaceService.setProjectTerminalPanelVisible(runtimeId, true);
+  desktopWorkspaceService.addProjectTerminalGroup(scopeId, seeded.slotID, index);
+  desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
 }
 
-async function closeTerminalSlot(runtimeId: string, slotId: string): Promise<void> {
-  const runtime = desktopWorkspaceService.getRuntimeState(runtimeId);
-  const slot = desktopWorkspaceService.getSlotState(runtimeId, slotId);
+async function closeTerminalSlot(scopeId: string, slotId: string): Promise<void> {
+  const scope = useTerminalScopeStore.getState().byScopeId[scopeId];
+  const slot = scope?.slots.find((s) => s.id === slotId);
   const sessionIds = new Set<string>(slot?.sessionIDs ?? []);
-  for (const session of runtime?.sessions ?? []) {
+  for (const session of scope?.sessions ?? []) {
     if (session.slotID === slotId) sessionIds.add(session.id);
   }
 
-  const client = getClient(runtimeId);
+  const client = requireIpcClient(scopeId);
   try {
-    await client.send(runtimeId, { type: "remove_slot", slotID: slotId });
+    await client.send(scopeId, { type: "remove_slot", slotID: slotId });
   } catch (cause) {
-    throw new TerminalCommandError({ cause, runtimeId });
+    throw new TerminalCommandError({ cause, scopeId });
   }
   for (const sessionId of sessionIds) {
     await terminalSurfaceService.removeSurface(sessionId).catch((error) => {
       console.warn("Failed to remove terminal surface after slot close:", error);
     });
   }
-  if (isProjectRuntimeKey(runtimeId)) {
-    desktopWorkspaceService.closeProjectTerminal(runtimeId, slotId);
+  if (isProjectRuntimeKey(scopeId)) {
+    desktopWorkspaceService.closeProjectTerminal(scopeId, slotId);
   }
 }
 
 export const terminalCommandService = {
   newTerminal: async (): Promise<void> => {
-    const effectiveLayoutRuntimeId = desktopWorkspaceService.getEffectiveLayoutRuntimeId();
+    const effectiveLayoutScopeId = desktopWorkspaceService.getEffectiveLayoutScopeId();
     const selectedWorkspaceId = desktopWorkspaceService.getSelectedWorkspaceId();
-    const runtimeId = resolveNewTerminalRuntimeId({
-      effectiveLayoutRuntimeId: () => effectiveLayoutRuntimeId,
+    const scopeId = resolveNewTerminalScopeId({
+      effectiveLayoutScopeId: () => effectiveLayoutScopeId,
       selectedWorkspaceID: selectedWorkspaceId,
     });
-    if (!runtimeId) return;
-    if (isProjectRuntimeKey(runtimeId)) {
-      await createProjectTerminal(runtimeId);
+    if (!scopeId) return;
+    if (isProjectRuntimeKey(scopeId)) {
+      await createProjectTerminal(scopeId);
       return;
     }
-    try {
-      await desktopWorkspaceService.ensureWorkspaceRuntimeConnected(runtimeId);
-    } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
-    }
-    const client = getClient(runtimeId);
+    const client = requireIpcClient(scopeId);
     let seeded;
     try {
-      seeded = await seedWorkspaceTerminal(client, runtimeId);
+      seeded = await seedWorkspaceTerminal(client, scopeId);
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
-    const session = desktopWorkspaceService.getWorkspaceSession(runtimeId);
+    const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
     session.commands.addTerminalTab(seeded.slotID);
   },
 
-  createWorkspaceTerminal: async (runtimeId: string): Promise<void> => {
-    try {
-      await desktopWorkspaceService.ensureWorkspaceRuntimeConnected(runtimeId);
-    } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
-    }
-    const client = getClient(runtimeId);
+  createWorkspaceTerminal: async (scopeId: string): Promise<void> => {
+    const client = requireIpcClient(scopeId);
     let seeded;
     try {
-      seeded = await seedWorkspaceTerminal(client, runtimeId);
+      seeded = await seedWorkspaceTerminal(client, scopeId);
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
-    const session = desktopWorkspaceService.getWorkspaceSession(runtimeId);
+    const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
     session.commands.addTerminalTab(seeded.slotID);
   },
 
   createProjectTerminal,
 
-  splitProjectTerminalGroup: async (runtimeId: string, groupId: string): Promise<void> => {
-    const client = getClient(runtimeId);
+  splitProjectTerminalGroup: async (scopeId: string, groupId: string): Promise<void> => {
+    const client = requireIpcClient(scopeId);
     let seeded;
     try {
-      seeded = await seedProjectTerminal(client, runtimeId);
+      seeded = await seedProjectTerminal(client, scopeId);
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
-    desktopWorkspaceService.splitProjectTerminalGroup(runtimeId, groupId, seeded.slotID);
-    desktopWorkspaceService.setProjectTerminalPanelVisible(runtimeId, true);
+    desktopWorkspaceService.splitProjectTerminalGroup(scopeId, groupId, seeded.slotID);
+    desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
   },
 
   closeTerminalSlot,
 
-  renameTerminal: async (runtimeId: string, slotId: string, name: string): Promise<void> => {
-    const client = getClient(runtimeId);
+  renameTerminal: async (scopeId: string, slotId: string, name: string): Promise<void> => {
+    const client = requireIpcClient(scopeId);
     try {
-      await client.send(runtimeId, { type: "update_slot", slot: { id: slotId, name } });
+      await client.send(scopeId, { type: "update_slot", slot: { id: slotId, name } });
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
   },
 
-  sendInput: async (runtimeId: string, sessionId: string, text: string): Promise<void> => {
-    const client = getClient(runtimeId);
+  sendInput: async (scopeId: string, sessionId: string, text: string): Promise<void> => {
+    const client = requireIpcClient(scopeId);
     try {
-      await client.send(runtimeId, {
+      await client.send(scopeId, {
         type: "input",
         sessionID: sessionId,
         data: encodeTerminalInput(text),
       });
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
   },
 
   closeFocusedTab: async (): Promise<void> => {
-    const runtimeId = desktopWorkspaceService.getEffectiveLayoutRuntimeId();
-    if (!runtimeId) return;
+    const scopeId = desktopWorkspaceService.getEffectiveLayoutScopeId();
+    if (!scopeId) return;
 
-    const runtime = desktopWorkspaceService.getRuntimeState(runtimeId);
-    if (!runtime) return;
+    const scope = useTerminalScopeStore.getState().byScopeId[scopeId];
+    const layout = useLayoutStore.getState().byWorkspaceId[scopeId];
 
-    if (isProjectRuntimeKey(runtimeId)) {
-      const slotId = runtime.terminalPanel?.activeSlotId;
+    if (isProjectRuntimeKey(scopeId)) {
+      const slotId = scope?.terminalPanel?.activeSlotId;
       if (!slotId) return;
-      await closeTerminalSlot(runtimeId, slotId);
+      await closeTerminalSlot(scopeId, slotId);
       return;
     }
 
-    const focusedPaneID = runtime.focusedPaneID;
-    if (!runtime.root || !focusedPaneID) return;
-    const leaf = findLeaf(runtime.root, focusedPaneID);
+    const focusedPaneID = layout?.focusedPaneID ?? null;
+    const root = layout?.root ?? null;
+    if (!root || !focusedPaneID) return;
+    const leaf = findLeaf(root, focusedPaneID);
     if (!leaf || leaf.tabs.length === 0) return;
 
     const index = leaf.selectedIndex;
@@ -175,21 +168,21 @@ export const terminalCommandService = {
     if (!tab) return;
 
     if (tab.kind === "terminal") {
-      await closeTerminalSlot(runtimeId, tab.slotId);
+      await closeTerminalSlot(scopeId, tab.slotId);
       return;
     }
 
     if (tab.kind === "diff" || tab.kind === "review") {
-      const session = desktopWorkspaceService.getWorkspaceSession(runtimeId);
+      const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
       session.commands.closeTab(focusedPaneID, index);
       return;
     }
 
-    const workspace = desktopWorkspaceService.getWorkspaceRecord(runtimeId);
+    const workspace = desktopWorkspaceService.getWorkspaceRecord(scopeId);
     if (!workspace || workspace.status !== "ready") return;
 
     const label = tab.path.split("/").pop() ?? tab.path;
-    const session = desktopWorkspaceService.getWorkspaceSession(runtimeId);
+    const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
     try {
       await tryCloseEditorTab({
         workspaceId: workspace.id,
@@ -203,7 +196,7 @@ export const terminalCommandService = {
         },
       });
     } catch (cause) {
-      throw new TerminalCommandError({ cause, runtimeId });
+      throw new TerminalCommandError({ cause, scopeId });
     }
   },
 
@@ -217,12 +210,12 @@ export const terminalCommandService = {
       : null;
     if (!selectedProjectId || selectedWorkspace?.status !== "ready") return;
 
-    const runtimeId = projectRuntimeKey(selectedProjectId);
-    desktopWorkspaceService.setProjectTerminalPanelVisible(runtimeId, true);
+    const scopeId = projectRuntimeKey(selectedProjectId);
+    desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
 
-    const runtime = desktopWorkspaceService.getRuntimeState(runtimeId);
-    if ((runtime?.terminalPanel?.groups.length ?? 0) > 0) return;
+    const scope = useTerminalScopeStore.getState().byScopeId[scopeId];
+    if ((scope?.terminalPanel?.groups.length ?? 0) > 0) return;
 
-    await createProjectTerminal(runtimeId);
+    await createProjectTerminal(scopeId);
   },
 };

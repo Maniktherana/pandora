@@ -1,79 +1,136 @@
 import { create } from "zustand";
 import type { FileTreeEntry } from "@/lib/shared/types";
+import type { FileTreeVisibleRow } from "./file-tree-types";
+import { buildVisibleRows } from "./file-tree-projection";
+
+export type FileTreeBootStatus = "idle" | "loading" | "loaded" | "error";
 
 export interface FileTreeRuntimeState {
   rootPath: string;
+  bootStatus: FileTreeBootStatus;
   directories: Record<string, FileTreeEntry[]>;
   expandedPaths: Set<string>;
+  /** Flat ordered row list — recomputed synchronously on every tree/expansion mutation. */
+  visibleRows: FileTreeVisibleRow[];
   lastError: string | null;
 }
 
+const EMPTY_VISIBLE_ROWS: FileTreeVisibleRow[] = [];
+
 function emptyFileTreeState(): FileTreeRuntimeState {
-  return { rootPath: "", directories: {}, expandedPaths: new Set(), lastError: null };
+  return {
+    rootPath: "",
+    bootStatus: "idle",
+    directories: {},
+    expandedPaths: new Set(),
+    visibleRows: EMPTY_VISIBLE_ROWS,
+    lastError: null,
+  };
 }
 
 interface FileTreeStoreState {
-  byRuntimeId: Record<string, FileTreeRuntimeState>;
+  byScopeId: Record<string, FileTreeRuntimeState>;
+  setBootLoading: (scopeId: string) => void;
   applySnapshot: (
-    runtimeId: string,
+    scopeId: string,
     rootPath: string,
     directories: Record<string, FileTreeEntry[]>,
     expandedPaths: string[],
   ) => void;
-  applyDirectoryChanged: (runtimeId: string, path: string, entries: FileTreeEntry[]) => void;
-  setExpandedPaths: (runtimeId: string, paths: Set<string>) => void;
-  setError: (runtimeId: string, error: string | null) => void;
-  resetRuntime: (runtimeId: string) => void;
+  applyDirectoryChanged: (scopeId: string, path: string, entries: FileTreeEntry[]) => void;
+  setExpandedPaths: (scopeId: string, paths: Set<string>) => void;
+  setError: (scopeId: string, error: string, options?: { forceErrorStatus?: boolean }) => void;
+  resetScope: (scopeId: string) => void;
 }
 
 export const useFileTreeStore = create<FileTreeStoreState>((set) => ({
-  byRuntimeId: {},
+  byScopeId: {},
 
-  applySnapshot: (runtimeId, rootPath, directories, expandedPaths) =>
-    set((s) => ({
-      byRuntimeId: {
-        ...s.byRuntimeId,
-        [runtimeId]: {
-          ...(s.byRuntimeId[runtimeId] ?? emptyFileTreeState()),
-          rootPath,
-          directories,
-          expandedPaths: new Set(expandedPaths),
-          lastError: null,
-        },
-      },
-    })),
-
-  applyDirectoryChanged: (runtimeId, path, entries) =>
+  setBootLoading: (scopeId) =>
     set((s) => {
-      const current = s.byRuntimeId[runtimeId] ?? emptyFileTreeState();
+      const current = s.byScopeId[scopeId] ?? emptyFileTreeState();
       return {
-        byRuntimeId: {
-          ...s.byRuntimeId,
-          [runtimeId]: { ...current, directories: { ...current.directories, [path]: entries } },
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: { ...current, bootStatus: "loading" },
         },
       };
     }),
 
-  setExpandedPaths: (runtimeId, paths) =>
+  applySnapshot: (scopeId, rootPath, directories, expandedPaths) =>
     set((s) => {
-      const current = s.byRuntimeId[runtimeId] ?? emptyFileTreeState();
+      const paths = new Set(expandedPaths);
       return {
-        byRuntimeId: { ...s.byRuntimeId, [runtimeId]: { ...current, expandedPaths: paths } },
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: {
+            ...(s.byScopeId[scopeId] ?? emptyFileTreeState()),
+            rootPath,
+            bootStatus: "loaded",
+            directories,
+            expandedPaths: paths,
+            visibleRows: buildVisibleRows(directories, paths),
+            lastError: null,
+          },
+        },
       };
     }),
 
-  setError: (runtimeId, error) =>
+  applyDirectoryChanged: (scopeId, path, entries) =>
     set((s) => {
-      const current = s.byRuntimeId[runtimeId] ?? emptyFileTreeState();
+      const current = s.byScopeId[scopeId] ?? emptyFileTreeState();
+      const directories = { ...current.directories, [path]: entries };
       return {
-        byRuntimeId: { ...s.byRuntimeId, [runtimeId]: { ...current, lastError: error } },
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: {
+            ...current,
+            directories,
+            visibleRows: buildVisibleRows(directories, current.expandedPaths),
+          },
+        },
       };
     }),
 
-  resetRuntime: (runtimeId) =>
+  setExpandedPaths: (scopeId, paths) =>
     set((s) => {
-      const next = { ...s.byRuntimeId };
-      delete next[runtimeId];
-      return { byRuntimeId: next };
+      const current = s.byScopeId[scopeId] ?? emptyFileTreeState();
+      return {
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: {
+            ...current,
+            expandedPaths: paths,
+            visibleRows: buildVisibleRows(current.directories, paths),
+          },
+        },
+      };
+    }),
+
+  setError: (scopeId, error, options) =>
+    set((s) => {
+      const current = s.byScopeId[scopeId] ?? emptyFileTreeState();
+      const rootDirectoryExists =
+        current.directories[""] !== undefined && current.directories[""] !== null;
+      const shouldErrorStatus =
+        options?.forceErrorStatus ||
+        (current.bootStatus !== "loaded" && !rootDirectoryExists);
+      return {
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: {
+            ...current,
+            bootStatus: shouldErrorStatus ? "error" : current.bootStatus,
+            lastError: error,
+          },
+        },
+      };
+    }),
+
+  resetScope: (scopeId) =>
+    set((s) => {
+      const next = { ...s.byScopeId };
+      delete next[scopeId];
+      return { byScopeId: next };
     }),
 }));

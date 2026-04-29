@@ -66,7 +66,6 @@ const waitForNextFrame = () =>
 
 const enqueueSurfaceCreate = async (surfaceId: string, task: () => Promise<void>) => {
   const queued = createQueue.then(async () => {
-    console.debug("[terminal-surface]", "create queued", { surfaceId });
     await waitForNextFrame();
     await task();
   });
@@ -132,22 +131,10 @@ function getObservedElements(anchor: HTMLElement): HTMLElement[] {
 
 const buildPayload = (entry: ManagedSurfaceEntry) => {
   if (!entry.anchorElement) {
-    console.debug("[terminal-surface]", "payload skipped", {
-      workspaceId: entry.workspaceId,
-      sessionId: entry.sessionId,
-      surfaceId: entry.surfaceId,
-      reason: "missing anchor element",
-    });
     return null;
   }
   const payload = snapRect(entry.anchorElement);
   if (!payload) {
-    console.debug("[terminal-surface]", "payload skipped", {
-      workspaceId: entry.workspaceId,
-      sessionId: entry.sessionId,
-      surfaceId: entry.surfaceId,
-      reason: "anchor rect has zero width or height",
-    });
     return null;
   }
 
@@ -164,21 +151,11 @@ const buildPayload = (entry: ManagedSurfaceEntry) => {
 const syncSurface = async (entry: ManagedSurfaceEntry, forceCreate: boolean) => {
   const supported = await getNativeSupport();
   if (!supported) {
-    console.debug("[terminal-surface]", "create skipped", {
-      workspaceId: entry.workspaceId,
-      sessionId: entry.sessionId,
-      surfaceId: entry.surfaceId,
-      reason: "native terminal unsupported",
-    });
     return;
   }
 
   const payload = buildPayload(entry);
   if (!payload) {
-    console.debug("[terminal-surface]", "sync skipped", {
-      surfaceId: entry.surfaceId,
-      reason: "no payload",
-    });
     return;
   }
 
@@ -190,12 +167,6 @@ const syncSurface = async (entry: ManagedSurfaceEntry, forceCreate: boolean) => 
       if (!createPayload) return;
       if (entry.created && !forceCreate) return;
 
-      console.debug("[terminal-surface]", "create attempted", {
-        workspaceId: entry.workspaceId,
-        sessionId: entry.sessionId,
-        surfaceId: entry.surfaceId,
-        forceCreate,
-      });
       entry.lastSignature = null;
       entry.pendingCreate = false;
       entry.created = true;
@@ -215,13 +186,6 @@ const syncSurface = async (entry: ManagedSurfaceEntry, forceCreate: boolean) => 
       }
     });
     if (!entry.created) return;
-  } else {
-    console.debug("[terminal-surface]", "create skipped", {
-      workspaceId: entry.workspaceId,
-      sessionId: entry.sessionId,
-      surfaceId: entry.surfaceId,
-      reason: "surface already created",
-    });
   }
 
   if (entry.lastSignature === payload.signature) return;
@@ -278,12 +242,6 @@ const scheduleSync = (surfaceId: string, forceCreate = false, ignoreOverlay = fa
     clearScheduledSync(entry);
     return;
   }
-  console.debug("[terminal-surface]", "sync scheduled", {
-    workspaceId: entry.workspaceId,
-    sessionId: entry.sessionId,
-    surfaceId,
-    forceCreate,
-  });
   if (entry.rafId != null) return;
   entry.rafId = requestAnimationFrame(() => {
     entry.rafId = null;
@@ -437,14 +395,6 @@ export const terminalSurfaceService = {
   upsertSurface: async (input: ManagedSurfaceRegistration): Promise<void> => {
     let entry = entries.get(input.surfaceId);
     if (!entry) {
-      console.debug("[terminal-surface]", "surface inserted", {
-        workspaceId: input.workspaceId,
-        sessionId: input.sessionId,
-        surfaceId: input.surfaceId,
-        visible: input.visible,
-        focused: input.focused,
-        hasAnchorElement: Boolean(input.anchorElement),
-      });
       entry = {
         ...input,
         resizeObserver: null,
@@ -464,15 +414,6 @@ export const terminalSurfaceService = {
       const anchorChanged = entry.anchorElement !== input.anchorElement;
       const overlayExempt = input.overlayExempt ?? false;
       const overlayChanged = entry.overlayExempt !== overlayExempt;
-      if (anchorChanged) {
-        console.debug("[terminal-surface]", "anchor changed", {
-          workspaceId: input.workspaceId,
-          sessionId: input.sessionId,
-          surfaceId: input.surfaceId,
-          hadAnchorElement: Boolean(entry.anchorElement),
-          hasAnchorElement: Boolean(input.anchorElement),
-        });
-      }
       entry.workspaceId = input.workspaceId;
       entry.sessionId = input.sessionId;
       entry.anchorElement = input.anchorElement;

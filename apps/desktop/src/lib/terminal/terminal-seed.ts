@@ -1,4 +1,4 @@
-import type { RuntimeClient } from "@/services/runtime/runtime-client";
+import type { IpcClient } from "@/services/ipc/ipc-client";
 
 function defaultShellInfo(): { shellPath: string; shellName: string } {
   const shellPath =
@@ -10,8 +10,8 @@ function defaultShellInfo(): { shellPath: string; shellName: string } {
 }
 
 export async function seedTerminalWithName(
-  client: RuntimeClient,
-  runtimeId: string,
+  client: IpcClient,
+  scopeId: string,
   name?: string,
 ): Promise<{ slotID: string; sessionDefID: string; shellName: string }> {
   const slotID = crypto.randomUUID();
@@ -19,7 +19,7 @@ export async function seedTerminalWithName(
   const { shellPath } = defaultShellInfo();
   const label = name ?? "Terminal";
 
-  await client.send(runtimeId, {
+  await client.send(scopeId, {
     type: "create_slot",
     slot: {
       id: slotID,
@@ -33,7 +33,7 @@ export async function seedTerminalWithName(
       sortOrder: Date.now(),
     },
   });
-  await client.send(runtimeId, {
+  await client.send(scopeId, {
     type: "create_session_def",
     session: {
       id: sessionDefID,
@@ -44,7 +44,7 @@ export async function seedTerminalWithName(
       cwd: null,
       port: null,
       envOverrides: {
-        PANDORA_RUNTIME_ID: runtimeId,
+        PANDORA_RUNTIME_ID: scopeId,
         PANDORA_SLOT_ID: slotID,
       },
       restartPolicy: "manual",
@@ -52,15 +52,15 @@ export async function seedTerminalWithName(
       resumeSupported: false,
     },
   });
-  await client.send(runtimeId, { type: "open_session_instance", sessionDefID });
+  await client.send(scopeId, { type: "open_session_instance", sessionDefID });
 
   return { slotID, sessionDefID, shellName: "terminal" };
 }
 
-export function seedWorkspaceTerminal(client: RuntimeClient, runtimeId: string) {
-  return seedTerminalWithName(client, runtimeId, "Terminal");
+export function seedWorkspaceTerminal(client: IpcClient, scopeId: string) {
+  return seedTerminalWithName(client, scopeId, "Terminal");
 }
 
-export function seedProjectTerminal(client: RuntimeClient, runtimeId: string) {
-  return seedTerminalWithName(client, runtimeId, "Terminal");
+export function seedProjectTerminal(client: IpcClient, scopeId: string) {
+  return seedTerminalWithName(client, scopeId, "Terminal");
 }

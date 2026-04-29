@@ -1,106 +1,60 @@
 import { describe, expect, test } from "bun:test";
-import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import type { SlotState, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { cycleRuntimeTabs } from "@/services/workspace/workspace-layout-model";
-import {
-  createWorkspaceRuntimeState,
-  ensureProjectTerminalPanel,
-  replaceRuntimeSlots,
-} from "@/services/workspace/workspace-runtime-model";
+import { reconcileProjectTerminalPanelState } from "./project-terminal-panel-model";
+import type { TerminalPanelState } from "@/lib/shared/types";
 
-function createTerminalSlot(id: string, sortOrder: number): SlotState {
+function makePanel(
+  groups: Array<{ id: string; children: string[] }>,
+  activeGroupIndex = 0,
+  activeSlotId?: string | null,
+): TerminalPanelState {
   return {
-    id,
-    kind: "terminal_slot",
-    name: id,
-    autostart: false,
-    presentationMode: "single",
-    primarySessionDefID: null,
-    sessionDefIDs: [],
-    persisted: false,
-    sortOrder,
-    aggregateStatus: "stopped",
-    sessionIDs: [],
-    capabilities: {
-      canFocus: true,
-      canPause: false,
-      canResume: false,
-      canClear: true,
-      canStop: true,
-      canRestart: true,
-    },
-  };
-}
-
-function createCorruptedProjectRuntime(): WorkspaceRuntimeState {
-  const runtime = createWorkspaceRuntimeState(projectRuntimeKey("project-1"));
-  replaceRuntimeSlots(runtime, [
-    createTerminalSlot("terminal-a", 1),
-    createTerminalSlot("terminal-b", 2),
-    createTerminalSlot("terminal-c", 3),
-  ]);
-  runtime.terminalPanel = {
-    groups: [
-      { id: "group-a", children: ["terminal-a"] },
-      { id: "group-c", children: ["terminal-c"] },
-      { id: "group-b", children: ["terminal-b"] },
-    ],
-    activeGroupIndex: 1,
-    activeSlotId: "terminal-c",
+    groups,
+    activeGroupIndex,
+    activeSlotId: activeSlotId ?? groups[activeGroupIndex]?.children[0] ?? null,
     visible: true,
   };
-  return runtime;
 }
 
 describe("project terminal panel reconciliation", () => {
   test("realigns groups after a removed terminal is re-added and slots later return to canonical order", () => {
-    const runtime = createWorkspaceRuntimeState(projectRuntimeKey("project-1"));
+    const initialSlots = ["terminal-a", "terminal-b", "terminal-c"];
+    let panel = reconcileProjectTerminalPanelState(null, initialSlots);
 
-    replaceRuntimeSlots(runtime, [
-      createTerminalSlot("terminal-a", 1),
-      createTerminalSlot("terminal-b", 2),
-      createTerminalSlot("terminal-c", 3),
-    ]);
-    ensureProjectTerminalPanel(runtime);
+    const afterRemoval = ["terminal-a", "terminal-c"];
+    panel = reconcileProjectTerminalPanelState(panel, afterRemoval);
 
-    replaceRuntimeSlots(runtime, [
-      createTerminalSlot("terminal-a", 1),
-      createTerminalSlot("terminal-c", 3),
-    ]);
-    ensureProjectTerminalPanel(runtime);
-
-    replaceRuntimeSlots(runtime, [
-      createTerminalSlot("terminal-a", 1),
-      createTerminalSlot("terminal-c", 3),
-      createTerminalSlot("terminal-b", 2),
-    ]);
-    ensureProjectTerminalPanel(runtime);
-    expect(runtime.terminalPanel?.groups.map((group) => group.children)).toEqual([
+    const afterReAdd = ["terminal-a", "terminal-c", "terminal-b"];
+    panel = reconcileProjectTerminalPanelState(panel, afterReAdd);
+    expect(panel.groups.map((g) => g.children)).toEqual([
       ["terminal-a"],
       ["terminal-c"],
       ["terminal-b"],
     ]);
 
-    replaceRuntimeSlots(runtime, [
-      createTerminalSlot("terminal-a", 1),
-      createTerminalSlot("terminal-b", 2),
-      createTerminalSlot("terminal-c", 3),
-    ]);
-    ensureProjectTerminalPanel(runtime);
-
-    expect(runtime.terminalPanel?.groups.map((group) => group.children)).toEqual([
+    const canonical = ["terminal-a", "terminal-b", "terminal-c"];
+    panel = reconcileProjectTerminalPanelState(panel, canonical);
+    expect(panel.groups.map((g) => g.children)).toEqual([
       ["terminal-a"],
       ["terminal-b"],
       ["terminal-c"],
     ]);
   });
 
-  test("realigns terminal groups to the runtime slot order and preserves the active group", () => {
-    const runtime = createCorruptedProjectRuntime();
+  test("realigns terminal groups to the slot order and preserves the active group", () => {
+    const corrupted = makePanel(
+      [
+        { id: "group-a", children: ["terminal-a"] },
+        { id: "group-c", children: ["terminal-c"] },
+        { id: "group-b", children: ["terminal-b"] },
+      ],
+      1,
+      "terminal-c",
+    );
 
-    ensureProjectTerminalPanel(runtime);
+    const slots = ["terminal-a", "terminal-b", "terminal-c"];
+    const result = reconcileProjectTerminalPanelState(corrupted, slots);
 
-    expect(runtime.terminalPanel).toEqual({
+    expect(result).toEqual({
       groups: [
         { id: "group-a", children: ["terminal-a"] },
         { id: "group-b", children: ["terminal-b"] },
@@ -110,23 +64,5 @@ describe("project terminal panel reconciliation", () => {
       activeSlotId: "terminal-c",
       visible: true,
     });
-  });
-
-  test("cycles project terminals in the reconciled slot order", () => {
-    const runtime = createCorruptedProjectRuntime();
-
-    ensureProjectTerminalPanel(runtime);
-
-    expect(cycleRuntimeTabs(runtime, 1)).toBe(true);
-    expect(runtime.terminalPanel?.activeSlotId).toBe("terminal-a");
-    expect(runtime.terminalPanel?.activeGroupIndex).toBe(0);
-
-    expect(cycleRuntimeTabs(runtime, 1)).toBe(true);
-    expect(runtime.terminalPanel?.activeSlotId).toBe("terminal-b");
-    expect(runtime.terminalPanel?.activeGroupIndex).toBe(1);
-
-    expect(cycleRuntimeTabs(runtime, -1)).toBe(true);
-    expect(runtime.terminalPanel?.activeSlotId).toBe("terminal-a");
-    expect(runtime.terminalPanel?.activeGroupIndex).toBe(0);
   });
 });

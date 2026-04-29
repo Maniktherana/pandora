@@ -1,52 +1,50 @@
-import type { DiffSource, LayoutAxis, LayoutNode, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { DiffSource, LayoutAxis, LayoutNode } from "@/lib/shared/types";
 import {
-  createLeaf,
-  findLeaf,
   getAllLeaves,
   getVisualLeaves,
+  createLeaf,
+  findLeaf,
   insertTabInPane,
   removeMatchingTabFromTree,
   removeTabAtIndexInTree,
   splitPaneAroundTab,
   splitPaneWithinLeaf,
+  addTerminalTabToNode,
+  getAllTerminalSlotIds,
+  removeTerminalSlotFromTree,
 } from "@/components/layout/workspace/layout-tree";
-import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import { acknowledgeTerminalAgentStatus } from "@/lib/terminal/agent-activity";
+import { useLayoutStore, type WorkspaceLayoutState } from "@/services/workspace/layout-store";
 
-export type WorkspaceLayoutChange = {
-  root: LayoutNode | null;
-  focusedPaneID: string | null;
-};
+type WorkspaceLayoutSnapshot = Pick<WorkspaceLayoutState, "root" | "focusedPaneID">;
 
-type WorkspaceLayoutSnapshot = {
-  root: LayoutNode | null;
-  focusedPaneID: string | null;
-};
-
-function snapshotRuntime(runtime: WorkspaceRuntimeState): WorkspaceLayoutSnapshot {
-  return {
-    root: runtime.root,
-    focusedPaneID: runtime.focusedPaneID,
-  };
+function readWorkspaceLayout(workspaceId: string): WorkspaceLayoutState {
+  return useLayoutStore.getState().getLayout(workspaceId);
 }
 
-function applySnapshot(runtime: WorkspaceRuntimeState, snapshot: WorkspaceLayoutSnapshot) {
-  runtime.root = snapshot.root;
-  runtime.focusedPaneID = snapshot.focusedPaneID;
+function commitWorkspaceLayout(workspaceId: string, next: WorkspaceLayoutSnapshot) {
+  useLayoutStore.getState().setLayout(workspaceId, {
+    root: next.root,
+    focusedPaneID: next.focusedPaneID,
+  });
 }
 
-function ensureWorkspaceRoot(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
-  if (snapshot.root) {
-    const leaves = getAllLeaves(snapshot.root);
+function ensureWorkspaceRoot(layout: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
+  if (layout.root) {
+    const leaves = getAllLeaves(layout.root);
     const focusedPaneID =
-      snapshot.focusedPaneID && findLeaf(snapshot.root, snapshot.focusedPaneID)
-        ? snapshot.focusedPaneID
+      layout.focusedPaneID && findLeaf(layout.root, layout.focusedPaneID)
+        ? layout.focusedPaneID
         : (leaves[0]?.id ?? null);
-    return { root: snapshot.root, focusedPaneID };
+    return { root: layout.root, focusedPaneID };
   }
 
   const root = createLeaf([]);
   return { root, focusedPaneID: root.id };
+}
+
+function selectInsertionPane(root: LayoutNode, focusedPaneID: string | null): string | null {
+  if (focusedPaneID && findLeaf(root, focusedPaneID)) return focusedPaneID;
+  return getAllLeaves(root)[0]?.id ?? null;
 }
 
 function selectTabInLayout(root: LayoutNode, paneID: string, index: number): LayoutNode {
@@ -65,25 +63,25 @@ function selectTabInLayout(root: LayoutNode, paneID: string, index: number): Lay
   };
 }
 
-function withLayoutSnapshot(
-  runtime: WorkspaceRuntimeState,
-  transform: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceLayoutSnapshot | null,
+function withWorkspaceLayoutSnapshot(
+  workspaceId: string,
+  transform: (snapshot: WorkspaceLayoutState) => WorkspaceLayoutSnapshot | null,
 ): boolean {
-  const next = transform(snapshotRuntime(runtime));
+  const next = transform(readWorkspaceLayout(workspaceId));
   if (!next) return false;
-  applySnapshot(runtime, next);
+  commitWorkspaceLayout(workspaceId, next);
   return true;
 }
 
-export function splitPaneInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function splitPaneInWorkspaceLayout(
+  workspaceId: string,
   targetPaneID: string,
   sourcePaneID: string,
   sourceTabIndex: number,
   axis: LayoutAxis,
   position: "before" | "after",
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     const srcLeaf = findLeaf(snapshot.root, sourcePaneID);
     const tab = srcLeaf?.tabs[sourceTabIndex];
@@ -104,10 +102,7 @@ export function splitPaneInWorkspaceRuntime(
     );
     if (!root) {
       root = createLeaf([tab]);
-      return {
-        root,
-        focusedPaneID: root.type === "leaf" ? root.id : snapshot.focusedPaneID,
-      };
+      return { root, focusedPaneID: root.type === "leaf" ? root.id : snapshot.focusedPaneID };
     }
     if (!findLeaf(root, targetPaneID)) return null;
     root = splitPaneAroundTab(root, targetPaneID, tab, axis, position);
@@ -115,13 +110,13 @@ export function splitPaneInWorkspaceRuntime(
   });
 }
 
-export function addTabToPaneInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function addTabToPaneInWorkspaceLayout(
+  workspaceId: string,
   targetPaneID: string,
   sourcePaneID: string,
   sourceTabIndex: number,
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     const srcLeaf = findLeaf(snapshot.root, sourcePaneID);
     const tab = srcLeaf?.tabs[sourceTabIndex];
@@ -139,12 +134,12 @@ export function addTabToPaneInWorkspaceRuntime(
   });
 }
 
-export function removeTabFromWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function removeTabFromWorkspaceLayout(
+  workspaceId: string,
   paneID: string,
   tabIndex: number,
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     const newRoot = removeTabAtIndexInTree(snapshot.root, paneID, tabIndex);
     const leaves = newRoot ? getAllLeaves(newRoot) : [];
@@ -155,31 +150,27 @@ export function removeTabFromWorkspaceRuntime(
   });
 }
 
-export function selectTabInPaneInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function selectTabInPaneInWorkspaceLayout(
+  workspaceId: string,
   paneID: string,
   index: number,
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     const leaf = findLeaf(snapshot.root, paneID);
     if (!leaf) return null;
-    const selectedTab = leaf.tabs[index];
-    if (selectedTab?.kind === "terminal") {
-      acknowledgeTerminalAgentStatus(runtime, selectedTab.slotId);
-    }
     return { root: selectTabInLayout(snapshot.root, paneID, index), focusedPaneID: paneID };
   });
 }
 
-export function moveTabInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function moveTabInWorkspaceLayout(
+  workspaceId: string,
   fromPaneID: string,
   toPaneID: string,
   fromIndex: number,
   toIndex: number,
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     const srcLeaf = findLeaf(snapshot.root, fromPaneID);
     const tab = srcLeaf?.tabs[fromIndex];
@@ -199,13 +190,13 @@ export function moveTabInWorkspaceRuntime(
   });
 }
 
-export function reorderTabInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function reorderTabInWorkspaceLayout(
+  workspaceId: string,
   paneID: string,
   fromIndex: number,
   toIndex: number,
 ) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
 
     function reorder(node: LayoutNode): LayoutNode {
@@ -232,79 +223,48 @@ export function reorderTabInWorkspaceRuntime(
   });
 }
 
-export function setFocusedPaneInWorkspaceRuntime(runtime: WorkspaceRuntimeState, paneID: string) {
-  return withLayoutSnapshot(runtime, (snapshot) => {
+export function setFocusedPaneInWorkspaceLayout(workspaceId: string, paneID: string) {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
     if (!snapshot.root) return null;
     if (!findLeaf(snapshot.root, paneID)) return null;
     return { root: snapshot.root, focusedPaneID: paneID };
   });
 }
 
-export function cycleRuntimeTabs(runtime: WorkspaceRuntimeState, direction: -1 | 1) {
-  if (isProjectRuntimeKey(runtime.workspaceId)) {
-    const panel = runtime.terminalPanel;
-    if (!panel || panel.groups.length === 0) return false;
+export function cycleWorkspaceTabs(workspaceId: string, direction: -1 | 1) {
+  return withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
+    if (!snapshot.root || !snapshot.focusedPaneID) return null;
 
-    const activeSlotId =
-      panel.activeSlotId ?? panel.groups[panel.activeGroupIndex]?.children[0] ?? null;
-    if (!activeSlotId) return false;
+    const leaves = getVisualLeaves(snapshot.root).filter((leaf) => leaf.tabs.length > 0);
+    if (leaves.length === 0) return null;
 
-    const terminals = panel.groups.flatMap((group) =>
-      group.children.map((slotId) => ({ groupId: group.id, slotId })),
-    );
-    if (terminals.length === 0) return false;
+    const currentLeaf = leaves.find((leaf) => leaf.id === snapshot.focusedPaneID);
+    if (!currentLeaf) return null;
 
-    const currentIndex = terminals.findIndex((terminal) => terminal.slotId === activeSlotId);
-    const resolvedIndex = currentIndex >= 0 ? currentIndex : 0;
-    const nextIndex = (resolvedIndex + direction + terminals.length) % terminals.length;
-    const nextTerminal = terminals[nextIndex] ?? terminals[0];
-    if (!nextTerminal) return false;
+    const nextIndex = currentLeaf.selectedIndex + direction;
+    if (nextIndex >= 0 && nextIndex < currentLeaf.tabs.length) {
+      const root = selectTabInLayout(snapshot.root, currentLeaf.id, nextIndex);
+      return { root, focusedPaneID: currentLeaf.id };
+    }
 
-    runtime.terminalPanel = {
-      ...panel,
-      activeSlotId: nextTerminal.slotId,
-      activeGroupIndex: panel.groups.findIndex((group) => group.id === nextTerminal.groupId),
-    };
-    return true;
-  }
+    const paneIdx = leaves.indexOf(currentLeaf);
+    const nextPaneIdx = paneIdx + direction;
+    if (nextPaneIdx < 0 || nextPaneIdx >= leaves.length) {
+      const wrapPane = direction === 1 ? leaves[0] : leaves[leaves.length - 1];
+      const wrapTabIdx = direction === 1 ? 0 : Math.max(0, wrapPane.tabs.length - 1);
+      const root = selectTabInLayout(snapshot.root, wrapPane.id, wrapTabIdx);
+      return { root, focusedPaneID: wrapPane.id };
+    }
 
-  if (!runtime.root || !runtime.focusedPaneID) return false;
-
-  const leaves = getVisualLeaves(runtime.root).filter((leaf) => leaf.tabs.length > 0);
-  if (leaves.length === 0) return false;
-
-  const currentLeaf = leaves.find((leaf) => leaf.id === runtime.focusedPaneID);
-  if (!currentLeaf) return false;
-
-  const nextIndex = currentLeaf.selectedIndex + direction;
-  if (nextIndex >= 0 && nextIndex < currentLeaf.tabs.length) {
-    return selectTabInPaneInWorkspaceRuntime(runtime, currentLeaf.id, nextIndex);
-  }
-
-  const paneIdx = leaves.indexOf(currentLeaf);
-  const nextPaneIdx = paneIdx + direction;
-  if (nextPaneIdx < 0 || nextPaneIdx >= leaves.length) {
-    const wrapPane = direction === 1 ? leaves[0] : leaves[leaves.length - 1];
-    const wrapTabIdx = direction === 1 ? 0 : Math.max(0, wrapPane.tabs.length - 1);
-    return (
-      selectTabInPaneInWorkspaceRuntime(runtime, wrapPane.id, wrapTabIdx) &&
-      setFocusedPaneInWorkspaceRuntime(runtime, wrapPane.id)
-    );
-  }
-
-  const nextPane = leaves[nextPaneIdx];
-  const targetIndex = direction === 1 ? 0 : Math.max(0, nextPane.tabs.length - 1);
-  return (
-    selectTabInPaneInWorkspaceRuntime(runtime, nextPane.id, targetIndex) &&
-    setFocusedPaneInWorkspaceRuntime(runtime, nextPane.id)
-  );
+    const nextPane = leaves[nextPaneIdx];
+    const targetIndex = direction === 1 ? 0 : Math.max(0, nextPane.tabs.length - 1);
+    const root = selectTabInLayout(snapshot.root, nextPane.id, targetIndex);
+    return { root, focusedPaneID: nextPane.id };
+  });
 }
 
-export function openEditorTabInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
-  relativePath: string,
-) {
-  const snapshot = ensureWorkspaceRoot(snapshotRuntime(runtime));
+export function openEditorTabInWorkspaceLayout(workspaceId: string, relativePath: string) {
+  const snapshot = ensureWorkspaceRoot(readWorkspaceLayout(workspaceId));
   if (!snapshot.root) return false;
   const leaves = getAllLeaves(snapshot.root);
   let paneID = snapshot.focusedPaneID;
@@ -317,10 +277,10 @@ export function openEditorTabInWorkspaceRuntime(
   if (!leaf) return false;
   const dup = leaf.tabs.findIndex((tab) => tab.kind === "editor" && tab.path === relativePath);
   if (dup >= 0) {
-    return selectTabInPaneInWorkspaceRuntime(runtime, paneID, dup);
+    return selectTabInPaneInWorkspaceLayout(workspaceId, paneID, dup);
   }
 
-  return withLayoutSnapshot(runtime, (current) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (current) => {
     if (!current.root) return null;
     const pl = findLeaf(current.root, paneID!);
     const at = pl?.tabs.length ?? 0;
@@ -329,12 +289,12 @@ export function openEditorTabInWorkspaceRuntime(
   });
 }
 
-export function openDiffTabInWorkspaceRuntime(
-  runtime: WorkspaceRuntimeState,
+export function openDiffTabInWorkspaceLayout(
+  workspaceId: string,
   relativePath: string,
   source: DiffSource,
 ) {
-  const snapshot = ensureWorkspaceRoot(snapshotRuntime(runtime));
+  const snapshot = ensureWorkspaceRoot(readWorkspaceLayout(workspaceId));
   if (!snapshot.root) return false;
   const leaves = getAllLeaves(snapshot.root);
   let paneID = snapshot.focusedPaneID;
@@ -349,10 +309,10 @@ export function openDiffTabInWorkspaceRuntime(
     (tab) => tab.kind === "diff" && tab.path === relativePath && tab.source === source,
   );
   if (dup >= 0) {
-    return selectTabInPaneInWorkspaceRuntime(runtime, paneID, dup);
+    return selectTabInPaneInWorkspaceLayout(workspaceId, paneID, dup);
   }
 
-  return withLayoutSnapshot(runtime, (current) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (current) => {
     if (!current.root) return null;
     const pl = findLeaf(current.root, paneID!);
     const at = pl?.tabs.length ?? 0;
@@ -366,17 +326,14 @@ export function openDiffTabInWorkspaceRuntime(
   });
 }
 
-export function openReviewTabInWorkspaceRuntime(runtime: WorkspaceRuntimeState) {
-  const snapshot = ensureWorkspaceRoot(snapshotRuntime(runtime));
+export function openReviewTabInWorkspaceLayout(workspaceId: string) {
+  const snapshot = ensureWorkspaceRoot(readWorkspaceLayout(workspaceId));
   if (!snapshot.root) return false;
 
   for (const leaf of getAllLeaves(snapshot.root)) {
     const reviewIndex = leaf.tabs.findIndex((tab) => tab.kind === "review");
     if (reviewIndex >= 0) {
-      return (
-        selectTabInPaneInWorkspaceRuntime(runtime, leaf.id, reviewIndex) &&
-        setFocusedPaneInWorkspaceRuntime(runtime, leaf.id)
-      );
+      return selectTabInPaneInWorkspaceLayout(workspaceId, leaf.id, reviewIndex);
     }
   }
 
@@ -387,11 +344,79 @@ export function openReviewTabInWorkspaceRuntime(runtime: WorkspaceRuntimeState) 
   }
   if (!paneID) return false;
 
-  return withLayoutSnapshot(runtime, (current) => {
+  return withWorkspaceLayoutSnapshot(workspaceId, (current) => {
     if (!current.root) return null;
     const leaf = findLeaf(current.root, paneID!);
     const insertAt = leaf?.tabs.length ?? 0;
     const root = insertTabInPane(current.root, paneID!, { kind: "review" }, insertAt);
     return { root, focusedPaneID: paneID };
+  });
+}
+
+export function sanitizeWorkspaceTerminalLayout(
+  root: LayoutNode | null,
+  focusedPaneID: string | null,
+  liveSlotIds: Set<string>,
+): { root: LayoutNode | null; focusedPaneID: string | null } {
+  if (!root) {
+    return { root: null, focusedPaneID: null };
+  }
+
+  let nextRoot: LayoutNode | null = root;
+  for (const slotId of new Set(getAllTerminalSlotIds(root))) {
+    if (!liveSlotIds.has(slotId)) {
+      nextRoot = nextRoot ? removeTerminalSlotFromTree(nextRoot, slotId) : null;
+    }
+  }
+
+  if (!nextRoot) {
+    return { root: null, focusedPaneID: null };
+  }
+
+  const nextFocusedPaneID =
+    focusedPaneID && findLeaf(nextRoot, focusedPaneID)
+      ? focusedPaneID
+      : (getAllLeaves(nextRoot)[0]?.id ?? null);
+
+  return { root: nextRoot, focusedPaneID: nextFocusedPaneID };
+}
+
+export function removeTerminalSlotFromWorkspaceLayout(workspaceId: string, slotId: string) {
+  withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
+    if (!snapshot.root) return null;
+    const newRoot = removeTerminalSlotFromTree(snapshot.root, slotId);
+    const leaves = newRoot ? getAllLeaves(newRoot) : [];
+    const focusedOK =
+      newRoot && snapshot.focusedPaneID ? findLeaf(newRoot, snapshot.focusedPaneID) : null;
+    const focusedPaneID = focusedOK ? snapshot.focusedPaneID : (leaves[0]?.id ?? null);
+    return { root: newRoot, focusedPaneID };
+  });
+}
+
+export function ensureWorkspaceTerminalLayout(workspaceId: string, slotIds: string[]) {
+  if (slotIds.length === 0) return;
+  withWorkspaceLayoutSnapshot(workspaceId, (snapshot) => {
+    if (snapshot.layoutLoading) return null;
+
+    const existingSlotIds = snapshot.root
+      ? new Set(getAllTerminalSlotIds(snapshot.root))
+      : new Set<string>();
+    const newSlotIds = slotIds.filter((id) => !existingSlotIds.has(id));
+    if (newSlotIds.length === 0) return null;
+
+    let root: LayoutNode = snapshot.root ?? createLeaf([]);
+    let focusedPaneID = snapshot.focusedPaneID ?? (root.type === "leaf" ? root.id : null);
+
+    for (const slotId of newSlotIds) {
+      if (focusedPaneID) {
+        root = addTerminalTabToNode(root, focusedPaneID, slotId);
+      } else {
+        const leaf = createLeaf([{ kind: "terminal", slotId }]);
+        root = leaf;
+        focusedPaneID = leaf.id;
+      }
+    }
+
+    return { root, focusedPaneID };
   });
 }

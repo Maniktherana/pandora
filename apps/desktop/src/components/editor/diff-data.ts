@@ -1,8 +1,8 @@
 import type { DiffSource } from "@/lib/shared/types";
 import {
-  scmReadGitBlob,
-  scmReadGitCompareBlob,
-} from "@/services/scm/scm-api";
+  gitReadBlob,
+  gitReadCompareBlob,
+} from "@/services/git/git-api";
 
 export type DiffContentsData = {
   original: string;
@@ -31,21 +31,21 @@ export async function fetchDiffContents(
   if (source === "branch") {
     if (!targetBranch) return { original: "", modified: "" };
     const [original, modified] = await Promise.all([
-      scmReadGitCompareBlob(workspaceRoot, relativePath, targetBranch, "base"),
-      scmReadGitCompareBlob(workspaceRoot, relativePath, targetBranch, "head"),
+      gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "base"),
+      gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "head"),
     ]);
     return { original, modified };
   }
 
   if (source === "staged") {
     const [original, modified] = await Promise.all([
-      scmReadGitBlob(workspaceRoot, relativePath, "head"),
-      scmReadGitBlob(workspaceRoot, relativePath, "index"),
+      gitReadBlob(workspaceRoot, relativePath, "head"),
+      gitReadBlob(workspaceRoot, relativePath, "index"),
     ]);
     return { original, modified };
   }
 
-  const original = await scmReadGitBlob(workspaceRoot, relativePath, "head");
+  const original = await gitReadBlob(workspaceRoot, relativePath, "head");
   let modified = "";
   if (readWorkingCopy) {
     try {

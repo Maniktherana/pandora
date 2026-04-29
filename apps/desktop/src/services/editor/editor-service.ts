@@ -1,4 +1,4 @@
-import { runtimeGateway } from "@/services/runtime/runtime-gateway";
+import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import { useEditorStore } from "./editor-store";
 import { pendingEditorReads, pendingEditorWrites } from "./editor-request-registry";
 
@@ -14,7 +14,7 @@ export async function editorEnsureFileLoaded(
   const existing = useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath];
   if (existing !== undefined) return true;
 
-  const client = runtimeGateway.getClient();
+  const client = getIpcClient();
   if (!client) return false;
 
   const requestID = crypto.randomUUID();
@@ -72,7 +72,7 @@ export async function editorSaveFile(
     content ?? useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath];
   if (buf === undefined) return false;
 
-  const client = runtimeGateway.getClient();
+  const client = getIpcClient();
   if (!client) return false;
 
   const requestID = crypto.randomUUID();

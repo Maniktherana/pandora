@@ -1,4 +1,4 @@
-import type { TerminalPanelState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { TerminalPanelState } from "@/lib/shared/types";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
 import {
   addTerminalGroup,
@@ -14,6 +14,7 @@ import {
   setTerminalPanelVisible,
   terminalPanelContainsSlot,
 } from "@/lib/terminal/bottom-terminal-panel";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 
 export function createProjectTerminalPanelState(): TerminalPanelState {
   return createEmptyTerminalPanel();
@@ -74,92 +75,85 @@ export function reconcileProjectTerminalPanelState(
   };
 }
 
-function updateProjectTerminalPanel(
-  runtime: WorkspaceRuntimeState,
+function updatePanel(
+  scopeId: string,
   updater: (panel: TerminalPanelState) => TerminalPanelState,
-) {
-  if (!isProjectRuntimeKey(runtime.workspaceId)) return;
-  runtime.terminalPanel = updater(runtime.terminalPanel ?? createEmptyTerminalPanel());
+): void {
+  if (!isProjectRuntimeKey(scopeId)) return;
+  const store = useTerminalScopeStore.getState();
+  const scope = store.byScopeId[scopeId];
+  const panel = scope?.terminalPanel ?? createEmptyTerminalPanel();
+  store.setTerminalPanel(scopeId, updater(panel));
 }
 
-export function addProjectTerminalGroupInRuntime(
-  runtime: WorkspaceRuntimeState,
-  slotId: string,
-  index?: number,
-) {
-  updateProjectTerminalPanel(runtime, (panel) =>
+export function addProjectTerminalGroup(scopeId: string, slotId: string, index?: number): void {
+  updatePanel(scopeId, (panel) =>
     addTerminalGroup(panel, slotId, index === undefined ? {} : { index }),
   );
 }
 
-export function splitProjectTerminalGroupInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function splitProjectTerminalGroup(
+  scopeId: string,
   groupId: string,
   slotId: string,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => addTerminalToGroup(panel, groupId, slotId));
+): void {
+  updatePanel(scopeId, (panel) => addTerminalToGroup(panel, groupId, slotId));
 }
 
-export function closeProjectTerminalInRuntime(runtime: WorkspaceRuntimeState, slotId: string) {
-  updateProjectTerminalPanel(runtime, (panel) => removeTerminalFromPanel(panel, slotId));
+export function closeProjectTerminal(scopeId: string, slotId: string): void {
+  updatePanel(scopeId, (panel) => removeTerminalFromPanel(panel, slotId));
 }
 
-export function selectProjectTerminalGroupInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function selectProjectTerminalGroup(
+  scopeId: string,
   groupId: string,
   slotId?: string | null,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => setActiveTerminalGroup(panel, groupId, slotId));
+): void {
+  updatePanel(scopeId, (panel) => setActiveTerminalGroup(panel, groupId, slotId));
 }
 
-export function focusProjectTerminalInRuntime(
-  runtime: WorkspaceRuntimeState,
-  slotId: string | null,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => setActiveTerminalSlot(panel, slotId));
+export function focusProjectTerminal(scopeId: string, slotId: string | null): void {
+  updatePanel(scopeId, (panel) => setActiveTerminalSlot(panel, slotId));
 }
 
-export function setProjectTerminalPanelVisibleInRuntime(
-  runtime: WorkspaceRuntimeState,
-  visible: boolean,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => setTerminalPanelVisible(panel, visible));
+export function setProjectTerminalPanelVisible(scopeId: string, visible: boolean): void {
+  updatePanel(scopeId, (panel) => setTerminalPanelVisible(panel, visible));
 }
 
-export function reorderProjectTerminalGroupsInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function reorderProjectTerminalGroups(
+  scopeId: string,
   fromIndex: number,
   toIndex: number,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => reorderTerminalGroups(panel, fromIndex, toIndex));
+): void {
+  updatePanel(scopeId, (panel) => reorderTerminalGroups(panel, fromIndex, toIndex));
 }
 
-export function reorderProjectTerminalGroupChildrenInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function reorderProjectTerminalGroupChildren(
+  scopeId: string,
   groupId: string,
   fromIndex: number,
   toIndex: number,
-) {
-  updateProjectTerminalPanel(runtime, (panel) =>
+): void {
+  updatePanel(scopeId, (panel) =>
     reorderTerminalGroupChildren(panel, groupId, fromIndex, toIndex),
   );
 }
 
-export function moveProjectTerminalToGroupInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function moveProjectTerminalToGroup(
+  scopeId: string,
   slotId: string,
   targetGroupId: string,
   index?: number,
-) {
-  updateProjectTerminalPanel(runtime, (panel) =>
+): void {
+  updatePanel(scopeId, (panel) =>
     moveTerminalToGroup(panel, slotId, targetGroupId, index === undefined ? {} : { index }),
   );
 }
 
-export function moveProjectTerminalToNewGroupInRuntime(
-  runtime: WorkspaceRuntimeState,
+export function moveProjectTerminalToNewGroup(
+  scopeId: string,
   slotId: string,
   index: number,
-) {
-  updateProjectTerminalPanel(runtime, (panel) => moveTerminalToNewGroup(panel, slotId, index));
+): void {
+  updatePanel(scopeId, (panel) => moveTerminalToNewGroup(panel, slotId, index));
 }

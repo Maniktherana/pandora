@@ -54,10 +54,10 @@ export class UiPreferenceError extends Error {
 export class TerminalCommandError extends Error {
   readonly _tag = "TerminalCommandError";
   override readonly cause: unknown;
-  readonly runtimeId?: string;
-  constructor(params: { cause: unknown; runtimeId?: string }) {
+  readonly scopeId?: string;
+  constructor(params: { cause: unknown; scopeId?: string }) {
     super("TerminalCommandError");
     this.cause = params.cause;
-    if (params.runtimeId !== undefined) this.runtimeId = params.runtimeId;
+    if (params.scopeId !== undefined) this.scopeId = params.scopeId;
   }
 }

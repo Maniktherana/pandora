@@ -29,21 +29,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/preview-card";
-import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
+import { useSelectedWorkspaceId, useNavigationArea } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
-import type { WorkspaceRecord, WorkspaceRuntimeState } from "@/lib/shared/types";
-import { useScmStore } from "@/services/scm/scm-store";
-import { flattenScmSnapshot } from "@/services/scm/scm-utils";
+import type { WorkspaceRecord } from "@/lib/shared/types";
+import { useGitSummaryStore } from "@/services/git/git-summary-store";
+import { useWorkspaceAgentStatus } from "@/services/terminal/terminal-scope-store";
 import DotGridLoader from "@/components/dot-grid-loader";
-import {
-  isTerminalAgentAttentionStatus,
-  workspaceTerminalAgentStatus,
-} from "@/lib/terminal/agent-activity";
-
-function selectAgentStatus(runtime: WorkspaceRuntimeState | null) {
-  return workspaceTerminalAgentStatus(runtime);
-}
+import { isTerminalAgentAttentionStatus } from "@/lib/terminal/agent-activity";
 
 function isRowActionTarget(target: EventTarget | null) {
   return target instanceof Element && target.closest("[data-workspace-row-action='true']") != null;
@@ -54,25 +47,24 @@ type WorkspaceRowProps = {
 };
 
 function WorkspaceRow({ workspace }: WorkspaceRowProps) {
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const navigationArea = useDesktopView((view) => view.navigationArea);
+  const selectedWorkspaceID = useSelectedWorkspaceId();
+  const navigationArea = useNavigationArea();
   const workspaceCommands = useWorkspaceActions();
   const [renameValue, setRenameValue] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
-  const agentStatus = useRuntimeState(workspace.id, selectAgentStatus);
-  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspace.id]?.snapshot ?? null);
-  const scmStatus = flattenScmSnapshot(scmSnapshot);
+  const agentStatus = useWorkspaceAgentStatus(workspace.id);
+  const gitSummary = useGitSummaryStore((s) => s.byWorkspaceId[workspace.id] ?? null);
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
   const isFailed = workspace.status === "failed";
   const isArchived = workspace.status === "archived";
   const isPending = pendingAction !== null;
-  const addedCount = scmSnapshot?.lineStats.added ?? 0;
-  const removedCount = scmSnapshot?.lineStats.removed ?? 0;
-  const filesChanged = scmStatus.length;
+  const addedCount = gitSummary?.lineStats.added ?? 0;
+  const removedCount = gitSummary?.lineStats.removed ?? 0;
+  const filesChanged = gitSummary?.filesChanged ?? 0;
   const hasAgentAttention = !isSelected && isTerminalAgentAttentionStatus(agentStatus);
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;

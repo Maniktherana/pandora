@@ -9,7 +9,6 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { Virtualizer } from "@pierre/diffs/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -22,7 +21,7 @@ import {
   PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
-import type { DiffSource, HeaderBranchContext } from "@/lib/shared/types";
+import type { DiffSource } from "@/lib/shared/types";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { Button } from "@/components/ui/button";
@@ -36,14 +35,11 @@ import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { getPierreSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/pierre-pandora";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import {
-  decorationForScmEntry,
-  flattenScmSnapshot,
-} from "@/services/scm/scm-utils";
+import { decorationForGitEntry } from "@/services/git/git-utils";
 import type {
-  ScmLineStats,
-  TreeScmDecoration,
-} from "@/services/scm/scm-types";
+  GitLineStats,
+  TreeGitDecoration,
+} from "@/services/git/git-types";
 import type { ScmEntry } from "@/lib/shared/types";
 import {
   DropdownMenu,
@@ -59,8 +55,8 @@ import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
 } from "@/components/layout/right-sidebar/scm/target-branch";
-import { useScmStore } from "@/services/scm/scm-store";
-import { useScmController } from "@/services/scm/use-scm";
+import { useGitStore } from "@/services/git/git-store";
+import { useGitController } from "@/services/git/use-git";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
@@ -151,7 +147,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function estimateDiffBodyHeight(stats: ScmLineStats | undefined): number {
+function estimateDiffBodyHeight(stats: GitLineStats | undefined): number {
   const changedLines = Math.max((stats?.added ?? 0) + (stats?.removed ?? 0), 4);
   return clamp(
     (changedLines + 8) * REVIEW_DIFF_METRICS.lineHeight + REVIEW_DIFF_METRICS.hunkSeparatorHeight,
@@ -188,8 +184,8 @@ function BranchModeLabel({ branchLabel }: { branchLabel: BranchLabel | null }) {
 type ReviewFileEntryProps = {
   entry: ScmEntry;
   source: DiffSource;
-  stats: ScmLineStats | undefined;
-  decoration: TreeScmDecoration;
+  stats: GitLineStats | undefined;
+  decoration: TreeGitDecoration;
   isOpen: boolean;
   canStage: boolean;
   busy: boolean;
@@ -205,20 +201,20 @@ type ReviewFileEntryProps = {
   onOpenFile: (path: string) => void;
   onRevert: (entry: ScmEntry) => void;
   onStage: (entry: ScmEntry) => void;
-  onStatsChange: (path: string, source: DiffSource, stats: ScmLineStats) => void;
+  onStatsChange: (path: string, source: DiffSource, stats: GitLineStats) => void;
 };
 
 type ReviewDiffBodyProps = {
   entry: ScmEntry;
   source: DiffSource;
-  stats: ScmLineStats | undefined;
+  stats: GitLineStats | undefined;
   workspaceId: string;
   workspaceRoot: string;
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
   targetBranch?: string | null | undefined;
-  onStatsChange: (path: string, source: DiffSource, stats: ScmLineStats) => void;
+  onStatsChange: (path: string, source: DiffSource, stats: GitLineStats) => void;
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({
@@ -438,18 +434,18 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const scm = useScmController(workspaceId);
-  const scmSnapshot = useScmStore((s) => s.byRuntimeId[workspaceId]?.snapshot ?? null);
-  const isFetching = useScmStore((s) => s.byRuntimeId[workspaceId]?.refreshing ?? false);
-  const entries = useMemo(() => flattenScmSnapshot(scmSnapshot), [scmSnapshot]);
+  const scm = useGitController(workspaceId);
+  const gitSnapshot = useGitStore((s) => s.byScopeId[workspaceId]?.snapshot ?? null);
+  const isFetching = useGitStore((s) => s.byScopeId[workspaceId]?.refreshing ?? false);
+  const entries = scm.entries;
   const [diffLayout, setDiffLayout] = useState<DiffLayout>(loadDiffLayout);
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
-  const targetBranch = scmSnapshot?.targetBranch ?? null;
+  const targetBranch = gitSnapshot?.targetBranch ?? null;
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
-  const [loadedStatsByKey, setLoadedStatsByKey] = useState<Record<string, ScmLineStats>>({});
+  const [loadedStatsByKey, setLoadedStatsByKey] = useState<Record<string, GitLineStats>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const reviewNavigationRequest = useReviewNavigationStore(
     (state) => state.requestByWorkspaceId[workspaceId] ?? null,
@@ -461,41 +457,25 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       setBaseBranchLabel(null);
       return;
     }
-    let cancelled = false;
-    invoke<HeaderBranchContext>("header_branch_context", { workspaceId: workspace.id })
-      .then((ctx) => {
-        if (!cancelled) {
-          const resolvedTarget = resolveWorkspaceTargetBranch(ctx, targetBranch);
-          setBaseBranchLabel({
-            source: workspace.gitBranchName,
-            target: formatTargetBranch(resolvedTarget),
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setBaseBranchLabel({
-            source: workspace.gitBranchName,
-            target: "origin/...",
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace, targetBranch]);
+    const resolvedTarget = scm.branchContext
+      ? resolveWorkspaceTargetBranch(scm.branchContext, targetBranch)
+      : targetBranch;
+    setBaseBranchLabel({
+      source: workspace.gitBranchName,
+      target: formatTargetBranch(resolvedTarget),
+    });
+  }, [workspace, targetBranch, scm.branchContext]);
 
   const filteredEntries = useMemo(() => {
     switch (mode) {
       case "staged":
-        return scmSnapshot?.staged ?? [];
+        return gitSnapshot?.staged ?? [];
       case "branch":
         return [];
       default:
-        return scmSnapshot?.unstaged ?? [];
+        return gitSnapshot?.unstaged ?? [];
     }
-  }, [mode, scmSnapshot?.staged, scmSnapshot?.unstaged]);
+  }, [mode, gitSnapshot?.staged, gitSnapshot?.unstaged]);
 
   const unstagedCount = useMemo(() => entries.filter(hasUnstaged).length, [entries]);
   const stagedCount = useMemo(() => entries.filter(hasStaged).length, [entries]);
@@ -505,9 +485,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     () => filteredEntries.map((entry) => entry.path).join("\0"),
     [filteredEntries],
   );
-  const statsByKey = useMemo((): Record<string, ScmLineStats> => {
+  const statsByKey = useMemo((): Record<string, GitLineStats> => {
     if (!activeSource) return loadedStatsByKey;
-    const next: Record<string, ScmLineStats> = {};
+    const next: Record<string, GitLineStats> = {};
     for (const entry of filteredEntries) {
       next[statsKey(entry.path, activeSource)] = entry.lineStats;
     }
@@ -516,7 +496,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const decorationByPath = useMemo(
     () =>
       Object.fromEntries(
-        filteredEntries.map((entry) => [entry.path, decorationForScmEntry(entry)]),
+        filteredEntries.map((entry) => [entry.path, decorationForGitEntry(entry)]),
       ),
     [filteredEntries],
   );
@@ -536,7 +516,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   }, [workspaceId, mode, targetBranch]);
 
   const handleDiffStatsChange = useCallback(
-    (path: string, source: DiffSource, stats: ScmLineStats) => {
+    (path: string, source: DiffSource, stats: GitLineStats) => {
       const key = statsKey(path, source);
       setLoadedStatsByKey((current) => {
         const previous = current[key];
@@ -580,7 +560,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   }, [queryClient, reviewNavigationRequest, targetBranch, workspaceId, workspaceRoot]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest || scmSnapshot == null) return;
+    if (!reviewNavigationRequest || gitSnapshot == null) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     if (mode !== requestedMode) return;
@@ -619,7 +599,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     };
   }, [
     clearReviewNavigation,
-    scmSnapshot,
+    gitSnapshot,
     filteredEntries,
     mode,
     reviewNavigationRequest,
@@ -889,9 +869,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           </div>
         </div>
 
-        {scmSnapshot == null || filteredEntries.length === 0 ? (
+        {gitSnapshot == null || filteredEntries.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {scmSnapshot == null ? (
+            {gitSnapshot == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
                 Loading review…
               </div>

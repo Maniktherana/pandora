@@ -8,7 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useWorkspaces } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn } from "@/lib/shared/utils";
 import type { ProjectRecord } from "@/lib/shared/types";
@@ -20,7 +20,7 @@ type ProjectRowProps = {
 };
 
 export function ProjectRow({ project }: ProjectRowProps) {
-  const allWorkspaces = useDesktopView((view) => view.workspaces);
+  const allWorkspaces = useWorkspaces();
   const workspaceCommands = useWorkspaceActions();
   const projectWorkspaces = useMemo(
     () => allWorkspaces.filter((workspace) => workspace.projectId === project.id),

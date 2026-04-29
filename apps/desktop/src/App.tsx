@@ -14,10 +14,14 @@ import SettingsPanel from "@/components/settings/settings-panel";
 import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
-import { useDesktopView } from "@/hooks/use-desktop-view";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
+import { useUiPreferencesActions, useUiPreferences } from "@/hooks/use-ui-preferences";
+import {
+  useSelectedWorkspace,
+  useSelectedWorkspaceId,
+  useSelectedProject,
+} from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 import {
@@ -121,14 +125,14 @@ export default function App() {
     void terminalSurfaceService.setAllSurfaceFontSizes(terminalFontSize).catch(() => {});
   }, [terminalFontSize]);
 
-  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const selectedWsStatus = useDesktopView((view) => view.selectedWorkspace?.status ?? null);
-  const selectedWsId = useDesktopView((view) => view.selectedWorkspaceID);
-  const selectedProject = useDesktopView((view) => view.selectedProject);
-  const sidebarVisible = useUiPreferencesView((view) => view.sidebarVisible);
-  const sidebarHydrated = useUiPreferencesView((view) => view.sidebarHydrated);
-  const fileTreeHydrated = useUiPreferencesView((view) => view.fileTreeHydrated);
-  const fileTreeOpen = useUiPreferencesView((view) => view.fileTreeOpen);
+  const selectedWs = useSelectedWorkspace();
+  const selectedWsStatus = selectedWs?.status ?? null;
+  const selectedWsId = useSelectedWorkspaceId();
+  const selectedProject = useSelectedProject();
+  const sidebarVisible = useUiPreferences((p) => p.sidebarVisible);
+  const sidebarHydrated = useUiPreferences((p) => p.sidebarHydrated);
+  const fileTreeHydrated = useUiPreferences((p) => p.fileTreeHydrated);
+  const fileTreeOpen = useUiPreferences((p) => p.fileTreeOpen);
   const booting = !sidebarHydrated || !fileTreeHydrated;
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
@@ -156,19 +160,19 @@ export default function App() {
   }, [sidebarVisible, uiPreferencesCommands]);
 
   const handleOpenSettings = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
+    workspaceCommands.setLayoutTargetScopeId(null);
     setSettingsProjectId(null);
     setSettingsOpen(true);
   }, [workspaceCommands]);
 
   const handleCloseSettings = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
+    workspaceCommands.setLayoutTargetScopeId(null);
     setSettingsOpen(false);
   }, [workspaceCommands]);
 
   const handleOpenProjectSettings = useCallback(
     (projectId: string) => {
-      workspaceCommands.setLayoutTargetRuntimeId(null);
+      workspaceCommands.setLayoutTargetScopeId(null);
       setSettingsProjectId(projectId);
       setSettingsOpen(true);
     },
@@ -345,7 +349,7 @@ export default function App() {
                             selectedWsStatus === "ready" ? (selectedWsId ?? undefined) : undefined
                           }
                           onPointerDownCapture={() =>
-                            workspaceCommands.setLayoutTargetRuntimeId(null)
+                            workspaceCommands.setLayoutTargetScopeId(null)
                           }
                         >
                           <ErrorBoundary name="workspace">
@@ -391,7 +395,7 @@ export default function App() {
                     <div
                       className="relative h-full shrink-0"
                       style={{ width: rightSidebarWidth }}
-                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
                     >
                       <div
                         ref={rightSidebarResizeHandleRef}

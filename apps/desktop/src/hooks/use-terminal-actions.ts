@@ -14,14 +14,14 @@ export function useTerminalActions() {
       toggleBottomPanel(currentlyOpen: boolean) {
         void terminalCommandService.toggleBottomPanel(currentlyOpen).catch(console.error);
       },
-      createWorkspaceTerminal(runtimeId: string) {
-        void terminalCommandService.createWorkspaceTerminal(runtimeId).catch(console.error);
+      createWorkspaceTerminal(scopeId: string) {
+        void terminalCommandService.createWorkspaceTerminal(scopeId).catch(console.error);
       },
-      closeTerminalSlot(runtimeId: string, slotId: string) {
-        void terminalCommandService.closeTerminalSlot(runtimeId, slotId).catch(console.error);
+      closeTerminalSlot(scopeId: string, slotId: string) {
+        void terminalCommandService.closeTerminalSlot(scopeId, slotId).catch(console.error);
       },
-      async sendInput(runtimeId: string, sessionId: string, text: string) {
-        await terminalCommandService.sendInput(runtimeId, sessionId, text);
+      async sendInput(scopeId: string, sessionId: string, text: string) {
+        await terminalCommandService.sendInput(scopeId, sessionId, text);
       },
     }),
     [],

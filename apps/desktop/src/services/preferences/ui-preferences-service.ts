@@ -5,21 +5,43 @@ import {
   persistFileTreeOpen,
   persistSidebarVisible,
 } from "@/services/file-tree/file-tree-preferences";
-import type { UiPreferencesView } from "@/services/workspace/desktop-view-projections";
-import { emptyUiPreferencesView } from "@/services/workspace/desktop-view-projections";
-import { useDesktopViewStore } from "@/services/workspace/desktop-view-store";
+import {
+  emptyUiPreferencesView,
+  useUiPreferencesStore,
+  type UiPreferencesView,
+} from "@/services/preferences/ui-preferences-store";
 
-// Module-level state — fileTreeOpen is a single global toggle, not per-workspace.
 let currentView: UiPreferencesView = emptyUiPreferencesView;
 let globalFileTreeOpen = false;
 
 function publishUiPreferences(next: UiPreferencesView) {
   currentView = next;
-  useDesktopViewStore.getState().setUiPreferences(next);
+  useUiPreferencesStore.getState().setUiPreferences(next);
 }
 
 function updateView(updater: (current: UiPreferencesView) => UiPreferencesView) {
   publishUiPreferences(updater(currentView));
+}
+
+// Trailing-debounce timers for preference persistence.
+const PERSIST_DELAY_MS = 300;
+let sidebarPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let fileTreeOpenPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSidebarPersist(visible: boolean): void {
+  if (sidebarPersistTimer !== null) clearTimeout(sidebarPersistTimer);
+  sidebarPersistTimer = setTimeout(() => {
+    sidebarPersistTimer = null;
+    persistSidebarVisible(visible).catch(console.error);
+  }, PERSIST_DELAY_MS);
+}
+
+function scheduleFileTreeOpenPersist(open: boolean): void {
+  if (fileTreeOpenPersistTimer !== null) clearTimeout(fileTreeOpenPersistTimer);
+  fileTreeOpenPersistTimer = setTimeout(() => {
+    fileTreeOpenPersistTimer = null;
+    persistFileTreeOpen(open).catch(console.error);
+  }, PERSIST_DELAY_MS);
 }
 
 export const uiPreferencesService = {
@@ -39,23 +61,23 @@ export const uiPreferencesService = {
     });
   },
 
-  setSidebarVisible: async (visible: boolean): Promise<void> => {
-    await persistSidebarVisible(visible);
+  setSidebarVisible: (visible: boolean): void => {
     updateView((current) => ({
       ...current,
       sidebarVisible: visible,
       sidebarHydrated: true,
     }));
+    scheduleSidebarPersist(visible);
   },
 
-  setFileTreeOpen: async (open: boolean): Promise<void> => {
+  setFileTreeOpen: (open: boolean): void => {
     globalFileTreeOpen = open;
     updateView((current) => ({
       ...current,
       fileTreeOpen: open,
       fileTreeHydrated: true,
     }));
-    await persistFileTreeOpen(open);
+    scheduleFileTreeOpenPersist(open);
   },
 
   syncSelectedWorkspace: (workspaceId: string | null, ready: boolean): void => {

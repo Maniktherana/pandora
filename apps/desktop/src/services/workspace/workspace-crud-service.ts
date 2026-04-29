@@ -1,26 +1,19 @@
 import type { WorkspaceKind, WorkspaceRecord } from "@/lib/shared/types";
 import {
-  desktopStateSnapshot,
   applyAppState,
   patchWorkspaceRecord,
-  replaceWorkspaceRecord,
-  updateDesktopState,
-  scheduleDesktopPublish,
-  scheduleRuntimePublish,
-  publishDesktopNow,
 } from "@/services/workspace/desktop-view-service";
-import {
-  findNearestWorkspaceInProject,
-  workspaceSelectionError,
-} from "@/services/workspace/workspace-selection-service";
-import { DesktopStateLoadError } from "@/services/service-errors";
+import { useCatalogStore } from "@/services/workspace/catalog-store";
+import { useNavigationStore } from "@/services/workspace/navigation-store";
+import { useLayoutStore } from "@/services/workspace/layout-store";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { DesktopStateLoadError, WorkspaceSelectionError } from "@/services/service-errors";
 import {
   loadAppState,
   saveSelection,
   addProject as apiAddProject,
   toggleProject as apiToggleProject,
   removeProject as apiRemoveProject,
-  stopProjectRuntime,
   createWorkspace as apiCreateWorkspace,
   archiveWorkspace as apiArchiveWorkspace,
   canArchiveWorkspace as apiCanArchiveWorkspace,
@@ -30,27 +23,59 @@ import {
   retryWorkspace as apiRetryWorkspace,
 } from "@/services/workspace/workspace-api";
 import { useSettingsStore } from "@/services/settings/settings-store";
-import type { WorkspaceStartupSet } from "@/services/workspace/workspace-startup";
 import type { createTerminalStartupService } from "@/services/terminal/terminal-startup-service";
+
+// ─── utilities ────────────────────────────────────────────────────────────────
+
+export function workspaceSelectionError(
+  cause: unknown,
+  workspaceId?: string,
+): WorkspaceSelectionError {
+  return new WorkspaceSelectionError({
+    cause,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+  });
+}
+
+export function findNearestWorkspaceInProject(
+  workspaces: readonly Pick<WorkspaceRecord, "id" | "projectId" | "status">[],
+  workspaceId: string,
+) {
+  const workspace = workspaces.find((entry) => entry.id === workspaceId);
+  if (!workspace || workspace.status === "archived") return null;
+
+  const projectWorkspaces = workspaces.filter(
+    (entry) => entry.projectId === workspace.projectId && entry.status !== "archived",
+  );
+  const projectIndex = projectWorkspaces.findIndex((entry) => entry.id === workspaceId);
+  if (projectIndex < 0) return null;
+
+  return (
+    projectWorkspaces[projectIndex + 1] ?? projectWorkspaces[projectIndex - 1] ?? null
+  );
+}
 
 // ─── context ──────────────────────────────────────────────────────────────────
 
 export type WorkspaceCrudContext = {
   terminalStartup: ReturnType<typeof createTerminalStartupService>;
-  interruptWorkspaceStartup: (set: WorkspaceStartupSet, workspaceId: string, reset?: boolean) => void;
-  startupSet: WorkspaceStartupSet;
+  resetWorkspaceLayoutState: (workspaceId: string) => void;
   selectWorkspaceById: (workspaceId: string) => Promise<void>;
-  startSelectionSettle: (workspace: WorkspaceRecord) => void;
-  maybeStartSelectedWorkspace: () => Promise<void>;
+  startSelectedWorkspaceBackgroundStartup: (workspaceId: string) => Promise<void>;
   getRemoveWorkspaceSurfaces: () => ((workspaceId: string) => Promise<void>) | null;
 };
 
 // ─── factory ─────────────────────────────────────────────────────────────────
 
 export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
+  function removeScopeState(scopeId: string) {
+    useTerminalScopeStore.getState().removeScope(scopeId);
+    useLayoutStore.getState().removeLayout(scopeId);
+  }
+
   async function addProject(path: string): Promise<void> {
     try {
-      const knownProjectIds = new Set(desktopStateSnapshot.projects.map((entry) => entry.id));
+      const knownProjectIds = new Set(useCatalogStore.getState().projects.map((entry) => entry.id));
       const project = await apiAddProject(path);
       const isNewProject = !knownProjectIds.has(project.id);
       let autoCreatedWorkspaceId: string | null = null;
@@ -60,20 +85,16 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
         ctx.terminalStartup.markPendingInitialTerminal(created.id);
       }
       const appState = await loadAppState();
-      const { allowedRuntimeIds } = applyAppState(appState);
-      ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
-      desktopStateSnapshot.selectedProjectID = project.id;
-      if (autoCreatedWorkspaceId) {
-        desktopStateSnapshot.selectedWorkspaceID = autoCreatedWorkspaceId;
-      }
-      publishDesktopNow();
-      if (autoCreatedWorkspaceId) {
-        const ws = desktopStateSnapshot.workspaces.find((w) => w.id === autoCreatedWorkspaceId);
-        if (ws?.status === "ready") ctx.startSelectionSettle(ws);
+    const { allowedScopeIds } = applyAppState(appState);
+    ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
+    if (autoCreatedWorkspaceId) {
+        useNavigationStore.getState().selectWorkspace(autoCreatedWorkspaceId, project.id);
+      } else {
+        useNavigationStore.getState().selectProject(project.id);
       }
       await saveSelection(
         project.id,
-        autoCreatedWorkspaceId ?? desktopStateSnapshot.selectedWorkspaceID,
+        autoCreatedWorkspaceId ?? useNavigationStore.getState().selectedWorkspaceID,
       );
     } catch (cause) {
       throw new DesktopStateLoadError({ cause });
@@ -84,32 +105,29 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     try {
       await apiToggleProject(projectId);
       const appState = await loadAppState();
-      const { allowedRuntimeIds } = applyAppState(appState);
-      ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
+      const { allowedScopeIds } = applyAppState(appState);
+      ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
     } catch (cause) {
       throw new DesktopStateLoadError({ cause });
     }
   }
 
   async function removeProject(projectId: string): Promise<void> {
-    const runtimeId = `project:${projectId}`;
-    ctx.terminalStartup.clearRuntimeTerminalStartupTracking(runtimeId);
+    const scopeId = `project:${projectId}`;
+    ctx.terminalStartup.clearScopeTerminalStartupTracking(scopeId);
     try {
-      await stopProjectRuntime(projectId).catch(() => {});
-      delete desktopStateSnapshot.runtimes[runtimeId];
-      if (desktopStateSnapshot.layoutTargetRuntimeId === runtimeId) {
-        desktopStateSnapshot.layoutTargetRuntimeId = null;
+      removeScopeState(scopeId);
+      if (useNavigationStore.getState().layoutTargetScopeId === scopeId) {
+        useNavigationStore.getState().setLayoutTargetScopeId(null);
       }
-      scheduleDesktopPublish();
-      scheduleRuntimePublish();
       await apiRemoveProject(projectId);
       const appState = await loadAppState();
-      const { allowedRuntimeIds } = applyAppState(appState);
-      ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
+      const { allowedScopeIds } = applyAppState(appState);
+      ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
     } catch (cause) {
       throw new DesktopStateLoadError({ cause });
     }
-    await ctx.terminalStartup.refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
+    await ctx.terminalStartup.refreshActiveScopeTerminalStartup({ rebuildHiddenQueues: true });
   }
 
   async function createWorkspace(projectId: string, workspaceKind?: WorkspaceKind): Promise<void> {
@@ -130,15 +148,20 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
       throw workspaceSelectionError(cause);
     }
     ctx.terminalStartup.markPendingInitialTerminal(created.id);
-    desktopStateSnapshot.projects = desktopStateSnapshot.projects.map((entry) =>
-      entry.id === projectId ? { ...entry, isExpanded: true } : entry,
-    );
+    const projects = useCatalogStore.getState().projects;
+    const updatedProject = projects.find((p) => p.id === projectId);
+    if (updatedProject) {
+      useCatalogStore.getState().applyAppState(
+        projects.map((p) => (p.id === projectId ? { ...p, isExpanded: true } : p)),
+        useCatalogStore.getState().workspaces,
+      );
+    }
     patchWorkspaceRecord(created);
     await ctx.selectWorkspaceById(created.id);
   }
 
   async function retryWorkspace(workspaceId: string): Promise<void> {
-    ctx.interruptWorkspaceStartup(ctx.startupSet, workspaceId, true);
+    ctx.resetWorkspaceLayoutState(workspaceId);
     try {
       const updated = await apiRetryWorkspace(workspaceId);
       patchWorkspaceRecord(updated);
@@ -148,7 +171,7 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
   }
 
   async function renameWorkspace(workspaceId: string, name: string): Promise<void> {
-    const workspace = desktopStateSnapshot.workspaces.find(
+    const workspace = useCatalogStore.getState().workspaces.find(
       (entry) => entry.id === workspaceId,
     );
     if (!workspace)
@@ -159,10 +182,9 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
       if (removeWorkspaceSurfaces) {
         await removeWorkspaceSurfaces(workspaceId).catch(() => {});
       }
-      ctx.terminalStartup.clearRuntimeTerminalStartupTracking(workspaceId);
-      ctx.interruptWorkspaceStartup(ctx.startupSet, workspaceId);
-      delete desktopStateSnapshot.runtimes[workspaceId];
-      scheduleRuntimePublish();
+      ctx.terminalStartup.clearScopeTerminalStartupTracking(workspaceId);
+      ctx.resetWorkspaceLayoutState(workspaceId);
+      removeScopeState(workspaceId);
     }
 
     let renamed: WorkspaceRecord;
@@ -175,15 +197,17 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     patchWorkspaceRecord(renamed);
 
     if (
-      renamed.id === desktopStateSnapshot.selectedWorkspaceID &&
+      renamed.id === useNavigationStore.getState().selectedWorkspaceID &&
       renamed.status === "ready"
     ) {
-      ctx.startSelectionSettle(renamed);
+      ctx.startSelectedWorkspaceBackgroundStartup(renamed.id).catch((error) =>
+        console.warn("Failed to start workspace background startup:", error),
+      );
     }
   }
 
   async function removeWorkspace(workspaceId: string): Promise<void> {
-    const workspace = desktopStateSnapshot.workspaces.find(
+    const workspace = useCatalogStore.getState().workspaces.find(
       (entry) => entry.id === workspaceId,
     );
     if (!workspace)
@@ -192,8 +216,8 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     try {
       await apiRemoveWorkspace(workspaceId);
       const appState = await loadAppState();
-      const { allowedRuntimeIds } = applyAppState(appState);
-      ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
+      const { allowedScopeIds } = applyAppState(appState);
+      ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
     } catch (cause) {
       throw workspaceSelectionError(cause, workspaceId);
     }
@@ -202,19 +226,24 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     if (removeWorkspaceSurfaces) {
       await removeWorkspaceSurfaces(workspaceId).catch(() => {});
     }
-    ctx.terminalStartup.clearRuntimeTerminalStartupTracking(workspaceId);
-    ctx.interruptWorkspaceStartup(ctx.startupSet, workspaceId);
-    delete desktopStateSnapshot.runtimes[workspaceId];
+    ctx.terminalStartup.clearScopeTerminalStartupTracking(workspaceId);
+    ctx.resetWorkspaceLayoutState(workspaceId);
+    removeScopeState(workspaceId);
 
-    await ctx.maybeStartSelectedWorkspace();
-    await ctx.terminalStartup.refreshActiveRuntimeTerminalStartup({ rebuildHiddenQueues: true });
+    const selectedWorkspaceId = useNavigationStore.getState().selectedWorkspaceID;
+    if (selectedWorkspaceId) {
+      ctx.startSelectedWorkspaceBackgroundStartup(selectedWorkspaceId).catch((error) =>
+        console.warn("Failed to start workspace background startup:", error),
+      );
+    }
+    await ctx.terminalStartup.refreshActiveScopeTerminalStartup({ rebuildHiddenQueues: true });
   }
 
   async function archiveWorkspace(
     workspaceId: string,
     options?: { deleteWorktree?: boolean },
   ): Promise<void> {
-    const workspace = desktopStateSnapshot.workspaces.find(
+    const workspace = useCatalogStore.getState().workspaces.find(
       (entry) => entry.id === workspaceId,
     );
     if (!workspace)
@@ -234,9 +263,9 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
       );
     }
 
-    const wasSelected = desktopStateSnapshot.selectedWorkspaceID === workspaceId;
+    const wasSelected = useNavigationStore.getState().selectedWorkspaceID === workspaceId;
     const nextWorkspace = wasSelected
-      ? findNearestWorkspaceInProject(desktopStateSnapshot.workspaces, workspaceId)
+      ? findNearestWorkspaceInProject(useCatalogStore.getState().workspaces, workspaceId)
       : null;
 
     const { runTeardownOnArchive } = useSettingsStore.getState();
@@ -245,8 +274,8 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     } catch (cause) {
       try {
         const appState = await loadAppState();
-        const { allowedRuntimeIds } = applyAppState(appState);
-        ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
+        const { allowedScopeIds } = applyAppState(appState);
+        ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
       } catch {
         // ignore
       }
@@ -255,8 +284,8 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
 
     const appState = await loadAppState().catch(() => null);
     if (appState) {
-      const { allowedRuntimeIds } = applyAppState(appState);
-      ctx.terminalStartup.cleanupAllowedRuntimeIds(allowedRuntimeIds);
+      const { allowedScopeIds } = applyAppState(appState);
+      ctx.terminalStartup.cleanupAllowedScopeIds(allowedScopeIds);
     }
 
     const removeWorkspaceSurfaces = ctx.getRemoveWorkspaceSurfaces();
@@ -267,27 +296,17 @@ export function createWorkspaceCrudService(ctx: WorkspaceCrudContext) {
     if (wasSelected && nextWorkspace) {
       await ctx.selectWorkspaceById(nextWorkspace.id);
     } else if (wasSelected) {
-      updateDesktopState(
-        (state) => {
-          state.selectedWorkspaceID = null;
-          state.selectedProjectID = workspace.projectId;
-          state.layoutTargetRuntimeId = null;
-        },
-        { sync: true },
-      );
+      useNavigationStore.getState().clearSelection();
+      useNavigationStore.getState().selectProject(workspace.projectId);
       await saveSelection(workspace.projectId, null).catch(() => {});
     }
   }
 
   async function restoreWorkspace(workspaceId: string): Promise<void> {
-    updateDesktopState(
-      (state) => {
-        state.workspaces = replaceWorkspaceRecord(state.workspaces, workspaceId, (workspace) => {
-          workspace.status = "ready";
-        });
-      },
-      { sync: true },
-    );
+    const workspace = useCatalogStore.getState().workspaces.find((w) => w.id === workspaceId);
+    if (workspace) {
+      useCatalogStore.getState().patchWorkspace({ ...workspace, status: "ready" });
+    }
     await apiRestoreWorkspace(workspaceId);
   }
 

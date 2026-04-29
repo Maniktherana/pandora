@@ -1,14 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
-  RuntimeConnectionEvent,
   RuntimeCommand,
   RuntimeEvent,
   RuntimeEventEnvelope,
 } from "@/lib/shared/types";
-import type { RuntimeQueueEvent } from "@/services/runtime/runtime-event-queue";
-
-export type ConnectionState = "disconnected" | "connecting" | "connected";
+import type { IpcQueueEvent } from "@/services/ipc/ipc-event-queue";
 
 async function sendWithRetry(
   runtimeId: string,
@@ -19,7 +16,7 @@ async function sendWithRetry(
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      await invoke("runtime_send", {
+      await invoke("scope_send", {
         runtimeId,
         message: JSON.stringify(message),
       });
@@ -31,42 +28,32 @@ async function sendWithRetry(
       }
     }
   }
-  console.error("Runtime send failed after retries:", lastError);
+  console.error("IPC send failed after retries:", lastError);
   throw lastError;
 }
 
-export class RuntimeClient {
-  private onEvent: (event: RuntimeQueueEvent) => void;
+export class IpcClient {
+  private onEvent: (event: IpcQueueEvent) => void;
   private unlisteners: UnlistenFn[] = [];
 
-  constructor(onEvent: (event: RuntimeQueueEvent) => void) {
+  constructor(onEvent: (event: IpcQueueEvent) => void) {
     this.onEvent = onEvent;
   }
 
   async connect() {
     try {
-      const unlisten1 = await listen<RuntimeConnectionEvent>("runtime-connection", (event) => {
+      const unlisten = await listen<RuntimeEventEnvelope>("runtime-event", (event) => {
         try {
-          const state: ConnectionState =
-            event.payload.state === "connected" ? "connected" : "disconnected";
-          this.onEvent({ type: "connection_state_changed", runtimeId: event.payload.runtimeId, state });
+          const { runtimeId: scopeId, ...message } = event.payload;
+          this.onEvent({ scopeId, ...(message as RuntimeEvent) });
         } catch (cause) {
-          console.error("Failed to parse runtime connection event:", cause);
+          console.error("Failed to parse IPC event:", cause);
         }
       });
 
-      const unlisten2 = await listen<RuntimeEventEnvelope>("runtime-event", (event) => {
-        try {
-          const { runtimeId, ...message } = event.payload;
-          this.onEvent({ runtimeId, ...(message as RuntimeEvent) });
-        } catch (cause) {
-          console.error("Failed to parse runtime event:", cause);
-        }
-      });
-
-      this.unlisteners = [unlisten1, unlisten2];
+      this.unlisteners = [unlisten];
     } catch (cause) {
-      console.error("Failed to connect runtime client:", cause);
+      console.error("Failed to connect IPC client:", cause);
     }
   }
 
@@ -187,60 +174,60 @@ export class RuntimeClient {
     });
   }
 
-  // SCM commands
+  // Git commands (protocol names use scm_ prefix — backend naming)
 
-  scmSubscribe(runtimeId: string, targetBranch?: string | null): Promise<void> {
+  gitSubscribe(runtimeId: string, targetBranch?: string | null): Promise<void> {
     const cmd = targetBranch !== undefined
       ? { type: "scm_subscribe" as const, target_branch: targetBranch }
       : { type: "scm_subscribe" as const };
     return this.send(runtimeId, cmd);
   }
 
-  scmRefresh(runtimeId: string): Promise<void> {
+  gitRefresh(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_refresh" });
   }
 
-  scmStage(runtimeId: string, paths: string[]): Promise<void> {
+  gitStage(runtimeId: string, paths: string[]): Promise<void> {
     return this.send(runtimeId, { type: "scm_stage", paths });
   }
 
-  scmStageAll(runtimeId: string): Promise<void> {
+  gitStageAll(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_stage_all" });
   }
 
-  scmUnstage(runtimeId: string, paths: string[]): Promise<void> {
+  gitUnstage(runtimeId: string, paths: string[]): Promise<void> {
     return this.send(runtimeId, { type: "scm_unstage", paths });
   }
 
-  scmUnstageAll(runtimeId: string): Promise<void> {
+  gitUnstageAll(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_unstage_all" });
   }
 
-  scmDiscardTracked(runtimeId: string, paths: string[]): Promise<void> {
+  gitDiscardTracked(runtimeId: string, paths: string[]): Promise<void> {
     return this.send(runtimeId, { type: "scm_discard_tracked", paths });
   }
 
-  scmDiscardUntracked(runtimeId: string, paths: string[]): Promise<void> {
+  gitDiscardUntracked(runtimeId: string, paths: string[]): Promise<void> {
     return this.send(runtimeId, { type: "scm_discard_untracked", paths });
   }
 
-  scmCommit(runtimeId: string, message: string, push = false): Promise<void> {
+  gitCommit(runtimeId: string, message: string, push = false): Promise<void> {
     return this.send(runtimeId, { type: "scm_commit", message, push });
   }
 
-  scmPush(runtimeId: string): Promise<void> {
+  gitPush(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_push" });
   }
 
-  scmFetch(runtimeId: string): Promise<void> {
+  gitFetch(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_fetch" });
   }
 
-  scmPull(runtimeId: string): Promise<void> {
+  gitPull(runtimeId: string): Promise<void> {
     return this.send(runtimeId, { type: "scm_pull" });
   }
 
-  scmSetTargetBranch(runtimeId: string, branch: string | null): Promise<void> {
+  gitSetTargetBranch(runtimeId: string, branch: string | null): Promise<void> {
     return this.send(runtimeId, { type: "scm_set_target_branch", branch });
   }
 
@@ -267,4 +254,52 @@ export class RuntimeClient {
       contents,
     });
   }
+}
+
+// Direct Tauri command invocations for git domain
+// Command names use scm_ prefix (backend protocol naming — translation boundary)
+
+type DiffResult = { diff: string; truncated: boolean };
+type BlobSource = "head" | "index";
+type CheckRunResult = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+export function ipcGitDiff(
+  worktreePath: string,
+  relativePath: string,
+  staged: boolean,
+): Promise<DiffResult> {
+  return invoke<DiffResult>("scm_git_diff", { worktreePath, relativePath, staged });
+}
+
+export function ipcGitReadBlob(
+  worktreePath: string,
+  relativePath: string,
+  source: BlobSource,
+): Promise<string> {
+  return invoke<string>("scm_read_git_blob", { worktreePath, relativePath, source });
+}
+
+export function ipcGitReadCompareBlob(
+  worktreePath: string,
+  relativePath: string,
+  targetBranch: string,
+  side: "base" | "head",
+): Promise<string> {
+  return invoke<string>("scm_read_git_compare_blob", {
+    worktreePath,
+    relativePath,
+    targetBranch,
+    side,
+  });
+}
+
+export function ipcGitCheckRuns(worktreePath: string): Promise<CheckRunResult[]> {
+  return invoke<CheckRunResult[]>("scm_check_runs", { worktreePath });
 }

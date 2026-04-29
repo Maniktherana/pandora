@@ -1,6 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import {
+  useNavigationArea,
+  useSelectedWorkspaceId,
+  useLayoutTargetScopeId,
+  useWorkspaces,
+} from "@/hooks/use-navigation";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useSettingsStore } from "@/services/settings/settings-store";
@@ -56,14 +61,13 @@ export default function useKeyboardShortcuts({
   onOpenSettings,
 }: UseKeyboardShortcutsParams) {
   const lastWorkspaceShortcutRef = useRef<{ direction: -1 | 1; at: number } | null>(null);
-  const navigationArea = useDesktopView((view) => view.navigationArea);
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const layoutTargetRuntimeId = useDesktopView((view) => view.layoutTargetRuntimeId);
-  const hasSelectedWorkspace = useDesktopView(
-    (view) =>
-      view.selectedWorkspaceID != null &&
-      view.workspaces.some((workspace) => workspace.id === view.selectedWorkspaceID),
-  );
+  const navigationArea = useNavigationArea();
+  const selectedWorkspaceID = useSelectedWorkspaceId();
+  const layoutTargetScopeId = useLayoutTargetScopeId();
+  const workspaces = useWorkspaces();
+  const hasSelectedWorkspace =
+    selectedWorkspaceID != null &&
+    workspaces.some((workspace) => workspace.id === selectedWorkspaceID);
   const {
     activateSidebarSelection,
     navigateSidebar,
@@ -113,11 +117,11 @@ export default function useKeyboardShortcuts({
 
   const resolveFontZoomTarget = useCallback(
     (eventTarget: EventTarget | null): "editor" | "terminal" | null => {
-      if (layoutTargetRuntimeId) return "terminal";
+      if (layoutTargetScopeId) return "terminal";
       if (isMonacoEditorTarget(eventTarget)) return "editor";
       return "terminal";
     },
-    [layoutTargetRuntimeId],
+    [layoutTargetScopeId],
   );
 
   useEffect(() => {
@@ -216,7 +220,7 @@ export default function useKeyboardShortcuts({
     decreaseTerminalFontSize,
     increaseEditorFontSize,
     increaseTerminalFontSize,
-    layoutTargetRuntimeId,
+    layoutTargetScopeId,
     navigationArea,
     navigateSidebar,
     onCloseTab,

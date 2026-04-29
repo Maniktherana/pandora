@@ -1,11 +1,11 @@
 import { useFileTreeStore } from "./file-tree-store";
 import { pendingFileTreeReads, pendingFileTreeWrites } from "./file-tree-request-registry";
-import type { RuntimeQueueEvent } from "@/services/runtime/runtime-event-queue";
+import type { IpcQueueEvent } from "@/services/ipc/ipc-event-queue";
 
 export function isFileTreeEvent(
-  event: RuntimeQueueEvent,
+  event: IpcQueueEvent,
 ): event is Extract<
-  RuntimeQueueEvent,
+  IpcQueueEvent,
   {
     type:
       | "file_tree_snapshot"
@@ -24,13 +24,13 @@ export function isFileTreeEvent(
   );
 }
 
-export function applyFileTreeRuntimeEvent(event: RuntimeQueueEvent): void {
+export function applyFileTreeRuntimeEvent(event: IpcQueueEvent): void {
   switch (event.type) {
     case "file_tree_snapshot":
       useFileTreeStore
         .getState()
         .applySnapshot(
-          event.runtimeId,
+          event.scopeId,
           event.snapshot.rootPath,
           event.snapshot.directories,
           event.snapshot.expandedPaths,
@@ -39,7 +39,7 @@ export function applyFileTreeRuntimeEvent(event: RuntimeQueueEvent): void {
     case "file_tree_directory_changed":
       useFileTreeStore
         .getState()
-        .applyDirectoryChanged(event.runtimeId, event.path, event.entries);
+        .applyDirectoryChanged(event.scopeId, event.path, event.entries);
       break;
     case "file_tree_file_read": {
       const resolver = pendingFileTreeReads.get(event.requestID);
@@ -66,7 +66,10 @@ export function applyFileTreeRuntimeEvent(event: RuntimeQueueEvent): void {
         pendingFileTreeWrites.delete(event.requestID);
         writeErr?.(new Error(event.message));
       }
-      useFileTreeStore.getState().setError(event.runtimeId, event.message);
+      // Errors with a requestID are operation-scoped (read/write) — they
+      // should not set bootStatus to "error".  General errors without a
+      // requestID may escalate to "error" if the tree hasn't loaded yet.
+      useFileTreeStore.getState().setError(event.scopeId, event.message);
       break;
   }
 }

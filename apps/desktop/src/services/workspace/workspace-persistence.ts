@@ -1,17 +1,16 @@
-import type { TerminalPanelState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { TerminalPanelState } from "@/lib/shared/types";
 import { getUiState, setUiState, saveWorkspaceLayout } from "./workspace-api";
+import { useLayoutStore } from "@/services/workspace/layout-store";
 
-export async function persistWorkspaceLayout(
-  runtime: WorkspaceRuntimeState | undefined,
-  workspaceId: string,
-): Promise<void> {
+export async function persistWorkspaceLayout(workspaceId: string): Promise<void> {
+  const workspaceLayout = useLayoutStore.getState().getLayout(workspaceId);
   const root =
-    runtime?.root?.type === "leaf" && runtime.root.tabs.length === 0
+    workspaceLayout.root?.type === "leaf" && workspaceLayout.root.tabs.length === 0
       ? null
-      : (runtime?.root ?? null);
+      : workspaceLayout.root;
   const layout = {
     root,
-    focusedPaneID: root ? (runtime?.focusedPaneID ?? null) : null,
+    focusedPaneID: root ? workspaceLayout.focusedPaneID : null,
   };
   try {
     await saveWorkspaceLayout(workspaceId, layout);
@@ -20,8 +19,8 @@ export async function persistWorkspaceLayout(
   }
 }
 
-export function projectTerminalPanelStorageKey(runtimeId: string) {
-  return `project-terminal-panel:${runtimeId}`;
+export function projectTerminalPanelStorageKey(scopeId: string) {
+  return `project-terminal-panel:${scopeId}`;
 }
 
 export function parsePersistedProjectTerminalPanel(
@@ -52,10 +51,10 @@ export function parsePersistedProjectTerminalPanel(
 }
 
 export async function loadPersistedProjectTerminalPanel(
-  runtimeId: string,
+  scopeId: string,
 ): Promise<TerminalPanelState | null> {
   try {
-    const raw = await getUiState(projectTerminalPanelStorageKey(runtimeId));
+    const raw = await getUiState(projectTerminalPanelStorageKey(scopeId));
     return parsePersistedProjectTerminalPanel(raw);
   } catch {
     return null;
@@ -63,12 +62,12 @@ export async function loadPersistedProjectTerminalPanel(
 }
 
 export async function persistProjectTerminalPanel(
-  runtimeId: string,
+  scopeId: string,
   panel: TerminalPanelState | null,
 ): Promise<void> {
   try {
     await setUiState(
-      projectTerminalPanelStorageKey(runtimeId),
+      projectTerminalPanelStorageKey(scopeId),
       panel ? JSON.stringify(panel) : null,
     );
   } catch {

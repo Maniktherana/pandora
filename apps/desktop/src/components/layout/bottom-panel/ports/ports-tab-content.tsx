@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { PortDataRow } from "./port-data-row";
-import { useRuntimeStore } from "@/services/runtime/runtime-store";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useWorkspaces } from "@/hooks/use-navigation";
 import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import type { DetectedPort, WorkspaceRecord } from "@/lib/shared/types";
+import type { WorkspaceRecord } from "@/lib/shared/types";
 
 interface PortRow {
   port: number;
@@ -13,23 +13,23 @@ interface PortRow {
 }
 
 function buildPortRows(
-  runtimeState: Readonly<Record<string, import("@/lib/shared/types").WorkspaceRuntimeState>>,
+  byScopeId: ReturnType<typeof useTerminalScopeStore.getState>["byScopeId"],
   workspaces: readonly WorkspaceRecord[],
 ): PortRow[] {
   const wsNameById = new Map(workspaces.map((ws) => [ws.id, ws.name]));
   const seen = new Map<number, PortRow>();
 
-  for (const [runtimeId, runtime] of Object.entries(runtimeState)) {
-    if (!runtime.detectedPorts?.length) continue;
+  for (const [scopeId, scope] of Object.entries(byScopeId)) {
+    if (!scope.detectedPorts.length) continue;
 
     let source: string;
-    if (isProjectRuntimeKey(runtimeId)) {
+    if (isProjectRuntimeKey(scopeId)) {
       source = "Project";
     } else {
-      source = wsNameById.get(runtimeId) ?? runtimeId.slice(0, 8);
+      source = wsNameById.get(scopeId) ?? scopeId.slice(0, 8);
     }
 
-    for (const p of runtime.detectedPorts) {
+    for (const p of scope.detectedPorts) {
       if (!seen.has(p.port)) {
         seen.set(p.port, {
           port: p.port,
@@ -45,10 +45,10 @@ function buildPortRows(
 }
 
 export function PortsTabContent() {
-  const runtimeState = useRuntimeStore((s) => s.runtimeState);
-  const workspaces = useDesktopView((v) => v.workspaces);
+  const byScopeId = useTerminalScopeStore((s) => s.byScopeId);
+  const workspaces = useWorkspaces();
 
-  const rows = useMemo(() => buildPortRows(runtimeState, workspaces), [runtimeState, workspaces]);
+  const rows = useMemo(() => buildPortRows(byScopeId, workspaces), [byScopeId, workspaces]);
 
   if (rows.length === 0) {
     return (

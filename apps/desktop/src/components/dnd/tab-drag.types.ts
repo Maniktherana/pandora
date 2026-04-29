@@ -3,7 +3,7 @@ export interface DragState {
   tabLabel: string;
   sourcePaneID?: string;
   sourceIndex?: number;
-  runtimeId?: string;
+  scopeId?: string;
   groupId?: string;
   groupIndex?: number;
   slotId?: string;
@@ -34,7 +34,7 @@ export interface TabDropTarget {
 
 export interface BottomTerminalGroupDropTarget {
   kind: "bottom-terminal-group";
-  runtimeId: string;
+  scopeId: string;
   groupId: string;
   groupIndex: number;
   rect: DOMRect;
@@ -42,7 +42,7 @@ export interface BottomTerminalGroupDropTarget {
 
 export interface BottomTerminalInsertDropTarget {
   kind: "bottom-terminal-insert";
-  runtimeId: string;
+  scopeId: string;
   insertIndex: number;
   barRect: DOMRect;
   lineY: number;
@@ -50,7 +50,7 @@ export interface BottomTerminalInsertDropTarget {
 
 export interface BottomTerminalSlotDropTarget {
   kind: "bottom-terminal-slot";
-  runtimeId: string;
+  scopeId: string;
   groupId: string;
   groupIndex: number;
   insertIndex: number;
@@ -60,7 +60,7 @@ export interface BottomTerminalSlotDropTarget {
 
 export interface BottomTerminalPaneDropTarget {
   kind: "bottom-terminal-pane";
-  runtimeId: string;
+  scopeId: string;
   groupId: string;
   slotId: string;
   zone: "center" | "left" | "right";

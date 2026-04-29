@@ -91,7 +91,7 @@ export interface FileTreeSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// SCM types
+// Git types (backend protocol names are prefixed with scm in Rust)
 // ---------------------------------------------------------------------------
 
 export interface ScmEntry {
@@ -159,7 +159,7 @@ export type RuntimeCommand =
   | { type: "file_tree_import"; dest_relative_path: string; source_absolute_paths: string[] }
   | { type: "file_tree_read_text_file"; requestID: string; relative_path: string }
   | { type: "file_tree_write_text_file"; requestID: string; relative_path: string; contents: string }
-  // SCM
+  // Git commands (backend protocol names)
   | { type: "scm_subscribe"; target_branch?: string | null }
   | { type: "scm_refresh" }
   | { type: "scm_stage"; paths: string[] }
@@ -199,7 +199,7 @@ export type RuntimeEvent =
   | { type: "file_tree_file_read"; requestID: string; relative_path: string; contents: string | null }
   | { type: "file_tree_file_written"; requestID: string; relative_path: string }
   | { type: "file_tree_error"; requestID?: string; message: string }
-  // SCM
+  // Git events (backend protocol names)
   | { type: "scm_snapshot"; snapshot: ScmSnapshot }
   | { type: "scm_refreshing" }
   | { type: "scm_operation_started"; opId: string }
@@ -349,18 +349,4 @@ export interface AppState {
   selectedWorkspaceId: string | null;
 }
 
-export interface WorkspaceRuntimeState {
-  workspaceId: string;
-  slots: SlotState[];
-  sessions: SessionState[];
-  detectedPorts: DetectedPort[];
-  terminalDisplayBySlotId: Record<string, TerminalDisplayState>;
-  terminalAgentStatusBySlotId: Record<string, TerminalAgentStatus>;
-  connectionState: "disconnected" | "connecting" | "connected";
-  root: LayoutNode | null;
-  focusedPaneID: string | null;
-  terminalPanel: TerminalPanelState | null;
-  layoutLoading: boolean;
-  /** True once the persisted layout attempt has settled, even if the result is empty. */
-  layoutLoaded: boolean;
-}
+

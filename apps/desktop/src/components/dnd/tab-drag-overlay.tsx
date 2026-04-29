@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useSelectedWorkspaceId } from "@/hooks/use-navigation";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
-import { useDesktopViewStore } from "@/services/workspace/desktop-view-store";
-import { useRuntimeStore } from "@/services/runtime/runtime-store";
+import { useNavigationStore } from "@/services/workspace/navigation-store";
+import { useLayoutStore } from "@/services/workspace/layout-store";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 import { editorEnsureFileLoaded } from "@/services/editor/editor-service";
 import { findLeaf } from "@/components/layout/workspace/layout-migrate";
 import { tabsEqual } from "@/components/layout/workspace/layout-tree";
@@ -30,7 +31,7 @@ export function TabDragOverlay({
   const [cursor, setCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [target, setTarget] = useState<DropTarget | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
+  const selectedWorkspaceID = useSelectedWorkspaceId();
   const layoutCommands = useLayoutActions();
   const projectTerminalCommands = useProjectTerminalActions();
 
@@ -107,11 +108,12 @@ export function TabDragOverlay({
     }
 
     function executeDrop(drag: DragState, tgt: DropTarget) {
-      const desktopView = useDesktopViewStore.getState().desktopView;
-      const runtimeState = useRuntimeStore.getState().runtimeState;
-      const rid = desktopView.layoutTargetRuntimeId ?? desktopView.selectedWorkspaceID;
-      const runtime = rid ? (runtimeState[rid] ?? null) : null;
-      const terminalPanel = drag.runtimeId ? runtimeState[drag.runtimeId]?.terminalPanel : null;
+      const nav = useNavigationStore.getState();
+      const rid = nav.layoutTargetScopeId ?? nav.selectedWorkspaceID;
+      const ridLayout = rid ? useLayoutStore.getState().byWorkspaceId[rid] : null;
+      const terminalPanel = drag.scopeId
+        ? (useTerminalScopeStore.getState().byScopeId[drag.scopeId]?.terminalPanel ?? null)
+        : null;
       const ensureDraggedFileLoaded = (afterLoad: () => void) => {
         if (
           drag.kind !== "file-tree-file" ||
@@ -121,7 +123,7 @@ export function TabDragOverlay({
         ) {
           return;
         }
-        void editorEnsureFileLoaded(drag.workspaceId, drag.workspaceRoot, drag.relativePath)
+        editorEnsureFileLoaded(drag.workspaceId, drag.workspaceRoot, drag.relativePath)
           .then((ok) => {
             if (ok) afterLoad();
           })
@@ -129,9 +131,9 @@ export function TabDragOverlay({
       };
 
       if (drag.kind === "bottom-terminal-group") {
-        if (tgt.kind === "bottom-terminal-pane" && drag.runtimeId === tgt.runtimeId) {
+        if (tgt.kind === "bottom-terminal-pane" && drag.scopeId === tgt.scopeId) {
           if (tgt.zone === "center") {
-            projectTerminalCommands.selectProjectTerminalGroup(tgt.runtimeId, drag.groupId!, null);
+            projectTerminalCommands.selectProjectTerminalGroup(tgt.scopeId, drag.groupId!, null);
           } else {
             const toIndex =
               terminalPanel?.groups.findIndex((group) => group.id === tgt.groupId) ?? -1;
@@ -139,7 +141,7 @@ export function TabDragOverlay({
             if (toIndex >= 0 && fromIndex >= 0) {
               const insertIndex = tgt.zone === "left" ? toIndex : toIndex + 1;
               projectTerminalCommands.reorderProjectTerminalGroups(
-                tgt.runtimeId,
+                tgt.scopeId,
                 fromIndex,
                 fromIndex < insertIndex ? insertIndex - 1 : insertIndex,
               );
@@ -147,22 +149,22 @@ export function TabDragOverlay({
           }
           return;
         }
-        if (tgt.kind !== "bottom-terminal-insert" || drag.runtimeId !== tgt.runtimeId) return;
+        if (tgt.kind !== "bottom-terminal-insert" || drag.scopeId !== tgt.scopeId) return;
         const fromIndex = drag.groupIndex ?? -1;
         let toIndex = tgt.insertIndex;
         if (fromIndex < toIndex) toIndex -= 1;
         if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
-          projectTerminalCommands.reorderProjectTerminalGroups(tgt.runtimeId, fromIndex, toIndex);
+          projectTerminalCommands.reorderProjectTerminalGroups(tgt.scopeId, fromIndex, toIndex);
         }
         return;
       }
 
       if (drag.kind === "bottom-terminal-slot") {
-        if (!drag.runtimeId || !drag.slotId || !terminalPanel) return;
-        if (tgt.kind === "bottom-terminal-pane" && tgt.runtimeId === drag.runtimeId) {
+        if (!drag.scopeId || !drag.slotId || !terminalPanel) return;
+        if (tgt.kind === "bottom-terminal-pane" && tgt.scopeId === drag.scopeId) {
           if (tgt.zone === "center") {
             projectTerminalCommands.selectProjectTerminalGroup(
-              tgt.runtimeId,
+              tgt.scopeId,
               drag.groupId!,
               drag.slotId,
             );
@@ -178,7 +180,7 @@ export function TabDragOverlay({
             if (fromIndex < toIndex) toIndex -= 1;
             if (fromIndex !== toIndex && fromIndex >= 0) {
               projectTerminalCommands.reorderProjectTerminalGroupChildren(
-                tgt.runtimeId,
+                tgt.scopeId,
                 tgt.groupId,
                 fromIndex,
                 toIndex,
@@ -186,20 +188,20 @@ export function TabDragOverlay({
             }
           } else {
             projectTerminalCommands.moveProjectTerminalToGroup(
-              tgt.runtimeId,
+              tgt.scopeId,
               drag.slotId,
               tgt.groupId,
               insertIndex,
             );
           }
           projectTerminalCommands.selectProjectTerminalGroup(
-            tgt.runtimeId,
+            tgt.scopeId,
             tgt.groupId,
             drag.slotId,
           );
           return;
         }
-        if (tgt.kind === "bottom-terminal-slot" && tgt.runtimeId === drag.runtimeId) {
+        if (tgt.kind === "bottom-terminal-slot" && tgt.scopeId === drag.scopeId) {
           const fromIndex = drag.slotIndex ?? -1;
           let toIndex = tgt.insertIndex;
           if (drag.groupId === tgt.groupId && fromIndex < toIndex) {
@@ -207,14 +209,14 @@ export function TabDragOverlay({
           }
           if (drag.groupId === tgt.groupId && fromIndex >= 0 && fromIndex !== toIndex) {
             projectTerminalCommands.reorderProjectTerminalGroupChildren(
-              tgt.runtimeId,
+              tgt.scopeId,
               tgt.groupId,
               fromIndex,
               toIndex,
             );
           } else if (drag.groupId !== tgt.groupId) {
             projectTerminalCommands.moveProjectTerminalToGroup(
-              tgt.runtimeId,
+              tgt.scopeId,
               drag.slotId,
               tgt.groupId,
               tgt.insertIndex,
@@ -223,10 +225,10 @@ export function TabDragOverlay({
           return;
         }
 
-        if (tgt.kind === "bottom-terminal-group" && tgt.runtimeId === drag.runtimeId) {
+        if (tgt.kind === "bottom-terminal-group" && tgt.scopeId === drag.scopeId) {
           if (drag.groupId !== tgt.groupId) {
             projectTerminalCommands.moveProjectTerminalToGroup(
-              tgt.runtimeId,
+              tgt.scopeId,
               drag.slotId,
               tgt.groupId,
             );
@@ -234,7 +236,7 @@ export function TabDragOverlay({
           return;
         }
 
-        if (tgt.kind === "bottom-terminal-insert" && tgt.runtimeId === drag.runtimeId) {
+        if (tgt.kind === "bottom-terminal-insert" && tgt.scopeId === drag.scopeId) {
           let insertIndex = tgt.insertIndex;
           const sourceGroup = terminalPanel.groups[drag.groupIndex ?? -1];
           if (
@@ -245,7 +247,7 @@ export function TabDragOverlay({
             insertIndex -= 1;
           }
           projectTerminalCommands.moveProjectTerminalToNewGroup(
-            tgt.runtimeId,
+            tgt.scopeId,
             drag.slotId,
             insertIndex,
           );
@@ -303,7 +305,7 @@ export function TabDragOverlay({
         return;
       }
 
-      if (!runtime?.root || drag.kind !== "pane-tab") return;
+      if (!ridLayout?.root || drag.kind !== "pane-tab") return;
 
       if (tgt.kind === "tab") {
         if (tgt.paneID === drag.sourcePaneID) {
@@ -325,15 +327,15 @@ export function TabDragOverlay({
         if (tgt.kind !== "pane") return;
         const { zone, paneID } = tgt;
         if (zone === "center") {
-          const leaf = findLeaf(runtime.root, paneID);
-          const srcLeaf = findLeaf(runtime.root, drag.sourcePaneID!);
+          const leaf = findLeaf(ridLayout.root, paneID);
+          const srcLeaf = findLeaf(ridLayout.root, drag.sourcePaneID!);
           const moving = srcLeaf?.tabs[drag.sourceIndex!];
           if (!moving) return;
           if (leaf?.tabs.some((tab) => tabsEqual(tab, moving))) return;
           layoutCommands.addTabToPane(paneID, drag.sourcePaneID!, drag.sourceIndex!);
         } else {
           if (drag.sourcePaneID === paneID) {
-            const leaf = findLeaf(runtime.root, paneID);
+            const leaf = findLeaf(ridLayout.root, paneID);
             if (leaf && leaf.tabs.length === 1) return;
           }
           const axisMap: Record<string, LayoutAxis> = {
