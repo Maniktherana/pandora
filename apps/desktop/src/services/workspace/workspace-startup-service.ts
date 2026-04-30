@@ -16,7 +16,8 @@ import {
   persistWorkspaceLayout,
   loadPersistedProjectTerminalPanel,
 } from "@/services/workspace/workspace-persistence";
-import { fileTreeInitExpansion } from "@/services/file-tree/file-tree-service";
+import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
+import { loadFileTreeExpandedPaths } from "@/services/file-tree/file-tree-preferences";
 import { gitInit } from "@/services/git/git-service";
 import { useNavigationStore } from "@/services/workspace/navigation-store";
 import { useCatalogStore } from "@/services/workspace/catalog-store";
@@ -188,11 +189,33 @@ function acknowledgeWorkspaceTerminalAgentStatus(workspaceId: string): void {
   }
 }
 
+// ─── file tree init ───────────────────────────────────────────────────────────
+
+const fileTreeSubscribed = new Set<string>();
+
+async function fileTreeInit(scopeId: string): Promise<void> {
+  const current = useFileTreeStore.getState().byScopeId[scopeId];
+  if (current?.bootStatus === "loaded" && fileTreeSubscribed.has(scopeId)) return;
+
+  useFileTreeStore.getState().setBootLoading(scopeId);
+  const client = getIpcClient();
+  if (!client) return;
+
+  try {
+    const paths = await loadFileTreeExpandedPaths(scopeId);
+    fileTreeSubscribed.add(scopeId);
+    client.fileTreeSubscribe(scopeId, paths).catch(() => fileTreeSubscribed.delete(scopeId));
+  } catch {
+    fileTreeSubscribed.add(scopeId);
+    client.fileTreeSubscribe(scopeId).catch(() => fileTreeSubscribed.delete(scopeId));
+  }
+}
+
 // ─── backend services startup ─────────────────────────────────────────────────
 
 async function ensureWorkspaceBackendServicesStarted(workspace: WorkspaceRecord): Promise<void> {
   if (workspace.status !== "ready") return;
-  await fileTreeInitExpansion(workspace.id);
+  await fileTreeInit(workspace.id);
   await hydrateProjectTerminalPanel(projectRuntimeKey(workspace.projectId));
   // Request terminal state from backend directly — no connection lifecycle needed.
   // Backend lazy-opens the scope domain service when it receives these commands.

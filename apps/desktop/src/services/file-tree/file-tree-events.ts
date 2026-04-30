@@ -1,4 +1,5 @@
 import { useFileTreeStore } from "./file-tree-store";
+import { applySnapshot, applyDirectoryChanged } from "./file-tree-model-registry";
 import { pendingFileTreeReads, pendingFileTreeWrites } from "./file-tree-request-registry";
 import type { IpcQueueEvent } from "@/services/ipc/ipc-event-queue";
 
@@ -27,19 +28,11 @@ export function isFileTreeEvent(
 export function applyFileTreeRuntimeEvent(event: IpcQueueEvent): void {
   switch (event.type) {
     case "file_tree_snapshot":
-      useFileTreeStore
-        .getState()
-        .applySnapshot(
-          event.scopeId,
-          event.snapshot.rootPath,
-          event.snapshot.directories,
-          event.snapshot.expandedPaths,
-        );
+      useFileTreeStore.getState().setBooted(event.scopeId);
+      applySnapshot(event.scopeId, event.snapshot.directories);
       break;
     case "file_tree_directory_changed":
-      useFileTreeStore
-        .getState()
-        .applyDirectoryChanged(event.scopeId, event.path, event.entries);
+      applyDirectoryChanged(event.scopeId, event.path, event.entries);
       break;
     case "file_tree_file_read": {
       const resolver = pendingFileTreeReads.get(event.requestID);
@@ -66,9 +59,6 @@ export function applyFileTreeRuntimeEvent(event: IpcQueueEvent): void {
         pendingFileTreeWrites.delete(event.requestID);
         writeErr?.(new Error(event.message));
       }
-      // Errors with a requestID are operation-scoped (read/write) — they
-      // should not set bootStatus to "error".  General errors without a
-      // requestID may escalate to "error" if the tree hasn't loaded yet.
       useFileTreeStore.getState().setError(event.scopeId, event.message);
       break;
   }

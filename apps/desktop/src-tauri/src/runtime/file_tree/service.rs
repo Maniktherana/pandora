@@ -583,83 +583,79 @@ async fn compute_snapshot(root: &Path, expanded: &BTreeSet<String>) -> FileTreeS
     }
 }
 
-/// Build a complete directory map from `root` by walking the workspace with
-/// the [`ignore`] crate.
+/// Build a complete directory map from `root` by walking the entire
+/// filesystem.  Every entry is included.  Gitignored entries are marked
+/// with `is_ignored = true` so the frontend can dim them.  `.git` is
+/// always excluded.
 ///
-/// `.gitignore`, `.ignore`, and global gitignore rules are all respected
-/// without spawning any git subprocess.  `.git` is always excluded via an
-/// explicit `filter_entry` guard.  `hidden(false)` ensures that dotfiles
-/// that are **not** gitignored (`.env`, `.vscode/`, etc.) still appear in
-/// the tree — only genuinely ignored paths are absent.
-///
-/// Every non-ignored directory becomes its own key in the returned map so
-/// the renderer can expand them on demand.  `is_ignored` is `false` for all
-/// included entries; ignored paths are simply not present.
+/// Uses a single `std::fs` recursive walk for the full listing, plus an
+/// `ignore`-crate walk to build the set of non-ignored paths.
 fn list_directory_tree_blocking(root: &Path) -> BTreeMap<String, Vec<FileTreeEntry>> {
     use ignore::WalkBuilder;
+    use std::collections::HashSet;
 
-    let mut result: BTreeMap<String, Vec<FileTreeEntry>> = BTreeMap::new();
-    // Root is always present, even when empty.
-    result.insert(String::new(), Vec::new());
-
+    // First, collect the set of non-ignored paths so we can mark the rest.
+    let mut non_ignored: HashSet<String> = HashSet::new();
     let walker = WalkBuilder::new(root)
-        // Include dotfiles that are not gitignored (.env, .vscode, etc.).
         .hidden(false)
-        // Respect .gitignore rules (no subprocess).
         .git_ignore(true)
-        // Respect the user's global gitignore / core.excludesFile.
         .git_global(true)
-        // Respect .git/info/exclude.
         .git_exclude(true)
-        // Respect .ignore files.
         .ignore(true)
-        // Also check parent directories for ignore files.
         .parents(true)
-        // Always exclude .git — never show it as an entry or descend into it.
         .filter_entry(|e| e.file_name() != std::ffi::OsStr::new(".git"))
         .build();
+    for item in walker.into_iter().filter_map(|e| e.ok()) {
+        if item.depth() == 0 { continue; }
+        if let Ok(rel) = item.path().strip_prefix(root) {
+            non_ignored.insert(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
 
-    for item in walker {
-        let entry = match item {
-            Ok(e) => e,
+    // Now walk the entire filesystem tree with std::fs.
+    let mut result: BTreeMap<String, Vec<FileTreeEntry>> = BTreeMap::new();
+    result.insert(String::new(), Vec::new());
+
+    let mut stack: Vec<String> = vec![String::new()];
+    while let Some(dir_rel) = stack.pop() {
+        let abs_dir = if dir_rel.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(&dir_rel)
+        };
+        let read = match std::fs::read_dir(&abs_dir) {
+            Ok(r) => r,
             Err(_) => continue,
         };
-        // Depth 0 is the walk root itself.
-        if entry.depth() == 0 {
-            continue;
-        }
-        let abs = entry.path();
-        let file_type = match entry.file_type() {
-            Some(ft) => ft,
-            None => continue, // stdin sentinel
-        };
-        let rel = match abs.strip_prefix(root) {
-            Ok(r) => r.to_string_lossy().replace('\\', "/"),
-            Err(_) => continue,
-        };
-        if rel.is_empty() {
-            continue;
-        }
-        let name = match abs.file_name() {
-            Some(n) => n.to_string_lossy().into_owned(),
-            None => continue,
-        };
-        let is_dir = file_type.is_dir();
+        for fs_entry in read.filter_map(|e| e.ok()) {
+            let name = fs_entry.file_name().to_string_lossy().into_owned();
+            if name == ".git" { continue; }
+            let child_rel = if dir_rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir_rel}/{name}")
+            };
+            let kind = match fs_entry.file_type() {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            let is_dir = kind.is_dir();
+            let is_ignored = !non_ignored.contains(&child_rel);
 
-        // Add this entry to its parent's listing.
-        result
-            .entry(parent_of(&rel))
-            .or_default()
-            .push(FileTreeEntry {
-                path: rel.clone(),
-                name,
-                is_directory: is_dir,
-                is_ignored: false,
-            });
+            result
+                .entry(dir_rel.clone())
+                .or_default()
+                .push(FileTreeEntry {
+                    path: child_rel.clone(),
+                    name,
+                    is_directory: is_dir,
+                    is_ignored,
+                });
 
-        // Traversed directories own a key so the renderer can expand them.
-        if is_dir {
-            result.entry(rel).or_default();
+            if is_dir {
+                result.entry(child_rel.clone()).or_default();
+                stack.push(child_rel);
+            }
         }
     }
 
@@ -685,18 +681,43 @@ async fn list_directory(root: &Path, relative: &str) -> Option<Vec<FileTreeEntry
 }
 
 fn list_directory_blocking(root: &Path, relative: &str) -> Result<Vec<FileTreeEntry>, String> {
+    use ignore::WalkBuilder;
+    use std::collections::HashSet;
+
     let dir = resolve_under_root(root, relative, true)?;
     if !dir.is_dir() {
         return Err("not a directory".to_string());
     }
 
+    // Collect non-ignored children via a depth-1 gitignore-aware walk.
+    let mut non_ignored: HashSet<String> = HashSet::new();
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .parents(true)
+        .max_depth(Some(if relative.is_empty() { 1 } else { relative.matches('/').count() + 2 }))
+        .filter_entry(|e| e.file_name() != std::ffi::OsStr::new(".git"))
+        .build();
+    for item in walker.into_iter().filter_map(|e| e.ok()) {
+        if item.depth() == 0 { continue; }
+        if let Ok(rel) = item.path().strip_prefix(root) {
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            let parent = parent_of(&rel_str);
+            if parent == relative {
+                non_ignored.insert(rel_str);
+            }
+        }
+    }
+
+    // List all filesystem children, marking those not in non_ignored as ignored.
     let mut entries: Vec<FileTreeEntry> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            // Keep single-directory listings consistent with the snapshot:
-            // .git is never surfaced.
             if name == ".git" {
                 return None;
             }
@@ -707,8 +728,9 @@ fn list_directory_blocking(root: &Path, relative: &str) -> Result<Vec<FileTreeEn
                 .ok()?
                 .to_string_lossy()
                 .replace('\\', "/");
+            let is_ignored = !non_ignored.contains(&path);
             Some(FileTreeEntry {
-                is_ignored: false,
+                is_ignored,
                 path,
                 name,
                 is_directory: kind.is_dir(),
