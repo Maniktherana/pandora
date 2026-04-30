@@ -1,27 +1,46 @@
 import type { ScmSnapshot } from "@/lib/shared/types";
-import { useGitStore } from "./git-store";
-import { useGitSummaryStore } from "./git-summary-store";
+import { queryClient } from "@/lib/query-client";
+import {
+  resolveScmSnapshotWaiters,
+  scmSummaryQueryKey,
+  scmStatusQueryKey,
+  deriveScmSummary,
+  deriveScmStatus,
+} from "./git-queries";
 
+/**
+ * Primary handler for incoming scm_snapshot events.
+ *
+ * 1. Resolves any query-function promises that are waiting for a first
+ *    snapshot (waiter registry in git-queries.ts).
+ * 2. Pushes fresh data directly into the React Query cache so all
+ *    subscribers (workspace rows, SCM panel, review viewer) re-render
+ *    immediately without a background refetch.
+ */
 export function applyGitSnapshot(scopeId: string, snapshot: ScmSnapshot): void {
-  useGitStore.getState().applySnapshot(scopeId, snapshot);
+  // Wake pending query fetchers for this workspace.
+  resolveScmSnapshotWaiters(scopeId, snapshot);
+
+  // Push authoritative data into the React Query cache.
+  queryClient.setQueryData(scmSummaryQueryKey(scopeId), deriveScmSummary(snapshot));
+  queryClient.setQueryData(scmStatusQueryKey(scopeId), deriveScmStatus(snapshot));
 }
 
-export function applyGitRefreshing(scopeId: string): void {
-  useGitStore.getState().setRefreshing(scopeId, true);
+/**
+ * Called alongside applyGitSnapshot from the IPC event router.
+ * The React Query cache update is handled entirely by applyGitSnapshot;
+ * this is kept for router compatibility but performs no additional work.
+ */
+export function applyGitSummary(_scopeId: string, _snapshot: ScmSnapshot): void {
+  // No-op: applyGitSnapshot above owns the cache and waiter resolution.
 }
 
-export function applyGitError(scopeId: string, message: string): void {
-  useGitStore.getState().setError(scopeId, message);
+/** Signals that the backend is recomputing git status (no data change yet). */
+export function applyGitRefreshing(_scopeId: string): void {
+  // No-op for now; could update a per-workspace refreshing flag in future.
 }
 
-export function applyGitSummary(scopeId: string, snapshot: ScmSnapshot): void {
-  const paths = new Set([
-    ...snapshot.staged.map((e) => e.path),
-    ...snapshot.unstaged.map((e) => e.path),
-  ]);
-  useGitSummaryStore.getState().applySummary(scopeId, {
-    branch: snapshot.branch,
-    lineStats: { added: snapshot.lineStats.added, removed: snapshot.lineStats.removed },
-    filesChanged: paths.size,
-  });
+/** Records a backend git error; the affected query will remain stale. */
+export function applyGitError(_scopeId: string, message: string): void {
+  console.error(`[git] backend error: ${message}`);
 }

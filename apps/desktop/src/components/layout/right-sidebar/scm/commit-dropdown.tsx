@@ -8,46 +8,52 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { useGitController } from "@/services/git/use-git";
 
 type CommitDropdownProps = {
-  onCommit: () => void;
+  onCommit: () => Promise<void>;
   canCommit: boolean;
   busy: boolean;
   scopeId: string;
-  scm: ReturnType<typeof useGitController>;
+  onPush: () => Promise<void>;
+  onFetch: () => Promise<void>;
+  onPull: () => Promise<void>;
 };
 
-export function CommitDropdown({ onCommit, canCommit, busy, scm }: CommitDropdownProps) {
+export function CommitDropdown({
+  onCommit,
+  canCommit,
+  busy,
+  onPush,
+  onFetch,
+  onPull,
+}: CommitDropdownProps) {
   const [actionBusy, setActionBusy] = useState(false);
   const disabled = busy || actionBusy;
 
-  const handleCommitAndPush = () => {
+  const handleCommitAndPush = async () => {
     if (!canCommit) return;
     setActionBusy(true);
     try {
-      onCommit();
-      scm.push();
-    } catch {
-      // errors handled by parent
+      await onCommit();
+      await onPush();
     } finally {
       setActionBusy(false);
     }
   };
 
-  const handleFetch = () => {
+  const handleFetch = async () => {
     setActionBusy(true);
     try {
-      scm.fetch();
+      await onFetch();
     } finally {
       setActionBusy(false);
     }
   };
 
-  const handlePull = () => {
+  const handlePull = async () => {
     setActionBusy(true);
     try {
-      scm.pull();
+      await onPull();
     } finally {
       setActionBusy(false);
     }

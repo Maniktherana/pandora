@@ -11,7 +11,7 @@ import {
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import ReviewViewer from "@/components/editor/review-viewer";
-import { fileTreeReadTextFile } from "@/services/file-tree/file-tree-service";
+import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
@@ -223,23 +223,31 @@ function PaneView({
           const isActiveTab = idx === leaf.selectedIndex;
           if (tab.kind === "editor") return null;
           if (tab.kind === "diff") {
-            if (!isActiveTab) return null;
             return (
-              <div key={tabKey(tab)} className="absolute inset-0 overflow-hidden">
+              <div
+                key={tabKey(tab)}
+                className="absolute inset-0 overflow-hidden"
+                style={!isActiveTab ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+                aria-hidden={!isActiveTab || undefined}
+              >
                 <DiffViewer
                   workspaceRoot={workspaceRoot}
                   relativePath={tab.path}
                   source={tab.source}
-                  isActive={true}
-                  readWorkingCopy={(path) => fileTreeReadTextFile(workspaceId, path)}
+                  isActive={isActiveTab}
+                  readWorkingCopy={(path) => editorReadWorkingCopyText(workspaceId, path)}
                 />
               </div>
             );
           }
           if (tab.kind === "review") {
-            if (!isActiveTab) return null;
             return (
-              <div key={tabKey(tab)} className="absolute inset-0 overflow-hidden">
+              <div
+                key={tabKey(tab)}
+                className="absolute inset-0 overflow-hidden"
+                style={!isActiveTab ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+                aria-hidden={!isActiveTab || undefined}
+              >
                 <ReviewViewer
                   workspaceId={workspaceId}
                   workspaceRoot={workspaceRoot}

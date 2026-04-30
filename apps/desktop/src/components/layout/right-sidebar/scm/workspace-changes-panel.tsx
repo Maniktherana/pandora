@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -22,7 +23,34 @@ import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useGitController } from "@/services/git/use-git";
+import { useBranchContext } from "@/services/git/use-git";
+import {
+  useScmStatusQuery,
+  scmStatusQueryKey,
+  scmSummaryQueryKey,
+  applyOptimisticEntriesToStatus,
+} from "@/services/git/git-queries";
+import {
+  optimisticallyStageEntries,
+  optimisticallyUnstageEntries,
+  optimisticallyStageAllEntries,
+  optimisticallyUnstageAllEntries,
+} from "@/services/git/git-utils";
+import {
+  gitRefresh,
+  gitStage,
+  gitStageAll,
+  gitUnstage,
+  gitUnstageAll,
+  gitDiscardTracked,
+  gitDiscardUntracked,
+  gitCommit,
+  gitPush,
+  gitFetch,
+  gitPull,
+  gitSetTargetBranch,
+  gitLoadBranchContext,
+} from "@/services/git/git-service";
 import type { GitSelectionModifiers } from "@/services/git/git-types";
 import type { ScmEntry } from "@/lib/shared/types";
 import {
@@ -48,13 +76,8 @@ type WorkspaceChangesPanelProps = {
   workspaceLabel: string;
 };
 
-function hasStaged(entry: ScmEntry): boolean {
-  return entry.stagedKind != null && entry.stagedKind !== "";
-}
-
-function hasUnstaged(entry: ScmEntry): boolean {
-  return entry.untracked || (entry.worktreeKind != null && entry.worktreeKind !== "");
-}
+const EMPTY_ENTRIES: ScmEntry[] = [];
+const EMPTY_PENDING: ReadonlySet<string> = new Set<string>();
 
 export default function WorkspaceChangesPanel({
   workspaceRoot,
@@ -74,20 +97,33 @@ export default function WorkspaceChangesPanel({
   const [targetBranch, setTargetBranch] = useState<string | null>(null);
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [branchSearch, setBranchSearch] = useState("");
+  /**
+   * Paths with an in-flight IPC call. Does NOT block visual movement — rows
+   * move immediately via the optimistic cache update. Pending only dims
+   * buttons/rows until the IPC settles and finally{} clears this set.
+   */
+  const [inflightPaths, setInflightPaths] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const scm = useGitController(workspaceId);
+  // React Query — primary data source for SCM status.
+  const statusQuery = useScmStatusQuery(workspaceId);
+  const queryClient = useQueryClient();
+
+  // Branch context still lives in the GitStore (not part of ScmStatusData).
+  const { branchContext, branchContextLoading } = useBranchContext(workspaceId);
+
+  // Derived lists from the React Query cache.
+  const snapshot = statusQuery.data?.snapshot ?? null;
+  const entries = statusQuery.data?.entries ?? EMPTY_ENTRIES;
+  const stagedList = statusQuery.data?.stagedEntries ?? EMPTY_ENTRIES;
+  const unstagedList = statusQuery.data?.unstagedEntries ?? EMPTY_ENTRIES;
+
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
   const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
-
-  // Read pre-derived lists directly from the store — no filter/sort in render.
-  const stagedList = scm.stagedEntries;
-  const unstagedList = scm.unstagedEntries;
-  const pendingPaths = scm.pendingPaths;
 
   // Stable visible-path arrays for range-select; recomputed only when the list changes.
   const stagedVisiblePaths = useMemo(
@@ -101,49 +137,50 @@ export default function WorkspaceChangesPanel({
 
   // Sync targetBranch from snapshot on first arrival.
   useEffect(() => {
-    if (scm.snapshot?.targetBranch !== undefined) {
-      setTargetBranch((current) => current ?? scm.snapshot?.targetBranch ?? null);
+    if (snapshot?.targetBranch !== undefined) {
+      setTargetBranch((current) => current ?? snapshot?.targetBranch ?? null);
     }
-  }, [scm.snapshot?.targetBranch]);
+  }, [snapshot?.targetBranch]);
 
   // Reset per-workspace UI state on workspace switch.
   useEffect(() => {
     setSelectedPaths([]);
     setLastSelectedPath(null);
+    setInflightPaths(EMPTY_PENDING);
   }, [workspaceId]);
 
   // Drop selected paths that no longer exist in the server list.
   useEffect(() => {
-    if (!scm.entries.length) return;
-    const existingPaths = new Set(scm.entries.map((entry) => entry.path));
+    if (!entries.length) return;
+    const existingPaths = new Set(entries.map((entry) => entry.path));
     setSelectedPaths((current) => current.filter((path) => existingPaths.has(path)));
     setLastSelectedPath((current) => (current && existingPaths.has(current) ? current : null));
-  }, [scm.entries]);
+  }, [entries]);
 
   // Clear busy when snapshot confirms a commit completed (staged list goes empty).
   useEffect(() => {
-    if (busy && scm.snapshot && stagedList.length === 0) {
+    if (busy && snapshot && stagedList.length === 0) {
       setBusy(false);
     }
-  }, [busy, scm.snapshot, stagedList.length]);
+  }, [busy, snapshot, stagedList.length]);
 
   useEffect(() => {
     if (!branchPickerOpen) setBranchSearch("");
   }, [branchPickerOpen]);
 
   useEffect(() => {
-    if (!scm.branchContext) return;
+    if (!branchContext) return;
     setTargetBranch((current) =>
       resolveWorkspaceTargetBranch(
-        scm.branchContext!,
-        current ?? scm.snapshot?.targetBranch ?? null,
+        branchContext,
+        current ?? snapshot?.targetBranch ?? null,
       ),
     );
-  }, [scm.branchContext, scm.snapshot?.targetBranch]);
+  }, [branchContext, snapshot?.targetBranch]);
 
   const branchOptions = useMemo(() => {
-    const currentBranch = scm.branchContext?.currentBranch ?? "";
-    const options = Array.from(new Set(scm.branchContext?.availableBranches ?? []));
+    const currentBranch = branchContext?.currentBranch ?? "";
+    const options = Array.from(new Set(branchContext?.availableBranches ?? []));
     return options
       .filter(
         (branch) =>
@@ -154,7 +191,7 @@ export default function WorkspaceChangesPanel({
         if (b === "main") return 1;
         return a.localeCompare(b, undefined, { sensitivity: "base" });
       });
-  }, [scm.branchContext?.availableBranches, scm.branchContext?.currentBranch]);
+  }, [branchContext?.availableBranches, branchContext?.currentBranch]);
 
   const filteredBranchOptions = useMemo(() => {
     const query = branchSearch.trim().toLowerCase();
@@ -162,25 +199,79 @@ export default function WorkspaceChangesPanel({
     return branchOptions.filter((branch) => branch.toLowerCase().includes(query));
   }, [branchOptions, branchSearch]);
 
-  const activeTargetBranch = targetBranch ?? scm.branchContext?.defaultTargetBranch ?? null;
+  const activeTargetBranch = targetBranch ?? branchContext?.defaultTargetBranch ?? null;
 
   const handleBranchPickerOpenChange = useCallback(
     (open: boolean) => {
       setBranchPickerOpen(open);
-      if (open) scm.loadBranchContext();
+      if (open) gitLoadBranchContext(workspaceId);
     },
-    [scm],
+    [workspaceId],
   );
 
+  /**
+   * Select a new base branch. Optimistically sets local state immediately, then
+   * awaits the IPC call and rolls back on failure.
+   */
   const handleSelectTargetBranch = useCallback(
-    (branch: string) => {
+    async (branch: string) => {
       setTargetBranch(branch);
-      scm.setTargetBranch(branch);
       setBranchPickerOpen(false);
       setBranchSearch("");
+      try {
+        await gitSetTargetBranch(workspaceId, branch);
+      } catch (error) {
+        setLoadError(String(error));
+        setTargetBranch(snapshot?.targetBranch ?? null);
+      }
     },
-    [scm],
+    [workspaceId, snapshot?.targetBranch],
   );
+
+  // ---------------------------------------------------------------------------
+  // Optimistic cache helpers
+  // ---------------------------------------------------------------------------
+
+  /** Immediately mutate the React Query status cache with an optimistic entry list. */
+  const applyOptimistic = useCallback(
+    (transform: (currentEntries: ScmEntry[]) => ScmEntry[]) => {
+      queryClient.setQueryData(
+        scmStatusQueryKey(workspaceId),
+        (old: ReturnType<typeof useScmStatusQuery>["data"]) => {
+          if (!old) return old;
+          return applyOptimisticEntriesToStatus(old, transform(old.entries));
+        },
+      );
+    },
+    [queryClient, workspaceId],
+  );
+
+  const addInflightPaths = useCallback((paths: string[]) => {
+    setInflightPaths((prev) => new Set([...prev, ...paths]));
+  }, []);
+
+  const removeInflightPaths = useCallback((paths: string[]) => {
+    setInflightPaths((prev) => {
+      const next = new Set(prev);
+      paths.forEach((p) => next.delete(p));
+      return next;
+    });
+  }, []);
+
+  /**
+   * On failure only: invalidate both queries so the cache reflects true server
+   * state. Never called on the success path — the backend snapshot event
+   * (applyGitSummary → queryClient.setQueryData) reconciles the cache
+   * without triggering a stale refetch that could snap back the optimistic view.
+   */
+  const reconcileScmAfterFailedAction = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: scmStatusQueryKey(workspaceId) });
+    await queryClient.invalidateQueries({ queryKey: scmSummaryQueryKey(workspaceId) });
+  }, [queryClient, workspaceId]);
+
+  // ---------------------------------------------------------------------------
+  // Selection helpers
+  // ---------------------------------------------------------------------------
 
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const selectedStagedPaths = useMemo(
@@ -246,48 +337,133 @@ export default function WorkspaceChangesPanel({
     setLastSelectedPath(null);
   }, []);
 
-  const onDiscard = (entry: ScmEntry) => {
-    if (entry.untracked) {
-      if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
-      try { scm.discardUntracked([entry.path]); } catch (e) { setLoadError(String(e)); }
-      return;
-    }
-    if (
-      !window.confirm(`Discard local changes to "${entry.path}"? Staged changes are not removed.`)
-    )
-      return;
-    try { scm.discardTracked([entry.path]); } catch (e) { setLoadError(String(e)); }
-  };
+  // ---------------------------------------------------------------------------
+  // SCM actions — optimistic → await IPC → catch+reconcile / finally clearPending
+  // ---------------------------------------------------------------------------
 
-  const onUnstage = (path: string) => {
-    const paths = selectedStagedPaths.includes(path) ? selectedStagedPaths : [path];
-    try { scm.unstage(paths); } catch (e) { setLoadError(String(e)); }
-  };
+  const onStage = useCallback(
+    async (entry: ScmEntry) => {
+      const paths = selectedUnstagedPaths.includes(entry.path)
+        ? selectedUnstagedPaths
+        : [entry.path];
+      applyOptimistic((current) => optimisticallyStageEntries(current, paths));
+      addInflightPaths(paths);
+      try {
+        await gitStage(workspaceId, paths);
+      } catch (error) {
+        setLoadError(String(error));
+        await reconcileScmAfterFailedAction();
+      } finally {
+        removeInflightPaths(paths);
+      }
+    },
+    [
+      workspaceId,
+      selectedUnstagedPaths,
+      applyOptimistic,
+      addInflightPaths,
+      removeInflightPaths,
+      reconcileScmAfterFailedAction,
+    ],
+  );
 
-  const onCommit = () => {
-    setBusy(true);
-    try {
-      scm.commit(commitMessage);
-      setCommitMessage("");
-    } catch (error) {
-      setLoadError(String(error));
-      setBusy(false);
-    }
-  };
+  const onUnstage = useCallback(
+    async (path: string) => {
+      const paths = selectedStagedPaths.includes(path) ? selectedStagedPaths : [path];
+      applyOptimistic((current) => optimisticallyUnstageEntries(current, paths));
+      addInflightPaths(paths);
+      try {
+        await gitUnstage(workspaceId, paths);
+      } catch (error) {
+        setLoadError(String(error));
+        await reconcileScmAfterFailedAction();
+      } finally {
+        removeInflightPaths(paths);
+      }
+    },
+    [
+      workspaceId,
+      selectedStagedPaths,
+      applyOptimistic,
+      addInflightPaths,
+      removeInflightPaths,
+      reconcileScmAfterFailedAction,
+    ],
+  );
 
-  const onUnstageAll = () => {
-    if (!stagedList.length) return;
-    clearSelection();
-    try { scm.unstageAll(); } catch (e) { setLoadError(String(e)); }
-  };
-
-  const onStageAll = () => {
+  const onStageAll = useCallback(async () => {
     if (!unstagedList.length) return;
     clearSelection();
-    try { scm.stageAll(); } catch (e) { setLoadError(String(e)); }
-  };
+    const paths = unstagedList.map((e) => e.path);
+    applyOptimistic(optimisticallyStageAllEntries);
+    addInflightPaths(paths);
+    try {
+      await gitStageAll(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+      await reconcileScmAfterFailedAction();
+    } finally {
+      removeInflightPaths(paths);
+    }
+  }, [
+    workspaceId,
+    unstagedList,
+    clearSelection,
+    applyOptimistic,
+    addInflightPaths,
+    removeInflightPaths,
+    reconcileScmAfterFailedAction,
+  ]);
 
-  const onDiscardAll = () => {
+  const onUnstageAll = useCallback(async () => {
+    if (!stagedList.length) return;
+    clearSelection();
+    const paths = stagedList.map((e) => e.path);
+    applyOptimistic(optimisticallyUnstageAllEntries);
+    addInflightPaths(paths);
+    try {
+      await gitUnstageAll(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+      await reconcileScmAfterFailedAction();
+    } finally {
+      removeInflightPaths(paths);
+    }
+  }, [
+    workspaceId,
+    stagedList,
+    clearSelection,
+    applyOptimistic,
+    addInflightPaths,
+    removeInflightPaths,
+    reconcileScmAfterFailedAction,
+  ]);
+
+  const onDiscard = useCallback(
+    async (entry: ScmEntry) => {
+      if (entry.untracked) {
+        if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
+        try {
+          await gitDiscardUntracked(workspaceId, [entry.path]);
+        } catch (e) {
+          setLoadError(String(e));
+        }
+        return;
+      }
+      if (
+        !window.confirm(`Discard local changes to "${entry.path}"? Staged changes are not removed.`)
+      )
+        return;
+      try {
+        await gitDiscardTracked(workspaceId, [entry.path]);
+      } catch (e) {
+        setLoadError(String(e));
+      }
+    },
+    [workspaceId],
+  );
+
+  const onDiscardAll = useCallback(async () => {
     if (!unstagedList.length) return;
     const entriesToDiscard = unstagedList;
     if (!window.confirm(`Discard ${entriesToDiscard.length} unstaged files?`)) return;
@@ -295,22 +471,70 @@ export default function WorkspaceChangesPanel({
     try {
       const tracked = entriesToDiscard.filter((e) => !e.untracked).map((e) => e.path);
       const untracked = entriesToDiscard.filter((e) => e.untracked).map((e) => e.path);
-      if (tracked.length) scm.discardTracked(tracked);
-      if (untracked.length) scm.discardUntracked(untracked);
-    } catch (e) { setLoadError(String(e)); }
-  };
+      await Promise.all([
+        tracked.length ? gitDiscardTracked(workspaceId, tracked) : Promise.resolve(),
+        untracked.length ? gitDiscardUntracked(workspaceId, untracked) : Promise.resolve(),
+      ]);
+    } catch (e) {
+      setLoadError(String(e));
+    }
+  }, [workspaceId, unstagedList, clearSelection]);
 
-  const onStage = (entry: ScmEntry) => {
-    const paths = selectedUnstagedPaths.includes(entry.path) ? selectedUnstagedPaths : [entry.path];
-    try { scm.stage(paths); } catch (e) { setLoadError(String(e)); }
-  };
+  const onCommit = useCallback(async () => {
+    if (!canCommit) return;
+    setBusy(true);
+    try {
+      await gitCommit(workspaceId, commitMessage);
+      setCommitMessage("");
+      // busy clears via useEffect once the backend snapshot confirms staged list is empty
+    } catch (error) {
+      setLoadError(String(error));
+      setBusy(false);
+    }
+  }, [workspaceId, commitMessage, canCommit]);
+
+  // ---------------------------------------------------------------------------
+  // Git lifecycle / network actions (no optimistic state)
+  // ---------------------------------------------------------------------------
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await gitRefresh(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+    }
+  }, [workspaceId]);
+
+  const handleGitPush = useCallback(async () => {
+    try {
+      await gitPush(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+    }
+  }, [workspaceId]);
+
+  const handleGitFetch = useCallback(async () => {
+    try {
+      await gitFetch(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+    }
+  }, [workspaceId]);
+
+  const handleGitPull = useCallback(async () => {
+    try {
+      await gitPull(workspaceId);
+    } catch (error) {
+      setLoadError(String(error));
+    }
+  }, [workspaceId]);
 
   const handleOpenPr = useCallback(async () => {
     setPrError(null);
     setPrSending(true);
     try {
       const ctx = await gatherPrContext(workspaceId, activeTargetBranch ?? undefined);
-      const hasUncommittedChanges = scm.entries.length > 0;
+      const hasUncommittedChanges = entries.length > 0;
       if (!ctx.hasCommits && !hasUncommittedChanges) {
         setPrError(`No commits or changes ahead of ${ctx.baseBranch}.`);
         setPrSending(false);
@@ -356,7 +580,7 @@ export default function WorkspaceChangesPanel({
       setPrSending(false);
     }
   }, [
-    scm.entries.length,
+    entries.length,
     activeTargetBranch,
     layoutCommands,
     projectRuntimeId,
@@ -438,7 +662,7 @@ export default function WorkspaceChangesPanel({
               className="max-h-72 overflow-y-auto overscroll-contain p-1"
               onWheelCapture={(event) => event.stopPropagation()}
             >
-              {scm.branchContextLoading ? (
+              {branchContextLoading ? (
                 <div className="px-2 py-2 text-xs text-[var(--theme-text-faint)]">
                   Loading branches
                 </div>
@@ -476,7 +700,7 @@ export default function WorkspaceChangesPanel({
             variant="ghost"
             size="sm"
             className="gap-1.5 px-2 text-[11px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
-            disabled={scm.entries.length === 0}
+            disabled={entries.length === 0}
             title="Review all changes"
             onClick={onOpenReview}
           >
@@ -500,7 +724,7 @@ export default function WorkspaceChangesPanel({
             size="icon-xs"
             className="text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
             title="Refresh"
-            onClick={() => scm.refresh()}
+            onClick={handleRefresh}
           >
             <HugeiconsIcon icon={Refresh01Icon} strokeWidth={1.5} className="size-3.5" />
           </Button>
@@ -529,7 +753,9 @@ export default function WorkspaceChangesPanel({
             canCommit={canCommit}
             busy={busy}
             scopeId={workspaceId}
-            scm={scm}
+            onPush={handleGitPush}
+            onFetch={handleGitFetch}
+            onPull={handleGitPull}
           />
         </div>
         <Button
@@ -538,7 +764,7 @@ export default function WorkspaceChangesPanel({
           size="sm"
           className="mt-1 h-7 w-full gap-1.5 text-[12px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
           disabled={prSending || busy}
-          onClick={() => handleOpenPr().catch((err) => setPrError(String(err)))}
+          onClick={handleOpenPr}
         >
           <GitPullRequest className="size-3.5" />
           Open Pull Request
@@ -563,7 +789,7 @@ export default function WorkspaceChangesPanel({
               }
             }}
           >
-            {scm.snapshot === null && (
+            {snapshot === null && (
               <div className="flex items-center justify-center px-4 py-8">
                 <DotGridLoader
                   variant="default"
@@ -573,7 +799,7 @@ export default function WorkspaceChangesPanel({
                 />
               </div>
             )}
-            {scm.snapshot !== null && scm.entries.length === 0 && (
+            {snapshot !== null && entries.length === 0 && (
               <div className="px-2 py-2 text-xs text-[var(--theme-text-subtle)]">No changes</div>
             )}
 
@@ -581,7 +807,7 @@ export default function WorkspaceChangesPanel({
               stagedList={stagedList}
               stagedOpen={stagedOpen}
               setStagedOpen={setStagedOpen}
-              pendingPaths={pendingPaths}
+              pendingPaths={inflightPaths}
               stickyTop={0}
               stickyZIndex={GIT_SECTION_STICKY_Z_INDEX_BASE}
               selectedPaths={selectedPathSet}
@@ -601,7 +827,7 @@ export default function WorkspaceChangesPanel({
               unstagedList={unstagedList}
               changesOpen={changesOpen}
               setChangesOpen={setChangesOpen}
-              pendingPaths={pendingPaths}
+              pendingPaths={inflightPaths}
               stickyTop={0}
               stickyZIndex={GIT_SECTION_STICKY_Z_INDEX_BASE}
               selectedPaths={selectedPathSet}

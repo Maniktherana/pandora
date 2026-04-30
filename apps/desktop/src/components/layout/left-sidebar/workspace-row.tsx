@@ -33,7 +33,7 @@ import { useSelectedWorkspaceId, useNavigationArea } from "@/hooks/use-navigatio
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
-import { useGitSummaryStore } from "@/services/git/git-summary-store";
+import { useScmSummaryQuery } from "@/services/git/git-queries";
 import { useWorkspaceAgentStatus } from "@/services/terminal/terminal-scope-store";
 import DotGridLoader from "@/components/dot-grid-loader";
 import { isTerminalAgentAttentionStatus } from "@/lib/terminal/agent-activity";
@@ -55,7 +55,11 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
   const agentStatus = useWorkspaceAgentStatus(workspace.id);
-  const gitSummary = useGitSummaryStore((s) => s.byWorkspaceId[workspace.id] ?? null);
+  // Read Git summary from React Query — populated by prefetch at launch and
+  // kept warm by the IPC event bridge in git-events.ts.
+  const { data: gitSummary } = useScmSummaryQuery(
+    workspace.status === "ready" ? workspace.id : null,
+  );
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
@@ -69,7 +73,7 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;
   const prState = workspace.prState as string | null;
-  const hasChanges = addedCount > 0 || removedCount > 0;
+  const hasChanges = gitSummary?.hasChanges ?? false;
   const isRenaming = renameValue !== null;
 
   const stateIcon = useMemo(() => {

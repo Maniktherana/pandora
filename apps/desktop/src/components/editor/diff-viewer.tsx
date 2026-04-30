@@ -88,6 +88,15 @@ export default function DiffViewer({
   const [sideBySide, setSideBySide] = useState(loadSideBySide);
   const [storedWrapLines, setStoredWrapLines] = useState(loadWrapLines);
 
+  // "Enabled once ever active" — fetches as soon as the tab is first activated,
+  // then stays enabled so cached content is visible instantly on switch-back.
+  // Avoids fetching for tabs mounted-but-never-viewed while still preventing
+  // a blank-flash when switching back to a previously-loaded diff.
+  const [everActive, setEverActive] = useState(isActive);
+  useEffect(() => {
+    if (isActive && !everActive) setEverActive(true);
+  }, [isActive, everActive]);
+
   const setSideBySidePersist = useCallback((next: boolean) => {
     setSideBySide(next);
     try {
@@ -110,14 +119,18 @@ export default function DiffViewer({
     queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source, targetBranch),
     queryFn: () =>
       fetchDiffContents(workspaceRoot, relativePath, source, targetBranch, readWorkingCopy),
-    enabled: isActive,
+    enabled: everActive,
     staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     gcTime: DIFF_CONTENTS_GC_TIME_MS,
   });
 
+  // Explicit reload on reloadKey bump — only fires when this tab is the active one
+  // so hidden tabs don't wastefully re-fetch on a refresh triggered elsewhere.
   useEffect(() => {
     if (!isActive || reloadKey === 0) return;
-    void diffQuery.refetch();
+    diffQuery.refetch().catch((error) => {
+      console.warn("[DiffViewer] reload refetch failed:", error);
+    });
   }, [diffQuery.refetch, isActive, reloadKey]);
 
   const original = diffQuery.data?.original ?? "";
@@ -196,15 +209,14 @@ export default function DiffViewer({
     });
   }, [diffMetadata, displayError, loading, onStatsChange]);
 
-  if (!isActive) {
-    return (
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{ backgroundColor: defaultTheme.codeEditor.surface.base }}
-        aria-hidden
-      />
-    );
-  }
+  // Named handler so the refresh button is never a fire-and-forget void call.
+  // refetch() captures errors in diffQuery.error automatically; the .catch here
+  // guards against the rare case where refetch itself throws before settling.
+  const handleRefresh = useCallback(() => {
+    diffQuery.refetch().catch((error) => {
+      console.warn("[DiffViewer] manual refresh failed:", error);
+    });
+  }, [diffQuery]);
 
   return (
     <div
@@ -277,7 +289,7 @@ export default function DiffViewer({
             className="h-7 w-7 shrink-0 p-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
             title="Refresh"
             aria-label="Refresh"
-            onClick={() => void diffQuery.refetch()}
+            onClick={handleRefresh}
             disabled={loading}
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />

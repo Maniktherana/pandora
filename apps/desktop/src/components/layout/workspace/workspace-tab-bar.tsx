@@ -7,7 +7,7 @@ import { tabKey } from "@/components/layout/workspace/layout-tree";
 import type { PaneTab, ScmEntry, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { useGitStore } from "@/services/git/git-store";
+import { useScmStatusQuery } from "@/services/git/git-queries";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 
@@ -88,7 +88,7 @@ export default function WorkspaceTabBar({
       >,
     [sessions],
   );
-  const gitEntries = useGitStore((s) => s.byScopeId[workspaceId]?.entries ?? EMPTY_GIT_ENTRIES);
+  const gitEntries = useScmStatusQuery(workspaceId).data?.entries ?? EMPTY_GIT_ENTRIES;
   const pendingDragRef = useRef<{
     sourceIndex: number;
     label: string;

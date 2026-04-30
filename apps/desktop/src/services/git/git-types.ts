@@ -37,6 +37,9 @@ export interface GitDecorationIndex {
   byDirectory: Record<string, TreeGitDecoration>;
 }
 
+/** Stable empty sentinel — use as default when no snapshot has arrived yet. */
+export const EMPTY_DECORATION_INDEX: GitDecorationIndex = { byPath: {}, byDirectory: {} };
+
 export type GitBlobSource = "head" | "index";
 
 export type GitSelectionModifiers = {

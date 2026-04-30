@@ -9,7 +9,8 @@ import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { useLayoutStore } from "@/services/workspace/layout-store";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
-import { useGitStore, EMPTY_DECORATION_INDEX } from "@/services/git/git-store";
+import { useScmStatusQuery } from "@/services/git/git-queries";
+import { EMPTY_DECORATION_INDEX } from "@/services/git/git-types";
 import { useFileTreeController } from "@/services/file-tree/use-file-tree";
 import type {
   LeftPanelMode,
@@ -79,9 +80,8 @@ export default memo(function RightSidebar({
     (s) => s.byScopeId[workspaceId]?.expandedPaths ?? emptySet,
   );
 
-  const decorationIndex = useGitStore(
-    (s) => s.byScopeId[workspaceId]?.decorationIndex ?? EMPTY_DECORATION_INDEX,
-  );
+  const decorationIndex =
+    useScmStatusQuery(workspaceId).data?.decorationIndex ?? EMPTY_DECORATION_INDEX;
 
   const setPathExpanded = useCallback(
     (relPath: string, expanded: boolean) => fileTree.setPathExpanded(relPath, expanded),

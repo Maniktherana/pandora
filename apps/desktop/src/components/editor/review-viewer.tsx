@@ -1,6 +1,5 @@
 import {
   memo,
-  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -50,13 +49,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
 import { useReviewNavigationStore } from "@/services/editor/review-navigation-store";
-import { fileTreeReadTextFile } from "@/services/file-tree/file-tree-service";
+import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
 import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
 } from "@/components/layout/right-sidebar/scm/target-branch";
-import { useGitStore } from "@/services/git/git-store";
-import { useGitController } from "@/services/git/use-git";
+import { useScmStatusQuery, scmStatusQueryKey } from "@/services/git/git-queries";
+import { useBranchContext } from "@/services/git/use-git";
+import {
+  gitRefresh,
+  gitStage,
+  gitUnstage,
+  gitDiscardTracked,
+  gitDiscardUntracked,
+} from "@/services/git/git-service";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
@@ -277,7 +283,7 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
           reloadKey={reloadKey}
           targetBranch={targetBranch}
           metrics={REVIEW_DIFF_METRICS}
-          readWorkingCopy={(path) => fileTreeReadTextFile(workspaceId, path)}
+          readWorkingCopy={(path) => editorReadWorkingCopyText(workspaceId, path)}
           onStatsChange={(next) => {
             if (!next.loading && !next.error) {
               onStatsChange(entry.path, source, {
@@ -429,21 +435,21 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   );
 });
 
+const EMPTY_SCM_ENTRIES: ScmEntry[] = [];
+
 function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const scm = useGitController(workspaceId);
-  const gitSnapshot = useGitStore((s) => s.byScopeId[workspaceId]?.snapshot ?? null);
-  const isFetching = useGitStore((s) => s.byScopeId[workspaceId]?.refreshing ?? false);
-  const entries = scm.entries;
+  const { data: statusData, isFetching } = useScmStatusQuery(workspaceId);
+  const { branchContext } = useBranchContext(workspaceId);
   const [diffLayout, setDiffLayout] = useState<DiffLayout>(loadDiffLayout);
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
-  const targetBranch = gitSnapshot?.targetBranch ?? null;
+  const targetBranch = statusData?.targetBranch ?? null;
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
   const [loadedStatsByKey, setLoadedStatsByKey] = useState<Record<string, GitLineStats>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
@@ -457,28 +463,28 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       setBaseBranchLabel(null);
       return;
     }
-    const resolvedTarget = scm.branchContext
-      ? resolveWorkspaceTargetBranch(scm.branchContext, targetBranch)
+    const resolvedTarget = branchContext
+      ? resolveWorkspaceTargetBranch(branchContext, targetBranch)
       : targetBranch;
     setBaseBranchLabel({
       source: workspace.gitBranchName,
       target: formatTargetBranch(resolvedTarget),
     });
-  }, [workspace, targetBranch, scm.branchContext]);
+  }, [workspace, targetBranch, branchContext]);
 
   const filteredEntries = useMemo(() => {
     switch (mode) {
       case "staged":
-        return gitSnapshot?.staged ?? [];
+        return statusData?.stagedEntries ?? EMPTY_SCM_ENTRIES;
       case "branch":
-        return [];
+        return EMPTY_SCM_ENTRIES;
       default:
-        return gitSnapshot?.unstaged ?? [];
+        return statusData?.unstagedEntries ?? EMPTY_SCM_ENTRIES;
     }
-  }, [mode, gitSnapshot?.staged, gitSnapshot?.unstaged]);
+  }, [mode, statusData?.stagedEntries, statusData?.unstagedEntries]);
 
-  const unstagedCount = useMemo(() => entries.filter(hasUnstaged).length, [entries]);
-  const stagedCount = useMemo(() => entries.filter(hasStaged).length, [entries]);
+  const unstagedCount = statusData?.unstagedEntries.length ?? 0;
+  const stagedCount = statusData?.stagedEntries.length ?? 0;
 
   const activeSource = sourceForMode(mode);
   const prefetchPathKey = useMemo(
@@ -529,6 +535,21 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     [],
   );
 
+  // Named helper so callers can attach explicit .catch() instead of suppressing promises.
+  // Declared before effects that depend on it so TypeScript sees it in scope.
+  const prefetchEntry = useCallback(
+    (path: string, source: DiffSource) =>
+      queryClient.prefetchQuery({
+        queryKey: diffContentsQueryKey(workspaceRoot, path, source, targetBranch),
+        queryFn: () =>
+          fetchDiffContents(workspaceRoot, path, source, targetBranch, (p) =>
+            editorReadWorkingCopyText(workspaceId, p),
+          ),
+        staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+      }),
+    [queryClient, workspaceRoot, targetBranch, workspaceId],
+  );
+
   useEffect(() => {
     if (!reviewNavigationRequest) return;
 
@@ -540,27 +561,15 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         : { ...current, [reviewNavigationRequest.path]: true },
     );
 
-    void queryClient.prefetchQuery({
-      queryKey: diffContentsQueryKey(
-        workspaceRoot,
-        reviewNavigationRequest.path,
-        reviewNavigationRequest.source,
-        targetBranch,
-      ),
-      queryFn: () =>
-        fetchDiffContents(
-          workspaceRoot,
-          reviewNavigationRequest.path,
-          reviewNavigationRequest.source,
-          targetBranch,
-          (path) => fileTreeReadTextFile(workspaceId, path),
-        ),
-      staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+    // prefetchEntry captures queryClient/workspaceRoot/targetBranch/workspaceId —
+    // no need to list them separately here.
+    prefetchEntry(reviewNavigationRequest.path, reviewNavigationRequest.source).catch((error) => {
+      console.warn("[ReviewViewer] navigation prefetch failed:", error);
     });
-  }, [queryClient, reviewNavigationRequest, targetBranch, workspaceId, workspaceRoot]);
+  }, [prefetchEntry, reviewNavigationRequest]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest || gitSnapshot == null) return;
+    if (!reviewNavigationRequest || statusData == null) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     if (mode !== requestedMode) return;
@@ -599,7 +608,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     };
   }, [
     clearReviewNavigation,
-    gitSnapshot,
+    statusData,
     filteredEntries,
     mode,
     reviewNavigationRequest,
@@ -610,6 +619,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     if (!activeSource || prefetchPathKey.length === 0) return;
 
     let cancelled = false;
+    // Cheap array derivation — no expensive work here.
     const queue = prefetchPathKey.split("\0");
     const maxConcurrent = Math.min(4, queue.length);
 
@@ -621,7 +631,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
             })
         : (task: () => void) => window.setTimeout(task, 32);
 
-    const readWorkingCopy = (path: string) => fileTreeReadTextFile(workspaceId, path);
+    const readWorkingCopy = (path: string) => editorReadWorkingCopyText(workspaceId, path);
 
     const runWorker = () => {
       if (cancelled) return;
@@ -636,7 +646,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           runWorker();
           return;
         }
-        void queryClient
+        queryClient
           .prefetchQuery({
             queryKey,
             queryFn: () =>
@@ -649,18 +659,28 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               ),
             staleTime: DIFF_CONTENTS_STALE_TIME_MS,
           })
+          .catch((error) => {
+            console.warn("[ReviewViewer] idle prefetch failed:", error);
+          })
           .finally(() => {
             runWorker();
           });
       });
     };
 
-    for (let index = 0; index < maxConcurrent; index += 1) {
-      runWorker();
-    }
+    // Delay worker start until after first paint so initial Review mount is not
+    // blocked by prefetch setup.  schedule() already defers individual fetches
+    // via requestIdleCallback/setTimeout, but this outer defer ensures the
+    // first render cycle completes before any workers are spawned.
+    const startTimeout = window.setTimeout(() => {
+      for (let index = 0; index < maxConcurrent; index += 1) {
+        runWorker();
+      }
+    }, 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(startTimeout);
     };
   }, [
     activeSource,
@@ -677,10 +697,17 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     filteredEntries.every((entry) => openByPath[entry.path] === false);
 
   const refreshAll = useCallback(async () => {
-    scm.refresh();
+    gitRefresh(workspaceId);
     await queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
+    await queryClient.invalidateQueries({ queryKey: scmStatusQueryKey(workspaceId) });
     setReloadKey((value) => value + 1);
-  }, [queryClient, scm, workspaceRoot]);
+  }, [queryClient, workspaceId, workspaceRoot]);
+
+  const handleRefreshClick = useCallback(() => {
+    refreshAll().catch((error) => {
+      console.warn("[ReviewViewer] refresh failed:", error);
+    });
+  }, [refreshAll]);
 
   const runEntryAction = useCallback(
     (path: string, fn: () => void) => {
@@ -697,51 +724,47 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   const handleRevert = useCallback(
     (entry: ScmEntry) => {
       if (mode === "staged") {
-        runEntryAction(entry.path, () => scm.unstage([entry.path]));
+        runEntryAction(entry.path, () => gitUnstage(workspaceId, [entry.path]));
         return;
       }
 
       if (entry.untracked) {
         if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
-        runEntryAction(entry.path, () => scm.discardUntracked([entry.path]));
+        runEntryAction(entry.path, () => gitDiscardUntracked(workspaceId, [entry.path]));
         return;
       }
 
       if (!window.confirm(`Discard local changes to "${entry.path}"?`)) return;
-      runEntryAction(entry.path, () => scm.discardTracked([entry.path]));
+      runEntryAction(entry.path, () => gitDiscardTracked(workspaceId, [entry.path]));
     },
-    [mode, runEntryAction, scm],
+    [mode, runEntryAction, workspaceId],
   );
 
   const handleStage = useCallback(
     (entry: ScmEntry) => {
       if (mode !== "unstaged" || !hasUnstaged(entry)) return;
-      runEntryAction(entry.path, () => scm.stage([entry.path]));
+      runEntryAction(entry.path, () => gitStage(workspaceId, [entry.path]));
     },
-    [mode, runEntryAction, scm],
+    [mode, runEntryAction, workspaceId],
   );
 
   const handleToggleEntry = useCallback(
     (path: string, nextOpen: boolean) => {
-      startTransition(() => {
-        setOpenByPath((current) => ({ ...current, [path]: nextOpen }));
-      });
+      // Synchronous UI update — expand/collapse is direct user intent, no deferral needed.
+      setOpenByPath((current) => ({ ...current, [path]: nextOpen }));
       if (!nextOpen || !activeSource) return;
-      void queryClient.prefetchQuery({
-        queryKey: diffContentsQueryKey(workspaceRoot, path, activeSource, targetBranch),
-        queryFn: () =>
-          fetchDiffContents(workspaceRoot, path, activeSource, targetBranch, (relativePath) =>
-            fileTreeReadTextFile(workspaceId, relativePath),
-          ),
-        staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+      prefetchEntry(path, activeSource).catch((error) => {
+        console.warn("[ReviewViewer] entry prefetch failed:", error);
       });
     },
-    [activeSource, queryClient, targetBranch, workspaceId, workspaceRoot],
+    [activeSource, prefetchEntry],
   );
 
   const handleOpenFile = useCallback(
     (path: string) => {
-      void openFile(workspaceId, workspaceRoot, path);
+      openFile(workspaceId, workspaceRoot, path).catch((error) => {
+        console.warn("[ReviewViewer] open file failed:", error);
+      });
     },
     [openFile, workspaceId, workspaceRoot],
   );
@@ -838,14 +861,13 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               size="sm"
               className="shrink-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
               onClick={() => {
-                startTransition(() => {
-                  setOpenByPath((current) => ({
-                    ...current,
-                    ...Object.fromEntries(
-                      filteredEntries.map((entry) => [entry.path, allCollapsed]),
-                    ),
-                  }));
-                });
+                // Synchronous UI update — expand/collapse all is direct user intent, no deferral.
+                setOpenByPath((current) => ({
+                  ...current,
+                  ...Object.fromEntries(
+                    filteredEntries.map((entry) => [entry.path, allCollapsed]),
+                  ),
+                }));
               }}
               disabled={filteredEntries.length === 0}
             >
@@ -857,7 +879,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               size="icon-sm"
               className="text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
               title="Refresh review"
-              onClick={() => void refreshAll()}
+              onClick={handleRefreshClick}
               disabled={isFetching}
             >
               <HugeiconsIcon
@@ -869,9 +891,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
           </div>
         </div>
 
-        {gitSnapshot == null || filteredEntries.length === 0 ? (
+        {statusData == null || filteredEntries.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {gitSnapshot == null ? (
+            {statusData == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
                 Loading review…
               </div>
