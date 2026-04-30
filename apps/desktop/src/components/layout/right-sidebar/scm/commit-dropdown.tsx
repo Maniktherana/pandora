@@ -8,16 +8,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { scmFetch, scmPull, scmPush } from "./scm.utils";
 
 type CommitDropdownProps = {
-  onCommit: () => void;
+  onCommit: () => Promise<void>;
   canCommit: boolean;
   busy: boolean;
-  worktreePath: string;
+  scopeId: string;
+  onPush: () => Promise<void>;
+  onFetch: () => Promise<void>;
+  onPull: () => Promise<void>;
 };
 
-export function CommitDropdown({ onCommit, canCommit, busy, worktreePath }: CommitDropdownProps) {
+export function CommitDropdown({
+  onCommit,
+  canCommit,
+  busy,
+  onPush,
+  onFetch,
+  onPull,
+}: CommitDropdownProps) {
   const [actionBusy, setActionBusy] = useState(false);
   const disabled = busy || actionBusy;
 
@@ -25,12 +34,8 @@ export function CommitDropdown({ onCommit, canCommit, busy, worktreePath }: Comm
     if (!canCommit) return;
     setActionBusy(true);
     try {
-      onCommit();
-      // Wait a tick for the commit to complete before pushing
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await scmPush(worktreePath);
-    } catch {
-      // errors handled by parent
+      await onCommit();
+      await onPush();
     } finally {
       setActionBusy(false);
     }
@@ -39,9 +44,7 @@ export function CommitDropdown({ onCommit, canCommit, busy, worktreePath }: Comm
   const handleFetch = async () => {
     setActionBusy(true);
     try {
-      await scmFetch(worktreePath);
-    } catch {
-      // silent
+      await onFetch();
     } finally {
       setActionBusy(false);
     }
@@ -50,9 +53,7 @@ export function CommitDropdown({ onCommit, canCommit, busy, worktreePath }: Comm
   const handlePull = async () => {
     setActionBusy(true);
     try {
-      await scmPull(worktreePath);
-    } catch {
-      // silent
+      await onPull();
     } finally {
       setActionBusy(false);
     }
@@ -88,15 +89,15 @@ export function CommitDropdown({ onCommit, canCommit, busy, worktreePath }: Comm
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!canCommit || disabled}
-            onClick={() => void handleCommitAndPush()}
+            onClick={handleCommitAndPush}
           >
             Commit & Push
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={disabled} onClick={() => void handleFetch()}>
+          <DropdownMenuItem disabled={disabled} onClick={handleFetch}>
             Fetch
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={disabled} onClick={() => void handlePull()}>
+          <DropdownMenuItem disabled={disabled} onClick={handlePull}>
             Pull
           </DropdownMenuItem>
         </DropdownMenuContent>

@@ -393,20 +393,6 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn update_workspace_target_branch(
-        &self,
-        id: &str,
-        target_branch: Option<&str>,
-    ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE workspaces SET target_branch = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id, target_branch, now_iso8601()],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
     pub fn update_workspace_pr(
         &self,
         id: &str,
@@ -625,7 +611,6 @@ impl AppDatabase {
     // Runtime metadata (key/value scoped by runtime_id).
     // ---------------------------------------------------------------------
 
-    #[allow(dead_code)]
     pub fn get_runtime_metadata(&self, runtime_id: &str, key: &str) -> Option<String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
@@ -638,7 +623,6 @@ impl AppDatabase {
         .flatten()
     }
 
-    #[allow(dead_code)]
     pub fn set_runtime_metadata(
         &self,
         runtime_id: &str,
@@ -672,11 +656,9 @@ impl AppDatabase {
         if let Ok(mut stmt) = conn.prepare(
             "SELECT id, slot_id FROM session_definitions WHERE runtime_id = ?1 ORDER BY rowid",
         ) {
-            if let Ok(rows) =
-                stmt.query_map(params![runtime_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-            {
+            if let Ok(rows) = stmt.query_map(params![runtime_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
                 for r in rows.flatten() {
                     sessions_by_slot.entry(r.1).or_default().push(r.0);
                 }
@@ -713,8 +695,7 @@ impl AppDatabase {
             Ok(iter) => iter
                 .filter_map(|r| r.ok())
                 .map(|mut slot| {
-                    slot.session_def_ids =
-                        sessions_by_slot.remove(&slot.id).unwrap_or_default();
+                    slot.session_def_ids = sessions_by_slot.remove(&slot.id).unwrap_or_default();
                     slot
                 })
                 .collect(),
@@ -1141,7 +1122,8 @@ mod tests {
         let runtime = "test-runtime-1";
 
         let slot = sample_slot("slot-1");
-        db.create_slot_definition(runtime, &slot).expect("create slot");
+        db.create_slot_definition(runtime, &slot)
+            .expect("create slot");
 
         let session = sample_session("session-1", &slot.id);
         db.create_session_definition(runtime, &session)
@@ -1159,12 +1141,21 @@ mod tests {
 
         let slots = db.list_slot_definitions(runtime);
         assert_eq!(slots.len(), 1);
-        assert_eq!(slots[0].primary_session_def_id.as_deref(), Some("session-1"));
+        assert_eq!(
+            slots[0].primary_session_def_id.as_deref(),
+            Some("session-1")
+        );
         assert_eq!(slots[0].session_def_ids, vec!["session-1".to_string()]);
 
         let sessions = db.list_session_definitions(runtime);
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].env_overrides.get("NODE_ENV").map(|s| s.as_str()), Some("development"));
+        assert_eq!(
+            sessions[0]
+                .env_overrides
+                .get("NODE_ENV")
+                .map(|s| s.as_str()),
+            Some("development")
+        );
         assert_eq!(sessions[0].port, Some(3000));
 
         db.remove_session_definition(runtime, &session.id)
@@ -1191,21 +1182,29 @@ mod tests {
             term.kind = SlotKind::TerminalSlot;
             term.name = "Terminal".to_string();
             term.autostart = true;
-            db.create_slot_definition(runtime, &term).expect("create term slot");
+            db.create_slot_definition(runtime, &term)
+                .expect("create term slot");
 
             let mut proc = sample_slot("process-slot");
             proc.kind = SlotKind::ProcessSlot;
             proc.name = "Server".to_string();
             proc.autostart = true;
             proc.sort_order = 2;
-            db.create_slot_definition(runtime, &proc).expect("create proc slot");
+            db.create_slot_definition(runtime, &proc)
+                .expect("create proc slot");
         }
 
         let db = AppDatabase::open(&home).expect("reopen db");
         let slots = db.list_slot_definitions(runtime);
-        let term = slots.iter().find(|s| s.id == "terminal-slot").expect("term");
+        let term = slots
+            .iter()
+            .find(|s| s.id == "terminal-slot")
+            .expect("term");
         let proc = slots.iter().find(|s| s.id == "process-slot").expect("proc");
-        assert!(!term.autostart, "terminal_slot autostart should be cleared on open");
+        assert!(
+            !term.autostart,
+            "terminal_slot autostart should be cleared on open"
+        );
         assert!(proc.autostart, "process_slot autostart should be preserved");
 
         let _ = std::fs::remove_dir_all(&home);
@@ -1248,7 +1247,8 @@ mod tests {
         let runtime = "test-runtime-4";
 
         let slot = sample_slot("only-slot");
-        db.create_slot_definition(runtime, &slot).expect("create slot");
+        db.create_slot_definition(runtime, &slot)
+            .expect("create slot");
 
         db.remove_slot_definition(runtime, &slot.id)
             .expect("remove slot");
@@ -1291,7 +1291,8 @@ mod tests {
         let slot = sample_slot("slot-1");
         db.create_slot_definition(runtime, &slot).expect("slot");
         let session = sample_session("session-1", &slot.id);
-        db.create_session_definition(runtime, &session).expect("session");
+        db.create_session_definition(runtime, &session)
+            .expect("session");
 
         db.update_session_definition(
             runtime,
@@ -1309,7 +1310,10 @@ mod tests {
         assert_eq!(sessions[0].port, Some(3000));
         assert_eq!(sessions[0].name, "backend");
         assert_eq!(
-            sessions[0].env_overrides.get("NODE_ENV").map(|s| s.as_str()),
+            sessions[0]
+                .env_overrides
+                .get("NODE_ENV")
+                .map(|s| s.as_str()),
             Some("development")
         );
 
@@ -1320,7 +1324,7 @@ mod tests {
     /// slotID, primarySessionDefID, sessionDefIDs (uppercase ID, not
     /// serde's stock camelCase slotId / sessionDefId).
     #[test]
-    fn slot_definition_json_uses_daemon_field_names() {
+    fn slot_definition_json_uses_runtime_field_names() {
         let slot = SlotDefinition {
             id: "s1".into(),
             kind: SlotKind::ProcessSlot,

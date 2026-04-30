@@ -29,23 +29,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/preview-card";
-import { useDesktopView, useRuntimeState } from "@/hooks/use-desktop-view";
+import { useSelectedWorkspaceId, useNavigationArea } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
-import type { WorkspaceRecord, WorkspaceRuntimeState } from "@/lib/shared/types";
-import {
-  useScmLineStatsQuery,
-  useScmStatusQuery,
-} from "@/components/layout/right-sidebar/scm/scm-queries";
+import type { WorkspaceRecord } from "@/lib/shared/types";
+import { useScmSummaryCached } from "@/services/git/git-queries";
+import { useWorkspaceAgentStatus } from "@/services/terminal/terminal-scope-store";
 import DotGridLoader from "@/components/dot-grid-loader";
-import {
-  isTerminalAgentAttentionStatus,
-  workspaceTerminalAgentStatus,
-} from "@/lib/terminal/agent-activity";
-
-function selectAgentStatus(runtime: WorkspaceRuntimeState | null) {
-  return workspaceTerminalAgentStatus(runtime);
-}
+import { isTerminalAgentAttentionStatus } from "@/lib/terminal/agent-activity";
 
 function isRowActionTarget(target: EventTarget | null) {
   return target instanceof Element && target.closest("[data-workspace-row-action='true']") != null;
@@ -56,34 +47,33 @@ type WorkspaceRowProps = {
 };
 
 function WorkspaceRow({ workspace }: WorkspaceRowProps) {
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const navigationArea = useDesktopView((view) => view.navigationArea);
+  const selectedWorkspaceID = useSelectedWorkspaceId();
+  const navigationArea = useNavigationArea();
   const workspaceCommands = useWorkspaceActions();
   const [renameValue, setRenameValue] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
-  const agentStatus = useRuntimeState(workspace.id, selectAgentStatus);
-  const { data: scmCounts } = useScmLineStatsQuery(workspace.worktreePath, {
-    enabled: workspace.status === "ready",
-  });
-  const { data: scmStatus } = useScmStatusQuery(workspace.worktreePath, {
-    enabled: workspace.status === "ready",
-  });
+  const agentStatus = useWorkspaceAgentStatus(workspace.id);
+  // Read Git summary from React Query cache — written by applyGitSnapshot in
+  // git-events.ts whenever the backend emits a scm_snapshot event.
+  const gitSummary = useScmSummaryCached(
+    workspace.status === "ready" ? workspace.id : null,
+  );
 
   const isSelected = workspace.id === selectedWorkspaceID;
   const isActive = navigationArea === "sidebar" && isSelected;
   const isFailed = workspace.status === "failed";
   const isArchived = workspace.status === "archived";
   const isPending = pendingAction !== null;
-  const addedCount = scmCounts?.added ?? 0;
-  const removedCount = scmCounts?.removed ?? 0;
-  const filesChanged = scmStatus?.length ?? 0;
+  const addedCount = gitSummary?.lineStats.added ?? 0;
+  const removedCount = gitSummary?.lineStats.removed ?? 0;
+  const filesChanged = gitSummary?.filesChanged ?? 0;
   const hasAgentAttention = !isSelected && isTerminalAgentAttentionStatus(agentStatus);
   const showAgentLoader = agentStatus === "working";
   const highlightName = hasAgentAttention;
   const prState = workspace.prState as string | null;
-  const hasChanges = addedCount > 0 || removedCount > 0;
+  const hasChanges = gitSummary?.hasChanges ?? false;
   const isRenaming = renameValue !== null;
 
   const stateIcon = useMemo(() => {

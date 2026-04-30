@@ -1,28 +1,22 @@
-//! In-process terminal runtime: PTY lifecycle, output batching, restart
-//! policy, port detection, and the wire types the renderer consumes.
+//! Domain registry modules.
 //!
 //! Module map:
 //!
 //! ```text
-//!   types          — Wire enums (ClientMessage / DaemonMessage) + helpers.
-//!                    Wire shape is preserved across the renderer boundary.
-//!   agent_signal   — Pure-function vendor signal → AgentActivityState.
-//!   pty            — portable-pty wrapper (spawn / read / write / signal).
-//!   port_manager   — lsof-based per-session listening-port scanner.
-//!   seed           — Idempotent dormant-terminal seeding for new runtimes.
-//!   process_manager— Session lifecycle, restart policy, output coalescing.
-//!   registry       — Runtime + RuntimeRegistry (per-workspace top-level
-//!                    facades; each Runtime owns one ProcessManager).
+//!   types        — Wire enums (IpcCommand / ScopeEvent / ScopeEventEnvelope)
+//!                  and state carriers. Wire shape is preserved across the
+//!                  renderer boundary.
+//!   terminal/    — ProcessManager, PTY, port detection, seeding, TerminalRegistry.
+//!   file_tree/   — FileTreeService + FileTreeRegistry.
+//!   scm/         — ScmService + ScmRegistry.
+//!   editor_io/   — EditorIoService + EditorIoRegistry.
 //! ```
 //!
-//! [`crate::daemon_bridge`] is the thin shim that routes Tauri commands and
-//! events into this module while preserving the renderer's existing
-//! `daemon-message` / `daemon-connection` event names.
+//! [`crate::runtime_ipc`] is the renderer-facing IPC boundary that holds all
+//! four domain registries as Tauri state and routes incoming `IpcCommand`s.
 
-pub mod agent_signal;
-pub mod port_manager;
-pub mod process_manager;
-pub mod pty;
-pub mod registry;
-pub mod seed;
+pub mod editor_io;
+pub mod file_tree;
+pub mod scm;
+pub mod terminal;
 pub mod types;

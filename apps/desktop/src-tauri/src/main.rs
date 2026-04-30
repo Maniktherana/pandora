@@ -5,12 +5,12 @@
 mod terminal_log;
 mod agent_cli;
 mod commands;
-mod daemon_bridge;
 mod database;
 mod git;
 mod models;
 mod native_shortcuts;
 mod runtime;
+mod runtime_ipc;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod ghostty_app;
@@ -170,12 +170,12 @@ fn main() {
             }
             _ => {}
         })
-        .manage(daemon_bridge::new_state())
+        .manage(runtime_ipc::DomainRegistries::new())
         .manage(Arc::new(surface_registry::SurfaceRegistry::new()))
         .manage(DbState(db))
         .invoke_handler(tauri::generate_handler![
-            // Runtime bridge
-            daemon_bridge::daemon_send,
+            // Domain command bridge
+            runtime_ipc::scope_send,
             // Native terminal surfaces (Ghostty on macOS arm64; stubs elsewhere)
             terminal_commands::terminal_surface_create,
             terminal_commands::terminal_surface_update,
@@ -194,7 +194,6 @@ fn main() {
             // Project settings
             commands::get_project_settings,
             commands::save_project_settings,
-            commands::set_workspace_target_branch,
             // Workspace commands
             commands::list_workspaces,
             commands::create_workspace,
@@ -210,36 +209,13 @@ fn main() {
             // Layout
             commands::save_workspace_layout,
             commands::load_workspace_layout,
-            // Runtime
-            commands::start_workspace_runtime,
-            commands::start_project_runtime,
-            commands::stop_project_runtime,
             // Full state reload
             commands::load_app_state,
             commands::native_terminal_supported,
             commands::read_system_ghostty_config,
-            commands::list_workspace_directory,
-            commands::read_workspace_text_file,
-            commands::write_workspace_text_file,
-            commands::create_workspace_directory,
             commands::scm_git_diff,
             commands::scm_read_git_blob,
             commands::scm_read_git_compare_blob,
-            commands::scm_status,
-            commands::scm_branch_changes,
-            commands::scm_line_stats,
-            commands::scm_path_line_stats,
-            commands::scm_path_line_stats_bulk,
-            commands::scm_stage,
-            commands::scm_stage_all,
-            commands::scm_unstage,
-            commands::scm_unstage_all,
-            commands::scm_discard_tracked,
-            commands::scm_discard_untracked,
-            commands::scm_commit,
-            commands::scm_push,
-            commands::scm_fetch,
-            commands::scm_pull,
             commands::scm_check_runs,
             // Open in external apps
             commands::list_available_editors,
@@ -253,11 +229,6 @@ fn main() {
             commands::can_archive_workspace,
             commands::archive_workspace,
             commands::restore_workspace,
-            commands::copy_into_workspace,
-            commands::move_within_workspace,
-            commands::rename_workspace_entry,
-            commands::delete_workspace_entry,
-            commands::copy_within_workspace,
             commands::read_clipboard_file_paths,
             commands::write_clipboard_file_paths,
         ])

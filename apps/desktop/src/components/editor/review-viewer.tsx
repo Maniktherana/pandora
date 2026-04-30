@@ -1,6 +1,5 @@
 import {
   memo,
-  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,10 +8,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react";
-import PierreWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url";
+import { useQueryClient } from "@tanstack/react-query";
+import { Virtualizer } from "@pierre/diffs/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -23,7 +20,7 @@ import {
   PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
-import type { DiffSource, HeaderBranchContext } from "@/lib/shared/types";
+import type { DiffSource } from "@/lib/shared/types";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { Button } from "@/components/ui/button";
@@ -31,30 +28,24 @@ import {
   DIFF_CONTENTS_STALE_TIME_MS,
   diffContentsQueryKey,
   fetchDiffContents,
+  type DiffContentsData,
 } from "@/components/editor/diff-data";
-import DiffViewer from "@/components/editor/diff-viewer";
+import {
+  parsedDiffQueryKey,
+  parseDiffInWorker,
+} from "@/services/diff/diff-worker-client";
+import { buildRowModel, reviewStatsKey, type ReviewRowData } from "@/components/editor/review-row-model";
+import DiffViewer, { type DiffViewerStats } from "@/components/editor/diff-viewer";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { getPierreSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/pierre-pandora";
-import {
-  useScmPathLineStatsBulkQuery,
-  useScmStatusQuery,
-} from "@/components/layout/right-sidebar/scm/scm-queries";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import {
-  decorationForScmEntry,
-  scmBranchChanges,
-  scmDiscardTracked,
-  scmDiscardUntracked,
-  scmStage,
-  scmUnstage,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+
 import type {
-  ScmLineStats,
-  ScmBranchChange,
-  ScmStatusEntry,
-  TreeScmDecoration,
-} from "@/components/layout/right-sidebar/scm/scm.types";
+  GitLineStats,
+  TreeGitDecoration,
+} from "@/services/git/git-types";
+import type { ScmEntry } from "@/lib/shared/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,21 +54,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
-import { useReviewNavigationStore } from "@/state/review-navigation-store";
+import { useReviewNavigationStore } from "@/services/editor/review-navigation-store";
+import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
 import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
-  WORKSPACE_TARGET_BRANCH_EVENT,
-  type WorkspaceTargetBranchEventDetail,
 } from "@/components/layout/right-sidebar/scm/target-branch";
+import { useScmStatusCached, scmStatusQueryKey } from "@/services/git/git-queries";
+import { useBranchContext } from "@/services/git/git-store";
+import {
+  gitRefresh,
+  gitStage,
+  gitUnstage,
+  gitDiscardTracked,
+  gitDiscardUntracked,
+} from "@/services/git/git-service";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
 
-const pierreWorkerFactory = () => new Worker(PierreWorkerUrl, { type: "module" });
-
-const pierreWorkerPoolOptions = { workerFactory: pierreWorkerFactory, poolSize: 4 };
-const pierreHighlighterOptions = { theme: "pandora-theme" };
 const reviewVirtualizerConfig = {
   overscrollSize: 1000,
   intersectionObserverMargin: 4000,
@@ -95,6 +90,7 @@ const MAX_ESTIMATED_DIFF_BODY_HEIGHT = 2200;
 type ReviewViewerProps = {
   workspaceId: string;
   workspaceRoot: string;
+  isActive?: boolean;
 };
 
 type DiffLayout = "split" | "unified";
@@ -130,11 +126,11 @@ function persistWrapLines(wrapLines: boolean) {
   }
 }
 
-function hasStaged(entry: ScmStatusEntry): boolean {
+function hasStaged(entry: ScmEntry): boolean {
   return entry.stagedKind != null && entry.stagedKind !== "";
 }
 
-function hasUnstaged(entry: ScmStatusEntry): boolean {
+function hasUnstaged(entry: ScmEntry): boolean {
   return entry.untracked || (entry.worktreeKind != null && entry.worktreeKind !== "");
 }
 
@@ -143,10 +139,6 @@ function sourceForMode(mode: ReviewMode): DiffSource | null {
   if (mode === "staged") return "staged";
   if (mode === "unstaged") return "working";
   return null;
-}
-
-function statsKey(path: string, source: DiffSource) {
-  return `${source}:${path}`;
 }
 
 function splitDisplayPath(path: string): { directory: string; fileName: string } {
@@ -164,7 +156,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function estimateDiffBodyHeight(stats: ScmLineStats | undefined): number {
+function estimateDiffBodyHeight(stats: GitLineStats | undefined): number {
   const changedLines = Math.max((stats?.added ?? 0) + (stats?.removed ?? 0), 4);
   return clamp(
     (changedLines + 8) * REVIEW_DIFF_METRICS.lineHeight + REVIEW_DIFF_METRICS.hunkSeparatorHeight,
@@ -199,14 +191,15 @@ function BranchModeLabel({ branchLabel }: { branchLabel: BranchLabel | null }) {
 }
 
 type ReviewFileEntryProps = {
-  entry: ScmStatusEntry;
+  entry: ScmEntry;
   source: DiffSource;
-  stats: ScmLineStats | undefined;
-  decoration: TreeScmDecoration;
+  stats: GitLineStats | undefined;
+  decoration: TreeGitDecoration;
   isOpen: boolean;
   canStage: boolean;
   busy: boolean;
   mode: ReviewMode;
+  workspaceId: string;
   workspaceRoot: string;
   diffLayout: DiffLayout;
   wrapLines: boolean;
@@ -215,30 +208,35 @@ type ReviewFileEntryProps = {
   isFirst: boolean;
   onToggle: (path: string, nextOpen: boolean) => void;
   onOpenFile: (path: string) => void;
-  onRevert: (entry: ScmStatusEntry) => void;
-  onStage: (entry: ScmStatusEntry) => void;
+  onRevert: (entry: ScmEntry) => void;
+  onStage: (entry: ScmEntry) => void;
+  onStatsChange: (path: string, source: DiffSource, stats: GitLineStats) => void;
 };
 
 type ReviewDiffBodyProps = {
-  entry: ScmStatusEntry;
+  path: string;
   source: DiffSource;
-  stats: ScmLineStats | undefined;
+  stats: GitLineStats | undefined;
+  workspaceId: string;
   workspaceRoot: string;
   diffLayout: DiffLayout;
   wrapLines: boolean;
   reloadKey: number;
   targetBranch?: string | null | undefined;
+  onStatsChange: (path: string, source: DiffSource, stats: GitLineStats) => void;
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({
-  entry,
+  path,
   source,
   stats,
+  workspaceId,
   workspaceRoot,
   diffLayout,
   wrapLines,
   reloadKey,
   targetBranch,
+  onStatsChange,
 }: ReviewDiffBodyProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [shouldMountDiff, setShouldMountDiff] = useState(false);
@@ -274,12 +272,26 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
     return () => observer.disconnect();
   }, [shouldMountDiff]);
 
+  const handleStatsChange = useCallback(
+    (next: DiffViewerStats) => {
+      if (!next.loading && !next.error) {
+        onStatsChange(path, source, { added: next.additions, removed: next.deletions });
+      }
+    },
+    [path, source, onStatsChange],
+  );
+
+  const readWorkingCopy = useCallback(
+    (p: string) => editorReadWorkingCopyText(workspaceId, p),
+    [workspaceId],
+  );
+
   return (
     <div ref={bodyRef} className="border-t border-[var(--theme-code-surface-separator)]">
       {shouldMountDiff ? (
         <DiffViewer
           workspaceRoot={workspaceRoot}
-          relativePath={entry.path}
+          relativePath={path}
           source={source}
           showHeader={false}
           fillHeight={false}
@@ -288,6 +300,8 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
           reloadKey={reloadKey}
           targetBranch={targetBranch}
           metrics={REVIEW_DIFF_METRICS}
+          readWorkingCopy={readWorkingCopy}
+          onStatsChange={handleStatsChange}
         />
       ) : (
         <div
@@ -309,6 +323,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   canStage,
   busy,
   mode,
+  workspaceId,
   workspaceRoot,
   diffLayout,
   wrapLines,
@@ -319,6 +334,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
   onOpenFile,
   onRevert,
   onStage,
+  onStatsChange,
 }: ReviewFileEntryProps) {
   const { directory, fileName } = splitDisplayPath(entry.path);
 
@@ -388,8 +404,12 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
           {decoration.badge ? (
             <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="shrink-0" />
           ) : null}
-          <span className="shrink-0 text-[var(--theme-scm-added)]">+{stats?.added ?? 0}</span>
-          <span className="shrink-0 text-[var(--theme-scm-deleted)]">-{stats?.removed ?? 0}</span>
+          {stats ? (
+            <>
+              <span className="shrink-0 text-[var(--theme-scm-added)]">+{stats.added}</span>
+              <span className="shrink-0 text-[var(--theme-scm-deleted)]">-{stats.removed}</span>
+            </>
+          ) : null}
         </div>
         <Button
           type="button"
@@ -409,164 +429,149 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
 
       {isOpen ? (
         <ReviewDiffBody
-          entry={entry}
+          path={entry.path}
           source={source}
           stats={stats}
+          workspaceId={workspaceId}
           workspaceRoot={workspaceRoot}
           diffLayout={diffLayout}
           wrapLines={wrapLines}
           reloadKey={reloadKey}
           targetBranch={targetBranch}
+          onStatsChange={onStatsChange}
         />
       ) : null}
     </section>
   );
 });
 
-function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
+const EMPTY_SCM_ENTRIES: ScmEntry[] = [];
+
+function ReviewViewer({ workspaceId, workspaceRoot, isActive = true }: ReviewViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const { data: entriesData, refetch, isFetching } = useScmStatusQuery(workspaceRoot);
-  const entries = entriesData ?? [];
+  const statusData = useScmStatusCached(workspaceId);
+  const { branchContext } = useBranchContext(workspaceId);
   const [diffLayout, setDiffLayout] = useState<DiffLayout>(loadDiffLayout);
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ReviewMode>("unstaged");
   const [baseBranchLabel, setBaseBranchLabel] = useState<BranchLabel | null>(null);
-  const [targetBranch, setTargetBranch] = useState<string | null>(workspace?.targetBranch ?? null);
+  const targetBranch = statusData?.targetBranch ?? null;
   const [openByPath, setOpenByPath] = useState<Record<string, boolean>>({});
+  const [loadedStatsByKey, setLoadedStatsByKey] = useState<Record<string, GitLineStats>>({});
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const reviewNavigationRequest = useReviewNavigationStore(
     (state) => state.requestByWorkspaceId[workspaceId] ?? null,
   );
   const clearReviewNavigation = useReviewNavigationStore((state) => state.clearReviewNavigation);
-  const { data: branchEntriesData = [], refetch: refetchBranchEntries } = useQuery({
-    queryKey: ["scm-branch-changes", workspaceRoot, targetBranch],
-    queryFn: () => scmBranchChanges(workspaceRoot, targetBranch!),
-    enabled: Boolean(workspaceRoot && targetBranch),
-    staleTime: 5_000,
-    gcTime: 300_000,
-  });
 
   useEffect(() => {
     if (!workspace || workspace.status !== "ready") {
       setBaseBranchLabel(null);
       return;
     }
-    let cancelled = false;
-    invoke<HeaderBranchContext>("header_branch_context", { workspaceId: workspace.id })
-      .then((ctx) => {
-        if (!cancelled) {
-          const resolvedTarget = resolveWorkspaceTargetBranch(ctx, workspace.id);
-          setTargetBranch(resolvedTarget);
-          setBaseBranchLabel({
-            source: workspace.gitBranchName,
-            target: formatTargetBranch(resolvedTarget),
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setBaseBranchLabel({
-            source: workspace.gitBranchName,
-            target: "origin/...",
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspace]);
-
-  useEffect(() => {
-    const handleTargetBranchChange = (event: Event) => {
-      const customEvent = event as CustomEvent<WorkspaceTargetBranchEventDetail>;
-      if (customEvent.detail.workspaceId !== workspaceId) return;
-      setTargetBranch(customEvent.detail.targetBranch);
-      if (workspace) {
-        setBaseBranchLabel({
-          source: workspace.gitBranchName,
-          target: formatTargetBranch(customEvent.detail.targetBranch),
-        });
-      }
-    };
-    window.addEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
-    return () =>
-      window.removeEventListener(WORKSPACE_TARGET_BRANCH_EVENT, handleTargetBranchChange);
-  }, [workspace, workspaceId]);
+    const resolvedTarget = branchContext
+      ? resolveWorkspaceTargetBranch(branchContext, targetBranch)
+      : targetBranch;
+    setBaseBranchLabel({
+      source: workspace.gitBranchName,
+      target: formatTargetBranch(resolvedTarget),
+    });
+  }, [workspace, targetBranch, branchContext]);
 
   const filteredEntries = useMemo(() => {
     switch (mode) {
       case "staged":
-        return entries.filter(hasStaged);
+        return statusData?.stagedEntries ?? EMPTY_SCM_ENTRIES;
       case "branch":
-        return branchEntriesData;
+        return EMPTY_SCM_ENTRIES;
       default:
-        return entries.filter(hasUnstaged);
+        return statusData?.unstagedEntries ?? EMPTY_SCM_ENTRIES;
     }
-  }, [branchEntriesData, entries, mode]);
+  }, [mode, statusData?.stagedEntries, statusData?.unstagedEntries]);
 
-  const unstagedCount = useMemo(() => entries.filter(hasUnstaged).length, [entries]);
-  const stagedCount = useMemo(() => entries.filter(hasStaged).length, [entries]);
+  const prefetchKey = useMemo(
+    () => filteredEntries.map((e) => e.path).join("\0"),
+    [filteredEntries],
+  );
+
+  const unstagedCount = statusData?.unstagedEntries.length ?? 0;
+  const stagedCount = statusData?.stagedEntries.length ?? 0;
 
   const activeSource = sourceForMode(mode);
-  const statPaths = useMemo(() => filteredEntries.map((entry) => entry.path), [filteredEntries]);
-  const prefetchPathKey = useMemo(
-    () => filteredEntries.map((entry) => entry.path).join("\0"),
-    [filteredEntries],
-  );
-  const untrackedPaths = useMemo(
-    () =>
-      mode === "unstaged"
-        ? filteredEntries.filter((entry) => entry.untracked).map((entry) => entry.path)
-        : [],
-    [filteredEntries, mode],
-  );
-  const { data: bulkStats = [] } = useScmPathLineStatsBulkQuery(
-    workspaceRoot,
-    statPaths,
-    activeSource === "staged",
-    untrackedPaths,
-    { enabled: activeSource !== null && activeSource !== "branch" },
-  );
-  const statsByKey = useMemo(() => {
-    if (activeSource === "branch") {
-      return Object.fromEntries(
-        (filteredEntries as ScmBranchChange[]).map((entry) => [
-          statsKey(entry.path, "branch"),
-          { added: entry.added, removed: entry.removed },
-        ]),
-      );
-    }
-    return Object.fromEntries(
-      bulkStats.map((stat) => [
-        statsKey(stat.path, activeSource === "staged" ? "staged" : "working"),
-        stat,
-      ]),
-    );
-  }, [activeSource, bulkStats, filteredEntries]);
-  const decorationByPath = useMemo(
-    () =>
-      Object.fromEntries(
-        filteredEntries.map((entry) => [entry.path, decorationForScmEntry(entry)]),
-      ),
-    [filteredEntries],
+  const rowModel = useMemo(
+    (): ReviewRowData[] =>
+      activeSource ? buildRowModel(filteredEntries, activeSource, loadedStatsByKey) : [],
+    [activeSource, filteredEntries, loadedStatsByKey],
   );
 
   useEffect(() => {
+    if (filteredEntries.length === 0) return;
     setOpenByPath((current) => {
-      const next: Record<string, boolean> = {};
+      let additions: Record<string, boolean> | null = null;
       for (const entry of filteredEntries) {
-        next[entry.path] = current[entry.path] ?? true;
+        if (!(entry.path in current)) {
+          additions ??= {};
+          additions[entry.path] = true;
+        }
       }
-      return next;
+      return additions ? { ...current, ...additions } : current;
     });
   }, [filteredEntries]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest) return;
+    setLoadedStatsByKey({});
+  }, [workspaceId, mode, targetBranch]);
+
+  const handleDiffStatsChange = useCallback(
+    (path: string, source: DiffSource, stats: GitLineStats) => {
+      const key = reviewStatsKey(path, source);
+      setLoadedStatsByKey((current) => {
+        const previous = current[key];
+        if (previous?.added === stats.added && previous?.removed === stats.removed) {
+          return current;
+        }
+        return { ...current, [key]: stats };
+      });
+    },
+    [],
+  );
+
+  const prefetchTextAndParse = useCallback(
+    async (path: string, source: DiffSource) => {
+      const textQueryKey = diffContentsQueryKey(workspaceRoot, path, source, targetBranch);
+      await queryClient.prefetchQuery({
+        queryKey: textQueryKey,
+        queryFn: () =>
+          fetchDiffContents(workspaceRoot, path, source, targetBranch, (p) =>
+            editorReadWorkingCopyText(workspaceId, p),
+          ),
+        staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+      });
+      const data = queryClient.getQueryData<DiffContentsData>(textQueryKey);
+      if (!data || data.original === data.modified) return;
+      await queryClient.prefetchQuery({
+        queryKey: parsedDiffQueryKey(workspaceRoot, source, path, targetBranch, data.originalHash, data.modifiedHash),
+        queryFn: () =>
+          parseDiffInWorker({
+            workspaceRoot,
+            relativePath: path,
+            source,
+            targetBranch,
+            original: data.original,
+            modified: data.modified,
+          }),
+        staleTime: Infinity,
+      });
+    },
+    [queryClient, workspaceRoot, targetBranch, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!isActive || !reviewNavigationRequest) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     setMode((current) => (current === requestedMode ? current : requestedMode));
@@ -576,26 +581,15 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         : { ...current, [reviewNavigationRequest.path]: true },
     );
 
-    void queryClient.prefetchQuery({
-      queryKey: diffContentsQueryKey(
-        workspaceRoot,
-        reviewNavigationRequest.path,
-        reviewNavigationRequest.source,
-        targetBranch,
-      ),
-      queryFn: () =>
-        fetchDiffContents(
-          workspaceRoot,
-          reviewNavigationRequest.path,
-          reviewNavigationRequest.source,
-          targetBranch,
-        ),
-      staleTime: DIFF_CONTENTS_STALE_TIME_MS,
-    });
-  }, [queryClient, reviewNavigationRequest, targetBranch, workspaceRoot]);
+    prefetchTextAndParse(reviewNavigationRequest.path, reviewNavigationRequest.source).catch(
+      (error) => {
+        console.warn("[ReviewViewer] navigation prefetch failed:", error);
+      },
+    );
+  }, [isActive, prefetchTextAndParse, reviewNavigationRequest]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest || entriesData == null) return;
+    if (!isActive || !reviewNavigationRequest || statusData == null) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     if (mode !== requestedMode) return;
@@ -633,8 +627,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       window.cancelAnimationFrame(frameId);
     };
   }, [
+    isActive,
     clearReviewNavigation,
-    entriesData,
+    statusData,
     filteredEntries,
     mode,
     reviewNavigationRequest,
@@ -642,10 +637,10 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   ]);
 
   useEffect(() => {
-    if (!activeSource || prefetchPathKey.length === 0) return;
+    if (!isActive || !activeSource || prefetchKey.length === 0) return;
 
     let cancelled = false;
-    const queue = prefetchPathKey.split("\0");
+    const queue = prefetchKey.split("\0");
     const maxConcurrent = Math.min(4, queue.length);
 
     const schedule =
@@ -656,6 +651,8 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
             })
         : (task: () => void) => window.setTimeout(task, 32);
 
+    const readWorkingCopy = (path: string) => editorReadWorkingCopyText(workspaceId, path);
+
     const runWorker = () => {
       if (cancelled) return;
       const nextPath = queue.shift();
@@ -665,15 +662,80 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         if (cancelled) return;
         const queryKey = diffContentsQueryKey(workspaceRoot, nextPath, activeSource, targetBranch);
         const queryState = queryClient.getQueryState(queryKey);
-        if (queryState?.data != null && !queryState.isInvalidated) {
+        const cachedData = queryState?.data as DiffContentsData | undefined;
+        if (cachedData != null && !queryState?.isInvalidated) {
+          if (cachedData.original !== cachedData.modified) {
+            queryClient
+              .prefetchQuery({
+                queryKey: parsedDiffQueryKey(
+                  workspaceRoot,
+                  activeSource,
+                  nextPath,
+                  targetBranch,
+                  cachedData.originalHash,
+                  cachedData.modifiedHash,
+                ),
+                queryFn: () =>
+                  parseDiffInWorker({
+                    workspaceRoot,
+                    relativePath: nextPath,
+                    source: activeSource,
+                    targetBranch,
+                    original: cachedData.original,
+                    modified: cachedData.modified,
+                  }),
+                staleTime: Infinity,
+              })
+              .catch((error) => {
+                console.warn("[ReviewViewer] idle parse prefetch failed:", error);
+              });
+          }
           runWorker();
           return;
         }
-        void queryClient
+        queryClient
           .prefetchQuery({
             queryKey,
-            queryFn: () => fetchDiffContents(workspaceRoot, nextPath, activeSource, targetBranch),
+            queryFn: () =>
+              fetchDiffContents(
+                workspaceRoot,
+                nextPath,
+                activeSource,
+                targetBranch,
+                readWorkingCopy,
+              ),
             staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+          })
+          .then(() => {
+            const data = queryClient.getQueryData<DiffContentsData>(queryKey);
+            if (!data || data.original === data.modified) return;
+            queryClient
+              .prefetchQuery({
+                queryKey: parsedDiffQueryKey(
+                  workspaceRoot,
+                  activeSource,
+                  nextPath,
+                  targetBranch,
+                  data.originalHash,
+                  data.modifiedHash,
+                ),
+                queryFn: () =>
+                  parseDiffInWorker({
+                    workspaceRoot,
+                    relativePath: nextPath,
+                    source: activeSource,
+                    targetBranch,
+                    original: data.original,
+                    modified: data.modified,
+                  }),
+                staleTime: Infinity,
+              })
+              .catch((error) => {
+                console.warn("[ReviewViewer] idle parse prefetch failed:", error);
+              });
+          })
+          .catch((error) => {
+            console.warn("[ReviewViewer] idle prefetch failed:", error);
           })
           .finally(() => {
             runWorker();
@@ -681,96 +743,109 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       });
     };
 
-    for (let index = 0; index < maxConcurrent; index += 1) {
-      runWorker();
-    }
+    // Delay worker start until after first paint so initial Review mount is not
+    // blocked by prefetch setup.  schedule() already defers individual fetches
+    // via requestIdleCallback/setTimeout, but this outer defer ensures the
+    // first render cycle completes before any workers are spawned.
+    const startTimeout = window.setTimeout(() => {
+      for (let index = 0; index < maxConcurrent; index += 1) {
+        runWorker();
+      }
+    }, 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(startTimeout);
     };
-  }, [activeSource, prefetchPathKey, queryClient, reloadKey, targetBranch, workspaceRoot]);
+  }, [
+    isActive,
+    activeSource,
+    prefetchKey,
+    queryClient,
+    reloadKey,
+    targetBranch,
+    workspaceId,
+    workspaceRoot,
+  ]);
 
   const allCollapsed =
-    filteredEntries.length > 0 &&
-    filteredEntries.every((entry) => openByPath[entry.path] === false);
+    rowModel.length > 0 && rowModel.every((row) => openByPath[row.entry.path] === false);
 
   const refreshAll = useCallback(async () => {
-    await refetch();
-    if (targetBranch) {
-      await refetchBranchEntries();
-    }
+    gitRefresh(workspaceId);
     await queryClient.invalidateQueries({ queryKey: ["diff-contents", workspaceRoot] });
+    await queryClient.invalidateQueries({ queryKey: scmStatusQueryKey(workspaceId) });
     setReloadKey((value) => value + 1);
-  }, [queryClient, refetch, refetchBranchEntries, targetBranch, workspaceRoot]);
+  }, [queryClient, workspaceId, workspaceRoot]);
+
+  const handleRefreshClick = useCallback(() => {
+    refreshAll().catch((error) => {
+      console.warn("[ReviewViewer] refresh failed:", error);
+    });
+  }, [refreshAll]);
 
   const runEntryAction = useCallback(
-    async (path: string, fn: () => Promise<void>) => {
+    (path: string, fn: () => void) => {
       setBusyPath(path);
       try {
-        await fn();
-        await refreshAll();
+        fn();
       } finally {
         setBusyPath(null);
       }
     },
-    [refreshAll],
+    [],
   );
 
   const handleRevert = useCallback(
-    (entry: ScmStatusEntry) => {
+    (entry: ScmEntry) => {
       if (mode === "staged") {
-        void runEntryAction(entry.path, () => scmUnstage(workspaceRoot, [entry.path]));
+        runEntryAction(entry.path, () => gitUnstage(workspaceId, [entry.path]));
         return;
       }
 
       if (entry.untracked) {
         if (!window.confirm(`Permanently delete untracked "${entry.path}"?`)) return;
-        void runEntryAction(entry.path, () => scmDiscardUntracked(workspaceRoot, entry.path));
+        runEntryAction(entry.path, () => gitDiscardUntracked(workspaceId, [entry.path]));
         return;
       }
 
       if (!window.confirm(`Discard local changes to "${entry.path}"?`)) return;
-      void runEntryAction(entry.path, () => scmDiscardTracked(workspaceRoot, entry.path));
+      runEntryAction(entry.path, () => gitDiscardTracked(workspaceId, [entry.path]));
     },
-    [mode, runEntryAction, workspaceRoot],
+    [mode, runEntryAction, workspaceId],
   );
 
   const handleStage = useCallback(
-    (entry: ScmStatusEntry) => {
+    (entry: ScmEntry) => {
       if (mode !== "unstaged" || !hasUnstaged(entry)) return;
-      void runEntryAction(entry.path, () => scmStage(workspaceRoot, [entry.path]));
+      runEntryAction(entry.path, () => gitStage(workspaceId, [entry.path]));
     },
-    [mode, runEntryAction, workspaceRoot],
+    [mode, runEntryAction, workspaceId],
   );
 
   const handleToggleEntry = useCallback(
     (path: string, nextOpen: boolean) => {
-      startTransition(() => {
-        setOpenByPath((current) => ({ ...current, [path]: nextOpen }));
-      });
+      // Synchronous UI update — expand/collapse is direct user intent, no deferral needed.
+      setOpenByPath((current) => ({ ...current, [path]: nextOpen }));
       if (!nextOpen || !activeSource) return;
-      void queryClient.prefetchQuery({
-        queryKey: diffContentsQueryKey(workspaceRoot, path, activeSource),
-        queryFn: () => fetchDiffContents(workspaceRoot, path, activeSource),
-        staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+      prefetchTextAndParse(path, activeSource).catch((error) => {
+        console.warn("[ReviewViewer] entry prefetch failed:", error);
       });
     },
-    [activeSource, queryClient, workspaceRoot],
+    [activeSource, prefetchTextAndParse],
   );
 
   const handleOpenFile = useCallback(
     (path: string) => {
-      void openFile(workspaceId, workspaceRoot, path);
+      openFile(workspaceId, workspaceRoot, path).catch((error) => {
+        console.warn("[ReviewViewer] open file failed:", error);
+      });
     },
     [openFile, workspaceId, workspaceRoot],
   );
 
   return (
-    <WorkerPoolContextProvider
-      poolOptions={pierreWorkerPoolOptions}
-      highlighterOptions={pierreHighlighterOptions}
-    >
-      <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
+    <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
         <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -861,14 +936,13 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               size="sm"
               className="shrink-0 text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
               onClick={() => {
-                startTransition(() => {
-                  setOpenByPath((current) => ({
-                    ...current,
-                    ...Object.fromEntries(
-                      filteredEntries.map((entry) => [entry.path, allCollapsed]),
-                    ),
-                  }));
-                });
+                // Synchronous UI update — expand/collapse all is direct user intent, no deferral.
+                setOpenByPath((current) => ({
+                  ...current,
+                  ...Object.fromEntries(
+                    filteredEntries.map((entry) => [entry.path, allCollapsed]),
+                  ),
+                }));
               }}
               disabled={filteredEntries.length === 0}
             >
@@ -880,25 +954,20 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               size="icon-sm"
               className="text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
               title="Refresh review"
-              onClick={() => void refreshAll()}
-              disabled={isFetching}
+              onClick={handleRefreshClick}
             >
               <HugeiconsIcon
                 icon={Refresh01Icon}
                 strokeWidth={1.5}
-                className={cn("size-3.5", isFetching && "animate-spin")}
+                className="size-3.5"
               />
             </Button>
           </div>
         </div>
 
-        {entriesData == null || filteredEntries.length === 0 ? (
+        {statusData == null || rowModel.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {mode === "branch" && !targetBranch ? (
-              <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
-                Pick a target branch in Source Control to compare this branch.
-              </div>
-            ) : entriesData == null ? (
+            {statusData == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
                 Loading review…
               </div>
@@ -915,38 +984,34 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
             className="pandora-review-scroll-root min-h-0 flex-1 overflow-auto"
             contentClassName="bg-[var(--theme-code-surface-base)]"
           >
-            {filteredEntries.map((entry, index) => {
-              const source = activeSource!;
-              const statKey = statsKey(entry.path, source);
-
-              return (
-                <ReviewFileEntry
-                  key={statKey}
-                  entry={entry}
-                  source={source}
-                  stats={statsByKey[statKey]}
-                  decoration={decorationByPath[entry.path]}
-                  isOpen={openByPath[entry.path] ?? true}
-                  canStage={mode === "unstaged" && hasUnstaged(entry)}
-                  busy={busyPath === entry.path}
-                  mode={mode}
-                  workspaceRoot={workspaceRoot}
-                  diffLayout={diffLayout}
-                  wrapLines={wrapLines}
-                  reloadKey={reloadKey}
-                  targetBranch={targetBranch}
-                  isFirst={index === 0}
-                  onToggle={handleToggleEntry}
-                  onOpenFile={handleOpenFile}
-                  onRevert={handleRevert}
-                  onStage={handleStage}
-                />
-              );
-            })}
+            {rowModel.map((row, index) => (
+              <ReviewFileEntry
+                key={row.statsKey}
+                entry={row.entry}
+                source={activeSource!}
+                stats={row.stats}
+                decoration={row.decoration}
+                isOpen={openByPath[row.entry.path] ?? true}
+                canStage={mode === "unstaged" && hasUnstaged(row.entry)}
+                busy={busyPath === row.entry.path}
+                mode={mode}
+                workspaceId={workspaceId}
+                workspaceRoot={workspaceRoot}
+                diffLayout={diffLayout}
+                wrapLines={wrapLines}
+                reloadKey={reloadKey}
+                targetBranch={targetBranch}
+                isFirst={index === 0}
+                onToggle={handleToggleEntry}
+                onOpenFile={handleOpenFile}
+                onRevert={handleRevert}
+                onStage={handleStage}
+                onStatsChange={handleDiffStatsChange}
+              />
+            ))}
           </Virtualizer>
         )}
-      </div>
-    </WorkerPoolContextProvider>
+    </div>
   );
 }
 

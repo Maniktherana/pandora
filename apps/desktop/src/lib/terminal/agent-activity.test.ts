@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentActivityState, WorkspaceRuntimeState } from "@/lib/shared/types";
+import type { AgentActivityState, SessionState, TerminalAgentStatus } from "@/lib/shared/types";
 import {
   acknowledgeTerminalAgentStatus,
   applySessionAgentActivityStatus,
@@ -26,42 +26,14 @@ const workingActivity: AgentActivityState = {
   updatedAt: "2026-04-09T00:01:00.000Z",
 };
 
-function runtimeWithStatuses(
-  terminalAgentStatusBySlotId: WorkspaceRuntimeState["terminalAgentStatusBySlotId"],
-): WorkspaceRuntimeState {
+function statusContext(statuses: Record<string, TerminalAgentStatus>) {
   return {
     workspaceId: "workspace-1",
-    slots: Object.keys(terminalAgentStatusBySlotId).map((id, index) => ({
-      id,
-      kind: "terminal_slot",
-      name: `Terminal ${index + 1}`,
-      autostart: true,
-      presentationMode: "single",
-      primarySessionDefID: `def-${index + 1}`,
-      sessionDefIDs: [`def-${index + 1}`],
-      persisted: false,
-      sortOrder: index + 1,
-      aggregateStatus: "running",
-      sessionIDs: [],
-      capabilities: {
-        canFocus: true,
-        canPause: false,
-        canResume: false,
-        canClear: true,
-        canStop: true,
-        canRestart: true,
-      },
-    })),
-    sessions: [],
-    detectedPorts: [],
-    terminalDisplayBySlotId: {},
-    terminalAgentStatusBySlotId,
-    connectionState: "connected",
+    slots: Object.keys(statuses).map((id) => ({ id })),
+    sessions: [] as SessionState[],
+    terminalAgentStatusBySlotId: { ...statuses },
     root: null,
     focusedPaneID: null,
-    terminalPanel: null,
-    layoutLoading: false,
-    layoutLoaded: true,
   };
 }
 
@@ -80,9 +52,9 @@ describe("terminal agent status", () => {
 
   test("prioritizes permission over working over review", () => {
     expect(highestTerminalAgentStatus(["review", "working", "permission"])).toBe("permission");
-    expect(workspaceTerminalAgentStatus(runtimeWithStatuses({ a: "review", b: "working" }))).toBe(
-      "working",
-    );
+    expect(
+      workspaceTerminalAgentStatus(statusContext({ a: "review", b: "working" })),
+    ).toBe("working");
   });
 
   test("marks completed work as review only when the terminal is not selected", () => {
@@ -99,17 +71,17 @@ describe("terminal agent status", () => {
   });
 
   test("acknowledges review without clearing active work or permission prompts", () => {
-    const runtime = runtimeWithStatuses({
+    const ctx = statusContext({
       review: "review",
       working: "working",
       permission: "permission",
     });
 
-    acknowledgeTerminalAgentStatus(runtime, "review");
-    acknowledgeTerminalAgentStatus(runtime, "working");
-    acknowledgeTerminalAgentStatus(runtime, "permission");
+    acknowledgeTerminalAgentStatus(ctx, "review");
+    acknowledgeTerminalAgentStatus(ctx, "working");
+    acknowledgeTerminalAgentStatus(ctx, "permission");
 
-    expect(runtime.terminalAgentStatusBySlotId).toEqual({
+    expect(ctx.terminalAgentStatusBySlotId).toEqual({
       review: "idle",
       working: "working",
       permission: "permission",
@@ -117,8 +89,8 @@ describe("terminal agent status", () => {
   });
 
   test("projects session activity into the terminal slot status map", () => {
-    const runtime = runtimeWithStatuses({ "slot-1": "idle" });
-    const session = {
+    const ctx = statusContext({ "slot-1": "idle" });
+    const session: SessionState = {
       id: "session-1",
       sessionDefID: "def-1",
       slotID: "slot-1",
@@ -141,20 +113,20 @@ describe("terminal agent status", () => {
         canStop: true,
         canRestart: true,
       },
-    } satisfies WorkspaceRuntimeState["sessions"][number];
+    };
 
-    applySessionAgentActivityStatus(runtime, session, { selectedWorkspaceId: null });
-    expect(runtime.terminalAgentStatusBySlotId["slot-1"]).toBe("working");
+    applySessionAgentActivityStatus(ctx, session, { selectedWorkspaceId: null });
+    expect(ctx.terminalAgentStatusBySlotId["slot-1"]).toBe("working");
 
     applySessionAgentActivityStatus(
-      runtime,
+      ctx,
       { ...session, agentActivity: finishedActivity },
       { selectedWorkspaceId: null },
     );
-    expect(runtime.terminalAgentStatusBySlotId["slot-1"]).toBe("review");
+    expect(ctx.terminalAgentStatusBySlotId["slot-1"]).toBe("review");
 
-    runtime.sessions = [{ ...session, agentActivity: workingActivity }];
-    rebuildTerminalAgentStatuses(runtime, { selectedWorkspaceId: null });
-    expect(runtime.terminalAgentStatusBySlotId["slot-1"]).toBe("working");
+    ctx.sessions = [{ ...session, agentActivity: workingActivity }];
+    rebuildTerminalAgentStatuses(ctx, { selectedWorkspaceId: null });
+    expect(ctx.terminalAgentStatusBySlotId["slot-1"]).toBe("working");
   });
 });

@@ -4,7 +4,7 @@ import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
-import { useEditorStore } from "@/state/editor-store";
+import { useEditorStore } from "@/services/editor/editor-store";
 import type {
   PaneTab,
   SessionState,
@@ -15,12 +15,12 @@ import type {
 import { cn } from "@/lib/shared/utils";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import {
-  decorationForScmEntry,
-  scmToneTextClass,
+  decorationForGitEntry,
+  gitToneTextClass,
   statusTone,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+} from "@/services/git/git-utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import type { ScmStatusEntry } from "@/components/layout/right-sidebar/scm/scm.types";
+import type { ScmEntry } from "@/lib/shared/types";
 
 type WorkspaceTabProps = {
   tab: PaneTab;
@@ -32,7 +32,7 @@ type WorkspaceTabProps = {
   isFocused: boolean;
   isLast: boolean;
   isBeingDragged: boolean;
-  scmEntry?: ScmStatusEntry | undefined;
+  gitEntry?: ScmEntry | undefined;
   slotsMap: Record<string, SlotState | undefined>;
   sessionsMap: Record<string, SessionState | undefined>;
   displayMap: Record<string, TerminalDisplayState>;
@@ -157,7 +157,7 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
     isFocused,
     isLast,
     isBeingDragged,
-    scmEntry,
+    gitEntry,
     slotsMap,
     sessionsMap,
     displayMap,
@@ -172,12 +172,12 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
   const isTerminal = tab.kind === "terminal";
   const terminalDisplay =
     tab.kind === "terminal" ? terminalTabDisplay(tab, slotsMap, sessionsMap, displayMap) : null;
-  const toneClass = scmEntry ? scmToneTextClass(statusTone(scmEntry)) : "";
+  const toneClass = gitEntry ? gitToneTextClass(statusTone(gitEntry)) : "";
   const label = tabLabel(tab, slotsMap, sessionsMap, displayMap);
-  const scmDecoration =
+  const gitDecoration =
     tab.kind === "editor" || tab.kind === "diff"
-      ? scmEntry
-        ? decorationForScmEntry(scmEntry)
+      ? gitEntry
+        ? decorationForGitEntry(gitEntry)
         : null
       : null;
 
@@ -219,10 +219,10 @@ export function WorkspaceTab(props: WorkspaceTabProps) {
         <TerminalIdentityIcon identity={terminalDisplay} className="size-3.5 pointer-events-none" />
       ) : null}
       <span className={cn("pointer-events-none min-w-0 flex-1 truncate", toneClass)}>{label}</span>
-      {scmDecoration?.badge && (
+      {gitDecoration?.badge && (
         <ScmStatusBadge
-          text={scmDecoration.badge}
-          tone={scmDecoration.tone}
+          text={gitDecoration.badge}
+          tone={gitDecoration.tone}
           className="pointer-events-none"
         />
       )}

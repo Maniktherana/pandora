@@ -6,8 +6,8 @@ use tokio::net::UnixListener;
 
 use super::paths::agent_socket_path;
 use super::types::AgentHookEnvelope;
-use crate::daemon_bridge::DaemonState;
 use crate::runtime::types::{AgentCliSignal, AgentVendor};
+use crate::runtime_ipc::DomainRegistries;
 
 /// Map a hook payload's `source` string into the `AgentVendor` enum the
 /// runtime understands. Unknown vendors are dropped so we don't surface
@@ -51,16 +51,19 @@ async fn handle_hook_connection(app: AppHandle, mut stream: tokio::net::UnixStre
             payload_base64: envelope.payload_base64,
         };
 
-        let runtime_state = app.state::<DaemonState>();
-        match runtime_state.inner().get(&envelope.runtime_id).await {
-            Some(runtime) => {
-                runtime.process_manager.record_agent_cli_signal(&signal).await;
+        let registries = app.state::<DomainRegistries>();
+        match registries.inner().terminal.get(&envelope.runtime_id).await {
+            Some(scope) => {
+                scope
+                    .process_manager
+                    .record_agent_cli_signal(&signal)
+                    .await;
             }
             None => {
                 // Hook payloads can race with workspace teardown; log and
                 // move on instead of disturbing the agent's terminal.
                 eprintln!(
-                    "[agent-cli] dropped hook for runtime {}: no runtime registered",
+                    "[agent-cli] dropped hook for scope {}: no terminal scope registered",
                     envelope.runtime_id
                 );
             }

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useEditorStore } from "@/state/editor-store";
+import { useEditorStore } from "@/services/editor/editor-store";
+import { editorEnsureFileLoaded, editorSaveFile } from "@/services/editor/editor-service";
 import { languageFromRelativePath } from "@/components/editor/editor-language";
 import {
   MONACO_THEME_ID,
@@ -12,7 +12,7 @@ import {
   PANDORA_EDITOR_FONT_FAMILY,
   PANDORA_EDITOR_FONT_SIZE,
 } from "@/components/editor/monaco-pandora";
-import { useSettingsStore, getMonoFont } from "@/state/settings-store";
+import { useSettingsStore, getMonoFont } from "@/services/settings/settings-store";
 
 const LARGE_FILE_BYTES = 500_000;
 const HUGE_FILE_BYTES = 2_000_000;
@@ -26,12 +26,10 @@ export default function PaneEditor({
   workspaceId,
   workspaceRoot,
   relativePath,
-  isVisible,
 }: {
   workspaceId: string;
   workspaceRoot: string;
   relativePath: string | null;
-  isVisible: boolean;
 }) {
   const monoFontFamily = useSettingsStore((s) => s.monoFontFamily);
   const monoFontCustom = useSettingsStore((s) => s.monoFontCustom);
@@ -86,30 +84,18 @@ export default function PaneEditor({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
 
-  const mergeSaved = useEditorStore((s) => s.mergeDiskContent);
   const workspaceCommands = useWorkspaceActions();
 
   const currentPathRef = useRef(relativePath);
   currentPathRef.current = relativePath;
 
-  // Load file content from disk if not already in store
+  // Load file content via runtime editor IO if not already in store
   useEffect(() => {
     if (!relativePath) return;
     const has = useEditorStore.getState().bufferByWorkspace[workspaceId]?.[relativePath];
     if (has !== undefined) return;
-    let cancelled = false;
-    void invoke<string>("read_workspace_text_file", {
-      workspaceRoot,
-      relativePath,
-    })
-      .then((content) => {
-        if (!cancelled) mergeSaved(workspaceId, relativePath, content);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, workspaceRoot, relativePath, mergeSaved]);
+    void editorEnsureFileLoaded(workspaceId, workspaceRoot, relativePath);
+  }, [workspaceId, workspaceRoot, relativePath]);
 
   // Read initial content non-reactively (only used as defaultValue for first model creation)
   const initialContent = useMemo(() => {
@@ -149,15 +135,13 @@ export default function PaneEditor({
         if (!path) return;
         const content = editor.getModel()?.getValue();
         if (content === undefined) return;
-        void useEditorStore
-          .getState()
-          .saveFile(workspaceId, workspaceRoot, path, content)
-          .catch((e) => console.error("Save failed:", e));
+        void editorSaveFile(workspaceId, workspaceRoot, path, content)
+          .catch((e: unknown) => console.error("Save failed:", e));
       });
 
       // --- Focus handler ---
       const focusDisposable = editor.onDidFocusEditorWidget(() => {
-        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setLayoutTargetScopeId(null);
         workspaceCommands.setNavigationArea("workspace");
       });
 
@@ -217,14 +201,28 @@ export default function PaneEditor({
     [workspaceId, workspaceRoot, workspaceCommands],
   );
 
-  // Cleanup on unmount
+  // Cleanup on unmount — flush any pending buffer sync so EditorStore is current
+  // before the Monaco model becomes inaccessible via editorRef.
   useEffect(() => {
     return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        const editor = editorRef.current;
+        const path = currentPathRef.current;
+        if (editor && path) {
+          const content = editor.getModel()?.getValue();
+          if (content !== undefined) {
+            useEditorStore.getState().setBuffer(workspaceId, path, content);
+          }
+        }
+      }
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
-      if (debounceRef.current) clearTimeout(debounceRef.current);
       editorRef.current = null;
     };
+  // workspaceId is stable for the lifetime of a PaneEditor instance
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Apply large-file optimizations when path (model) changes
@@ -257,25 +255,14 @@ export default function PaneEditor({
     return () => cancelAnimationFrame(id);
   }, [relativePath]);
 
-  if (!relativePath) {
-    return (
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{ visibility: "hidden", pointerEvents: "none", backgroundColor: PANDORA_EDITOR_BG }}
-        aria-hidden
-      />
-    );
-  }
+  // Should not happen: PaneEditor is only rendered when active tab is an editor.
+  if (!relativePath) return null;
 
   return (
     <div
       ref={containerRef}
       className="absolute inset-0 min-h-0"
-      style={{
-        backgroundColor: PANDORA_EDITOR_BG,
-        visibility: isVisible ? "visible" : "hidden",
-        pointerEvents: isVisible ? "auto" : "none",
-      }}
+      style={{ backgroundColor: PANDORA_EDITOR_BG }}
     >
       {editorReady ? (
         <Editor

@@ -14,23 +14,26 @@ import SettingsPanel from "@/components/settings/settings-panel";
 import { useNativeTerminalOcclusion } from "@/hooks/use-native-terminal-occlusion";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
-import { useDesktopView } from "@/hooks/use-desktop-view";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { useUiPreferencesActions, useUiPreferencesView } from "@/hooks/use-ui-preferences";
+import { useUiPreferencesActions, useUiPreferences } from "@/hooks/use-ui-preferences";
+import {
+  useSelectedWorkspace,
+  useSelectedWorkspaceId,
+  useSelectedProject,
+} from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useBootstrapDesktop, useDesktopRuntime } from "@/hooks/use-bootstrap-desktop";
+import { useBootstrapDesktop } from "@/hooks/use-bootstrap-desktop";
 import {
   useSettingsStore,
   getFontFamily,
   getMonoFont,
   getTerminalFont,
-} from "@/state/settings-store";
+} from "@/services/settings/settings-store";
 import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
 import { applyTheme, defaultTheme, themes } from "@/lib/theme";
 import { loader } from "@monaco-editor/react";
-import { Effect } from "effect";
-import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -71,7 +74,6 @@ export default function App() {
   const terminalFontCustom = useSettingsStore((state) => state.terminalFontCustom);
   const editorFontSize = useSettingsStore((state) => state.editorFontSize);
   const terminalFontSize = useSettingsStore((state) => state.terminalFontSize);
-  const runtime = useDesktopRuntime();
   const terminalFontSizeHydratedRef = useRef(false);
   useBootstrapDesktop();
   useNativeTerminalOverlay(settingsOpen ? "opaque" : isResizingPanels ? "semi-transparent" : null);
@@ -120,21 +122,17 @@ export default function App() {
       return;
     }
 
-    void runtime.runPromise(
-      Effect.flatMap(TerminalSurfaceService, (service) =>
-        service.setAllSurfaceFontSizes(terminalFontSize),
-      ).pipe(Effect.catchAll(() => Effect.void)),
-    );
-  }, [runtime, terminalFontSize]);
+    void terminalSurfaceService.setAllSurfaceFontSizes(terminalFontSize).catch(() => {});
+  }, [terminalFontSize]);
 
-  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const selectedWsStatus = useDesktopView((view) => view.selectedWorkspace?.status ?? null);
-  const selectedWsId = useDesktopView((view) => view.selectedWorkspaceID);
-  const selectedProject = useDesktopView((view) => view.selectedProject);
-  const sidebarVisible = useUiPreferencesView((view) => view.sidebarVisible);
-  const sidebarHydrated = useUiPreferencesView((view) => view.sidebarHydrated);
-  const fileTreeHydrated = useUiPreferencesView((view) => view.fileTreeHydrated);
-  const fileTreeOpen = useUiPreferencesView((view) => view.fileTreeOpen);
+  const selectedWs = useSelectedWorkspace();
+  const selectedWsStatus = selectedWs?.status ?? null;
+  const selectedWsId = useSelectedWorkspaceId();
+  const selectedProject = useSelectedProject();
+  const sidebarVisible = useUiPreferences((p) => p.sidebarVisible);
+  const sidebarHydrated = useUiPreferences((p) => p.sidebarHydrated);
+  const fileTreeHydrated = useUiPreferences((p) => p.fileTreeHydrated);
+  const fileTreeOpen = useUiPreferences((p) => p.fileTreeOpen);
   const booting = !sidebarHydrated || !fileTreeHydrated;
   const terminalCommands = useTerminalActions();
   const uiPreferencesCommands = useUiPreferencesActions();
@@ -162,19 +160,19 @@ export default function App() {
   }, [sidebarVisible, uiPreferencesCommands]);
 
   const handleOpenSettings = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
+    workspaceCommands.setLayoutTargetScopeId(null);
     setSettingsProjectId(null);
     setSettingsOpen(true);
   }, [workspaceCommands]);
 
   const handleCloseSettings = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
+    workspaceCommands.setLayoutTargetScopeId(null);
     setSettingsOpen(false);
   }, [workspaceCommands]);
 
   const handleOpenProjectSettings = useCallback(
     (projectId: string) => {
-      workspaceCommands.setLayoutTargetRuntimeId(null);
+      workspaceCommands.setLayoutTargetScopeId(null);
       setSettingsProjectId(projectId);
       setSettingsOpen(true);
     },
@@ -186,7 +184,7 @@ export default function App() {
       if (selectedWs?.status !== "ready") return;
       const shouldOpen = !fileTreeOpen || rightSidebarMode !== mode;
       setRightSidebarMode(mode);
-      uiPreferencesCommands.setFileTreeOpenForWorkspace(selectedWs.id, shouldOpen);
+      uiPreferencesCommands.setFileTreeOpen(shouldOpen);
     },
     [fileTreeOpen, rightSidebarMode, selectedWs, uiPreferencesCommands],
   );
@@ -351,7 +349,7 @@ export default function App() {
                             selectedWsStatus === "ready" ? (selectedWsId ?? undefined) : undefined
                           }
                           onPointerDownCapture={() =>
-                            workspaceCommands.setLayoutTargetRuntimeId(null)
+                            workspaceCommands.setLayoutTargetScopeId(null)
                           }
                         >
                           <ErrorBoundary name="workspace">
@@ -393,11 +391,11 @@ export default function App() {
                     </ResizablePanelGroup>
                   </div>
 
-                  {fileTreePanelVisible && selectedWs && (
+                  {selectedWs && (
                     <div
                       className="relative h-full shrink-0"
-                      style={{ width: rightSidebarWidth }}
-                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+                      style={{ width: rightSidebarWidth, ...(!fileTreePanelVisible && { display: "none" }) }}
+                      onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
                     >
                       <div
                         ref={rightSidebarResizeHandleRef}

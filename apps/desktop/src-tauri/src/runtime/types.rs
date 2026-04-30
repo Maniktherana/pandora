@@ -1,14 +1,13 @@
 //! Wire types shared with the renderer.
 //!
-//! These structs are what the runtime emits over the Tauri event channel
-//! (`daemon-message`) and what it accepts from the renderer (`daemon_send` /
-//! `ClientMessage`). Field names and tag values define the JSON shape the
-//! `daemon-client.ts` parses; treat field names and tag values as a
-//! public contract — they are the renderer boundary.
+//! These structs define the Tauri IPC contract between the renderer and the
+//! in-process domain registries. Treat field names and tag values as a public
+//! boundary: the renderer sends `IpcCommand`s through `scope_send`, and Rust
+//! emits `ScopeEventEnvelope`s through the `runtime-event` channel.
 //!
 //! Notes on serde tagging:
-//!   * `ClientMessage` and `DaemonMessage` are external-tag = "type" enums,
-//!     producing `{ "type": "input", … }` payloads.
+//!   * `IpcCommand` and `ScopeEvent` are externally tagged with `type`,
+//!     producing `{ "type": "input", ... }` payloads.
 //!   * Field renames keep `slotID`, `sessionDefIDs`, `agentSessionID` style
 //!     (uppercase ID), since serde's stock camelCase would lower the D in ID.
 
@@ -16,6 +15,7 @@ use crate::models::{
     PresentationMode, RestartPolicy, SessionDefinition, SessionKind, SlotDefinition, SlotKind,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // Status enums.
@@ -185,13 +185,79 @@ pub struct DetectedPort {
 }
 
 // ---------------------------------------------------------------------------
+// File-tree state carriers.
+// ---------------------------------------------------------------------------
+
+/// `path` is workspace-relative, forward-slash separated, no leading slash —
+/// the renderer uses it as a stable identity key across IPC.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreeEntry {
+    pub path: String,
+    pub name: String,
+    pub is_directory: bool,
+    pub is_ignored: bool,
+}
+
+/// `directories` keys the workspace root by `""`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreeSnapshot {
+    pub root_path: String,
+    pub directories: BTreeMap<String, Vec<FileTreeEntry>>,
+    pub expanded_paths: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// SCM state carriers.
+// ---------------------------------------------------------------------------
+
+/// Wire-safe copy of `git::ScmStatusEntry` so the SCM domain stays inside
+/// the runtime module without re-exporting crate-private git structs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmEntry {
+    pub path: String,
+    pub orig_path: Option<String>,
+    pub staged_kind: Option<String>,
+    pub worktree_kind: Option<String>,
+    pub untracked: bool,
+    pub line_stats: ScmLineStatsSummary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmLineStatsSummary {
+    pub added: u64,
+    pub removed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmSnapshot {
+    pub branch: String,
+    pub upstream: Option<String>,
+    /// Commits ahead of upstream (0 when no upstream or no commits ahead).
+    pub ahead: u64,
+    /// Commits behind upstream (0 when no upstream or up to date).
+    pub behind: u64,
+    pub target_branch: Option<String>,
+    /// Entries that have staged changes (index differs from HEAD).
+    pub staged: Vec<ScmEntry>,
+    /// Entries that have unstaged changes (worktree differs from index) or are
+    /// untracked.
+    pub unstaged: Vec<ScmEntry>,
+    pub line_stats: ScmLineStatsSummary,
+}
+
+// ---------------------------------------------------------------------------
 // Wire enums (renderer ⇄ runtime). Tag = "type" produces JSON like
 // `{ "type": "input", … }`.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientMessage {
+pub enum IpcCommand {
     CreateSlot {
         slot: SlotDefinition,
     },
@@ -275,11 +341,114 @@ pub enum ClientMessage {
     AgentCliSignal {
         signal: AgentCliSignal,
     },
+
+    // ---- File tree ------------------------------------------------------
+    /// Initial subscription: seeds the expansion set and replies with a
+    /// `FileTreeSnapshot`. Idempotent — safe to call after a renderer reload.
+    FileTreeSubscribe {
+        #[serde(default)]
+        expanded_paths: Vec<String>,
+    },
+    FileTreeSetExpandedPaths {
+        paths: Vec<String>,
+    },
+    /// Re-read one expanded directory; with no `path`, all of them.
+    FileTreeRefresh {
+        #[serde(default)]
+        path: Option<String>,
+    },
+    FileTreeCreateFile {
+        parent_relative_path: String,
+        name: String,
+        #[serde(default)]
+        contents: String,
+    },
+    FileTreeCreateDirectory {
+        relative_path: String,
+    },
+    FileTreeRename {
+        source_relative_path: String,
+        new_name: String,
+    },
+    FileTreeDelete {
+        relative_path: String,
+    },
+    FileTreeMove {
+        source_relative_path: String,
+        dest_relative_path: String,
+    },
+    /// Copy within the workspace; collisions append " copy", " copy 2", …
+    FileTreeCopy {
+        source_relative_path: String,
+        dest_relative_path: String,
+    },
+    /// Import absolute paths from outside the workspace (Finder drag,
+    /// clipboard paste) into a workspace-relative directory.
+    FileTreeImport {
+        dest_relative_path: String,
+        source_absolute_paths: Vec<String>,
+    },
+    FileTreeReadTextFile {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+    },
+    FileTreeWriteTextFile {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+        contents: String,
+    },
+
+    // ---- SCM ---------------------------------------------------------------
+    /// Initial subscription: replies with a `ScmSnapshot`.
+    ScmSubscribe {
+        target_branch: Option<String>,
+    },
+    ScmRefresh,
+    ScmStage {
+        paths: Vec<String>,
+    },
+    ScmStageAll,
+    ScmUnstage {
+        paths: Vec<String>,
+    },
+    ScmUnstageAll,
+    ScmDiscardTracked {
+        paths: Vec<String>,
+    },
+    ScmDiscardUntracked {
+        paths: Vec<String>,
+    },
+    ScmCommit {
+        message: String,
+        #[serde(default)]
+        push: bool,
+    },
+    ScmPush,
+    ScmFetch,
+    ScmPull,
+    ScmSetTargetBranch {
+        branch: Option<String>,
+    },
+
+    // ---- Editor IO ---------------------------------------------------------
+    EditorReadTextFile {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+    },
+    EditorWriteTextFile {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+        contents: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DaemonMessage {
+pub enum ScopeEvent {
     SlotSnapshot {
         slots: Vec<SlotState>,
     },
@@ -317,9 +486,82 @@ pub enum DaemonMessage {
     PortsSnapshot {
         ports: Vec<DetectedPort>,
     },
+
+    // ---- File tree ------------------------------------------------------
+    FileTreeSnapshot {
+        snapshot: FileTreeSnapshot,
+    },
+    /// One directory's listing changed; replace cached entries for `path`.
+    FileTreeDirectoryChanged {
+        path: String,
+        entries: Vec<FileTreeEntry>,
+    },
+    /// Reply to `FileTreeReadTextFile`. `contents` is `None` if missing.
+    FileTreeFileRead {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+        contents: Option<String>,
+    },
+    FileTreeFileWritten {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+    },
+    FileTreeError {
+        #[serde(rename = "requestID", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        message: String,
+    },
+
+    // ---- SCM ---------------------------------------------------------------
+    ScmSnapshot {
+        snapshot: ScmSnapshot,
+    },
+    ScmRefreshing,
+    ScmOperationStarted {
+        #[serde(rename = "opId")]
+        op_id: String,
+    },
+    ScmError {
+        message: String,
+    },
+
+    // ---- Editor IO ---------------------------------------------------------
+    /// Reply to `EditorReadTextFile`. `contents` is `None` if missing/binary.
+    EditorFileRead {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+        contents: Option<String>,
+    },
+    EditorFileWritten {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        relative_path: String,
+    },
+    /// A file that was previously read/opened has changed on disk.
+    EditorFileChanged {
+        relative_path: String,
+    },
+    EditorError {
+        #[serde(rename = "requestID", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        message: String,
+    },
+
     Error {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopeEventEnvelope {
+    #[serde(rename = "runtimeId")]
+    pub scope_id: String,
+    #[serde(flatten)]
+    pub event: ScopeEvent,
 }
 
 // ---------------------------------------------------------------------------
@@ -360,11 +602,7 @@ pub struct SlotDefinitionPatchWire {
 #[serde(rename_all = "camelCase")]
 pub struct SessionDefinitionPatchWire {
     pub id: String,
-    #[serde(
-        default,
-        rename = "slotID",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, rename = "slotID", skip_serializing_if = "Option::is_none")]
     pub slot_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<SessionKind>,
@@ -406,10 +644,16 @@ pub fn capabilities_for(status: SessionStatus, def: &SessionDefinition) -> Actio
 
 /// Reduce a slot's per-session statuses to one aggregate.
 pub fn aggregate_slot_status(states: &[SessionState]) -> AggregateStatus {
-    if states.iter().any(|s| s.instance.status == SessionStatus::Crashed) {
+    if states
+        .iter()
+        .any(|s| s.instance.status == SessionStatus::Crashed)
+    {
         return AggregateStatus::Crashed;
     }
-    if states.iter().any(|s| s.instance.status == SessionStatus::Restarting) {
+    if states
+        .iter()
+        .any(|s| s.instance.status == SessionStatus::Restarting)
+    {
         return AggregateStatus::Restarting;
     }
     if states.iter().any(|s| {
@@ -434,7 +678,10 @@ mod tests {
         // must round-trip them.
         let v: AgentVendor = serde_json::from_value(json!("claude-code")).unwrap();
         assert_eq!(v, AgentVendor::ClaudeCode);
-        assert_eq!(serde_json::to_value(AgentVendor::CursorAgent).unwrap(), json!("cursor-agent"));
+        assert_eq!(
+            serde_json::to_value(AgentVendor::CursorAgent).unwrap(),
+            json!("cursor-agent")
+        );
     }
 
     #[test]
@@ -444,10 +691,10 @@ mod tests {
             "sessionID": "s-1",
             "data": "hello"
         });
-        let msg: ClientMessage = serde_json::from_value(raw.clone()).unwrap();
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
         assert_eq!(
             msg,
-            ClientMessage::Input {
+            IpcCommand::Input {
                 session_id: "s-1".to_string(),
                 data: "hello".to_string(),
             }
@@ -458,16 +705,16 @@ mod tests {
     #[test]
     fn client_message_resize_round_trips() {
         let raw = json!({"type":"resize","sessionID":"s","cols":80,"rows":24});
-        let msg: ClientMessage = serde_json::from_value(raw.clone()).unwrap();
-        assert!(matches!(msg, ClientMessage::Resize { .. }));
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(msg, IpcCommand::Resize { .. }));
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 
     #[test]
     fn client_message_request_snapshot_serializes_as_unit_variant() {
         let raw = json!({"type":"request_snapshot"});
-        let msg: ClientMessage = serde_json::from_value(raw.clone()).unwrap();
-        assert_eq!(msg, ClientMessage::RequestSnapshot);
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(msg, IpcCommand::RequestSnapshot);
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 
@@ -481,8 +728,8 @@ mod tests {
                 "payloadBase64": null,
             }
         });
-        let msg: ClientMessage = serde_json::from_value(raw.clone()).unwrap();
-        if let ClientMessage::AgentCliSignal { signal } = &msg {
+        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
+        if let IpcCommand::AgentCliSignal { signal } = &msg {
             assert_eq!(signal.slot_id, "slot-1");
             assert_eq!(signal.source, AgentVendor::ClaudeCode);
         } else {
@@ -492,14 +739,14 @@ mod tests {
     }
 
     #[test]
-    fn daemon_message_output_chunk_round_trips() {
+    fn runtime_message_output_chunk_round_trips() {
         let raw = json!({
             "type": "output_chunk",
             "sessionID": "s",
             "data": "aGVsbG8=",
         });
-        let msg: DaemonMessage = serde_json::from_value(raw.clone()).unwrap();
-        assert!(matches!(msg, DaemonMessage::OutputChunk { .. }));
+        let msg: ScopeEvent = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(msg, ScopeEvent::OutputChunk { .. }));
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 

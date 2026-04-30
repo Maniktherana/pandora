@@ -4,7 +4,7 @@ import { ArrowLeft02Icon, GitBranchIcon, PaintBucketIcon } from "@hugeicons/core
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/shared/utils";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useProjects } from "@/hooks/use-navigation";
 import AppearanceSettings from "./appearance-settings";
 import GitSettings from "./git-settings";
 import ProjectSettings from "./project-settings";
@@ -32,7 +32,7 @@ export default function SettingsPanel({
   );
   const panelRef = useRef<HTMLDivElement>(null);
   const workspaceCommands = useWorkspaceActions();
-  const projects = useDesktopView((view) => view.projects);
+  const projects = useProjects();
   const activeProjectId = activeTab.startsWith("project:")
     ? activeTab.slice("project:".length)
     : null;
@@ -57,7 +57,7 @@ export default function SettingsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      onPointerDownCapture={() => workspaceCommands.setLayoutTargetRuntimeId(null)}
+      onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

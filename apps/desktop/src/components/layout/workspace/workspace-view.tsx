@@ -11,25 +11,35 @@ import {
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import ReviewViewer from "@/components/editor/review-viewer";
+import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
 import { ResizablePanelGroup, ResizablePanel } from "@/components/ui/resizable";
 import { useLazyTerminalSlotConnections } from "@/hooks/use-lazy-terminal-slot-connections";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
-import { useDesktopView, useRuntimeState, useUiPreferencesView } from "@/hooks/use-desktop-view";
+import {
+  useLayoutTargetScopeId,
+  useSelectedWorkspace,
+  useSelectedProject,
+  useSelectedWorkspaceId,
+} from "@/hooks/use-navigation";
+import { useUiPreferences } from "@/hooks/use-ui-preferences";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
+import { useLayoutStore } from "@/services/workspace/layout-store";
 import { tabKey } from "@/components/layout/workspace/layout-tree";
 import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
-import type { SessionState } from "@/lib/shared/types";
+import type { SessionState, SlotState } from "@/lib/shared/types";
 import { RotateCcw, Trash2 } from "lucide-react";
 import DotGridLoader from "@/components/dot-grid-loader";
 import WelcomeScreen from "@/components/layout/workspace/welcome-screen";
 import type { NativeTerminalRegistration, TerminalAnchorInfo } from "./workspace-view.types";
 
 const NativeTerminalRegContext = createContext<NativeTerminalRegistration | null>(null);
+const EMPTY_SLOTS: readonly SlotState[] = [];
 
 type PaneTerminalAnchorSlotProps = {
   sessionId: string;
@@ -63,11 +73,11 @@ function PaneTerminalAnchorSlot({
   const anchorRef = useRef<HTMLDivElement>(null);
   const layoutCommands = useLayoutActions();
   const workspaceCommands = useWorkspaceActions();
-  const layoutTargetRuntimeId = useDesktopView((view) => view.layoutTargetRuntimeId);
-  const ownsNativeFocus = layoutTargetRuntimeId === layoutTargetOnFocus;
+  const layoutTargetScopeId = useLayoutTargetScopeId();
+  const ownsNativeFocus = layoutTargetScopeId === layoutTargetOnFocus;
 
   const handleFocus = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
+    workspaceCommands.setLayoutTargetScopeId(layoutTargetOnFocus);
     layoutCommands.setFocusedPane(leafId);
     workspaceCommands.setNavigationArea("workspace");
   }, [leafId, layoutCommands, layoutTargetOnFocus, workspaceCommands]);
@@ -77,12 +87,6 @@ function PaneTerminalAnchorSlot({
     const el = anchorRef.current;
     if (!el) return;
     const workspaceVisible = terminalRegistration.workspaceVisible;
-    console.debug("[terminal-surface]", "anchor register", {
-      workspaceId,
-      sessionId,
-      visible: workspaceVisible && isActiveTab,
-      focused: workspaceVisible && isFocused && isActiveTab,
-    });
     terminalRegistration.register(sessionId, {
       el,
       workspaceId,
@@ -105,7 +109,6 @@ function PaneTerminalAnchorSlot({
   useLayoutEffect(() => {
     if (!terminalRegistration) return;
     return () => {
-      console.debug("[terminal-surface]", "anchor unregister", { workspaceId, sessionId });
       terminalRegistration.register(sessionId, null);
     };
   }, [terminalRegistration, sessionId, workspaceId]);
@@ -114,11 +117,7 @@ function PaneTerminalAnchorSlot({
     <div
       ref={anchorRef}
       className="absolute inset-0"
-      style={{
-        visibility: isActiveTab ? "visible" : "hidden",
-        pointerEvents: isActiveTab ? "auto" : "none",
-      }}
-      aria-hidden={!isActiveTab}
+      style={{ pointerEvents: isActiveTab ? "auto" : "none" }}
     />
   );
 }
@@ -133,26 +132,26 @@ function PaneView({
   hideTabBar = false,
   isResizing,
 }: PaneViewProps) {
-  const runtime = useRuntimeState(workspaceId);
+  const scope = useTerminalScopeStore((s) => s.byScopeId[workspaceId] ?? null);
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
 
   const slotsMap = useMemo(() => {
     const map: Record<string, { id: string; sessionIDs: string[] }> = {};
-    for (const slot of runtime?.slots ?? []) {
+    for (const slot of scope?.slots ?? []) {
       map[slot.id] = slot;
     }
     return map;
-  }, [runtime?.slots]);
+  }, [scope?.slots]);
 
   const sessionsMap = useMemo(() => {
     const map: Record<string, SessionState> = {};
-    for (const session of runtime?.sessions ?? []) {
+    for (const session of scope?.sessions ?? []) {
       map[session.id] = session;
     }
     return map;
-  }, [runtime?.sessions]);
+  }, [scope?.sessions]);
 
   const terminalSlots = leaf.tabs
     .map((t, i) => (t.kind === "terminal" ? { slotId: t.slotId, idx: i } : null))
@@ -176,7 +175,7 @@ function PaneView({
     leaf.tabs.every((t) => t.kind === "editor" || t.kind === "diff" || t.kind === "review");
 
   const handlePanePointerDownCapture = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(layoutTargetOnFocus);
+    workspaceCommands.setLayoutTargetScopeId(layoutTargetOnFocus);
     workspaceCommands.setNavigationArea("workspace");
     layoutCommands.setFocusedPane(leaf.id);
   }, [layoutCommands, layoutTargetOnFocus, leaf.id, workspaceCommands]);
@@ -184,6 +183,21 @@ function PaneView({
   const handleCreateTerminalFromEmptyPane = useCallback(() => {
     terminalCommands.createWorkspaceTerminal(workspaceId);
   }, [terminalCommands, workspaceId]);
+
+  // Track the last-known editor-tab path so PaneEditor stays mounted and warm
+  // while a diff/review tab is active.  CSS visibility-hiding (not unmounting)
+  // preserves warm Monaco models and per-file scroll state so switching back to
+  // an editor tab never triggers a fresh mount + editorReady RAF delay.
+  const activeTab = leaf.tabs[leaf.selectedIndex];
+  const activeEditorPath: string | null =
+    activeTab !== undefined && activeTab.kind === "editor" ? activeTab.path : null;
+  const lastEditorPathRef = useRef<string | null>(null);
+  if (activeEditorPath !== null) {
+    lastEditorPathRef.current = activeEditorPath;
+  }
+  const hasEditorTabs = leaf.tabs.some((t) => t.kind === "editor");
+  const editorPath = activeEditorPath ?? lastEditorPathRef.current;
+  const isEditorActive = activeTab?.kind === "editor";
 
   return (
     <div
@@ -210,20 +224,23 @@ function PaneView({
         }}
         onPointerDownCapture={handlePanePointerDownCapture}
       >
-        {/* Single editor instance per pane — model-swaps via path prop */}
-        {leaf.tabs.some((t) => t.kind === "editor") && (
-          <PaneEditor
-            key={`pane-editor-${leaf.id}`}
-            workspaceId={workspaceId}
-            workspaceRoot={workspaceRoot}
-            relativePath={
-              leaf.tabs[leaf.selectedIndex]?.kind === "editor"
-                ? (leaf.tabs[leaf.selectedIndex] as { path: string }).path
-                : ((leaf.tabs.find((t) => t.kind === "editor") as { path: string } | undefined)
-                    ?.path ?? null)
-            }
-            isVisible={leaf.tabs[leaf.selectedIndex]?.kind === "editor"}
-          />
+        {/* Keep PaneEditor mounted while any editor tab exists in this pane.
+            CSS visibility (not unmount) preserves warm Monaco models and per-file
+            scroll state across editor↔diff/review tab switches.
+            Dirty buffers survive separately via EditorStore + Monaco model registry. */}
+        {hasEditorTabs && editorPath && (
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={!isEditorActive ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+            aria-hidden={!isEditorActive || undefined}
+          >
+            <PaneEditor
+              key={`pane-editor-${leaf.id}`}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
+              relativePath={editorPath}
+            />
+          </div>
         )}
 
         {leaf.tabs.map((tab, idx) => {
@@ -234,17 +251,15 @@ function PaneView({
               <div
                 key={tabKey(tab)}
                 className="absolute inset-0 overflow-hidden"
-                style={{
-                  visibility: isActiveTab ? "visible" : "hidden",
-                  pointerEvents: isActiveTab ? "auto" : "none",
-                }}
-                aria-hidden={!isActiveTab}
+                style={!isActiveTab ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+                aria-hidden={!isActiveTab || undefined}
               >
                 <DiffViewer
                   workspaceRoot={workspaceRoot}
                   relativePath={tab.path}
                   source={tab.source}
                   isActive={isActiveTab}
+                  readWorkingCopy={(path) => editorReadWorkingCopyText(workspaceId, path)}
                 />
               </div>
             );
@@ -254,13 +269,14 @@ function PaneView({
               <div
                 key={tabKey(tab)}
                 className="absolute inset-0 overflow-hidden"
-                style={{
-                  visibility: isActiveTab ? "visible" : "hidden",
-                  pointerEvents: isActiveTab ? "auto" : "none",
-                }}
-                aria-hidden={!isActiveTab}
+                style={!isActiveTab ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+                aria-hidden={!isActiveTab || undefined}
               >
-                <ReviewViewer workspaceId={workspaceId} workspaceRoot={workspaceRoot} />
+                <ReviewViewer
+                  workspaceId={workspaceId}
+                  workspaceRoot={workspaceRoot}
+                  isActive={isActiveTab}
+                />
               </div>
             );
           }
@@ -418,7 +434,7 @@ const MemoHoistedNativeTerminals = memo(HoistedNativeTerminals);
 type WorkspaceRuntimeViewProps = {
   workspaceId: string;
   workspaceRoot: string;
-  runtime: import("@/lib/shared/types").WorkspaceRuntimeState;
+  layout: import("@/services/workspace/layout-store").WorkspaceLayoutState;
   layoutTargetOnFocus?: string | null;
   isVisible?: boolean;
 };
@@ -426,16 +442,17 @@ type WorkspaceRuntimeViewProps = {
 export function WorkspaceRuntimeView({
   workspaceId,
   workspaceRoot,
-  runtime,
+  layout,
   layoutTargetOnFocus = null,
   isVisible = true,
 }: WorkspaceRuntimeViewProps) {
   const [anchors, setAnchors] = useState<Record<string, TerminalAnchorInfo>>({});
   const visibleSlotIds = useMemo(
-    () => getVisibleWorkspaceTerminalSlotIds(runtime.root),
-    [runtime.root],
+    () => getVisibleWorkspaceTerminalSlotIds(layout.root),
+    [layout.root],
   );
-  const liveSlotIds = useMemo(() => runtime.slots.map((slot) => slot.id), [runtime.slots]);
+  const liveSlots = useTerminalScopeStore((s) => s.byScopeId[workspaceId]?.slots ?? EMPTY_SLOTS);
+  const liveSlotIds = useMemo(() => liveSlots.map((slot) => slot.id), [liveSlots]);
   const connectedSlotIds = useLazyTerminalSlotConnections(workspaceId, visibleSlotIds, liveSlotIds);
 
   const registerTerminalAnchor = useCallback(
@@ -472,14 +489,24 @@ export function WorkspaceRuntimeView({
     [registerTerminalAnchor, isVisible],
   );
 
+  if (!layout.root) {
+    return (
+      <NativeTerminalRegContext.Provider value={terminalRegistration}>
+        <div className="relative h-full w-full min-h-0">
+          <EmptyWorkspaceLayout workspaceId={workspaceId} />
+        </div>
+      </NativeTerminalRegContext.Provider>
+    );
+  }
+
   return (
     <NativeTerminalRegContext.Provider value={terminalRegistration}>
       <div className="relative h-full w-full min-h-0">
         <div className="relative h-full min-h-0 min-w-0">
           <MemoLayoutRenderer
-            node={runtime.root!}
+            node={layout.root!}
             connectedSlotIds={connectedSlotIds}
-            focusedPaneID={runtime.focusedPaneID}
+            focusedPaneID={layout.focusedPaneID}
             workspaceId={workspaceId}
             workspaceRoot={workspaceRoot}
             layoutTargetOnFocus={layoutTargetOnFocus}
@@ -493,9 +520,9 @@ export function WorkspaceRuntimeView({
 }
 
 function EmptyWorkspaceState() {
-  const workspace = useDesktopView((view) => view.selectedWorkspace);
-  const project = useDesktopView((view) => view.selectedProject);
-  const booting = useUiPreferencesView((view) => !view.sidebarHydrated || !view.fileTreeHydrated);
+  const workspace = useSelectedWorkspace();
+  const project = useSelectedProject();
+  const booting = useUiPreferences((p) => !p.sidebarHydrated || !p.fileTreeHydrated);
   const workspaceCommands = useWorkspaceActions();
   const handleRetryWorkspace = useCallback(() => {
     if (!workspace) return;
@@ -607,7 +634,7 @@ function EmptyWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function WorkspaceRuntimeLoading() {
+function WorkspaceLayoutLoading() {
   return (
     <div className="flex h-full items-center justify-center text-[var(--theme-text-subtle)]">
       <div className="text-center">
@@ -623,12 +650,14 @@ function WorkspaceRuntimeLoading() {
 }
 
 export default memo(function WorkspaceView() {
-  const selectedWorkspaceID = useDesktopView((view) => view.selectedWorkspaceID);
-  const selectedWs = useDesktopView((view) => view.selectedWorkspace);
-  const runtime = useRuntimeState(selectedWorkspaceID ?? "");
+  const selectedWorkspaceID = useSelectedWorkspaceId();
+  const selectedWs = useSelectedWorkspace();
+  const layout = useLayoutStore((state) =>
+    selectedWorkspaceID ? (state.byWorkspaceId[selectedWorkspaceID] ?? null) : null,
+  );
   const workspaceCommands = useWorkspaceActions();
   const handleRootPointerDownCapture = useCallback(() => {
-    workspaceCommands.setLayoutTargetRuntimeId(null);
+    workspaceCommands.setLayoutTargetScopeId(null);
     workspaceCommands.setNavigationArea("workspace");
   }, [workspaceCommands]);
 
@@ -636,25 +665,23 @@ export default memo(function WorkspaceView() {
     return <EmptyWorkspaceState />;
   }
 
-  if (!runtime) {
-    return <WorkspaceRuntimeLoading />;
-  }
-
-  if (runtime.connectionState !== "connected" || runtime.layoutLoading || !runtime.layoutLoaded) {
-    return <WorkspaceRuntimeLoading />;
-  }
-
-  if (!runtime.root) {
+  if (!layout?.layoutLoaded && !layout?.layoutLoading && !layout?.root) {
     return <EmptyWorkspaceLayout workspaceId={selectedWorkspaceID!} />;
   }
 
   return (
-    <div className="h-full min-h-0" onPointerDownCapture={handleRootPointerDownCapture}>
+    <div
+      className="relative h-full min-h-0"
+      onPointerDownCapture={handleRootPointerDownCapture}
+    >
+      {layout?.layoutLoading && !layout.root ? <WorkspaceLayoutLoading /> : null}
       <WorkspaceRuntimeView
+        key={selectedWorkspaceID}
         workspaceId={selectedWorkspaceID!}
         workspaceRoot={selectedWs.worktreePath}
-        runtime={runtime}
+        layout={layout ?? { root: null, focusedPaneID: null, layoutLoading: true, layoutLoaded: false }}
         layoutTargetOnFocus={null}
+        isVisible={true}
       />
     </div>
   );

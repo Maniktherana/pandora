@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { LayoutAlignLeftIcon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
-import { useDesktopView } from "@/hooks/use-desktop-view";
+import { useProjects } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { ProjectRow } from "./project-row";
 import DotGridLoader from "@/components/dot-grid-loader";
@@ -34,7 +34,7 @@ export default memo(function LeftSidebar({
   onCollapse,
   onOpenSettings,
 }: LeftSidebarProps) {
-  const projects = useDesktopView((view) => view.projects);
+  const projects = useProjects();
   const workspaceCommands = useWorkspaceActions();
 
   const handleAddProject = async () => {

@@ -1,13 +1,15 @@
 import type { DiffSource } from "@/lib/shared/types";
 import {
-  readWorkspaceTextFile,
-  scmReadGitBlob,
-  scmReadGitCompareBlob,
-} from "@/components/layout/right-sidebar/scm/scm.utils";
+  gitReadBlob,
+  gitReadCompareBlob,
+} from "@/services/git/git-api";
+import { hashDiffText } from "@/services/diff/diff-worker-client";
 
 export type DiffContentsData = {
   original: string;
   modified: string;
+  originalHash: string;
+  modifiedHash: string;
 };
 
 export const DIFF_CONTENTS_STALE_TIME_MS = 2 * 60_000;
@@ -27,30 +29,35 @@ export async function fetchDiffContents(
   relativePath: string,
   source: DiffSource,
   targetBranch?: string | null,
+  readWorkingCopy?: (relativePath: string) => Promise<string | null>,
 ): Promise<DiffContentsData> {
   if (source === "branch") {
-    if (!targetBranch) return { original: "", modified: "" };
+    if (!targetBranch) {
+      return { original: "", modified: "", originalHash: hashDiffText(""), modifiedHash: hashDiffText("") };
+    }
     const [original, modified] = await Promise.all([
-      scmReadGitCompareBlob(workspaceRoot, relativePath, targetBranch, "base"),
-      scmReadGitCompareBlob(workspaceRoot, relativePath, targetBranch, "head"),
+      gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "base"),
+      gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "head"),
     ]);
-    return { original, modified };
+    return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
   }
 
   if (source === "staged") {
     const [original, modified] = await Promise.all([
-      scmReadGitBlob(workspaceRoot, relativePath, "head"),
-      scmReadGitBlob(workspaceRoot, relativePath, "index"),
+      gitReadBlob(workspaceRoot, relativePath, "head"),
+      gitReadBlob(workspaceRoot, relativePath, "index"),
     ]);
-    return { original, modified };
+    return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
   }
 
-  const original = await scmReadGitBlob(workspaceRoot, relativePath, "head");
+  const original = await gitReadBlob(workspaceRoot, relativePath, "head");
   let modified = "";
-  try {
-    modified = await readWorkspaceTextFile(workspaceRoot, relativePath);
-  } catch {
-    modified = "";
+  if (readWorkingCopy) {
+    try {
+      modified = (await readWorkingCopy(relativePath)) ?? "";
+    } catch {
+      modified = "";
+    }
   }
-  return { original, modified };
+  return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
 }

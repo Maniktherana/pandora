@@ -1,63 +1,38 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Effect } from "effect";
-import { getDesktopRuntime } from "@/app/desktop-runtime";
-import { DaemonGateway } from "@/services/daemon/daemon-gateway";
-import { UiPreferencesService } from "@/services/preferences/ui-preferences-service";
-import { TerminalSurfaceService } from "@/services/terminal/terminal-surface-service";
-import { DesktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-
-export function useDesktopRuntime() {
-  return useMemo(() => getDesktopRuntime(), []);
-}
-
-export function useDesktopEffectRunner() {
-  const runtime = useDesktopRuntime();
-
-  const run = useCallback(
-    <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-      runtime.runPromise(effect as Effect.Effect<A, E, never>).catch(console.error);
-    },
-    [runtime],
-  );
-
-  const runPromise = useCallback(
-    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      runtime.runPromise(effect as Effect.Effect<A, E, never>),
-    [runtime],
-  );
-
-  return { run, runPromise };
-}
+import { useEffect, useRef } from "react";
+import { startIpcEventRouting, stopIpcEventRouting } from "@/services/ipc/ipc-lifecycle";
+import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
+import { uiPreferencesService } from "@/services/preferences/ui-preferences-service";
+import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 
 export function useBootstrapDesktop() {
-  const runtime = useDesktopRuntime();
-  const bootstrappedRef = useRef(false);
+  const didBootstrap = useRef(false);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-    runtime
-      .runPromise(
-        Effect.gen(function* () {
-          const daemonGateway = yield* DaemonGateway;
-          const desktopWorkspace = yield* DesktopWorkspaceService;
-          const uiPreferences = yield* UiPreferencesService;
-          yield* daemonGateway.connect();
-          yield* desktopWorkspace.loadDesktopState();
-          yield* uiPreferences.hydrate();
-        }),
-      )
-      .catch(console.error);
+    if (didBootstrap.current) return;
+    didBootstrap.current = true;
+
+    const init = async () => {
+      await startIpcEventRouting();
+
+      desktopWorkspaceService.init({
+        removeWorkspaceSurfaces: (workspaceId) =>
+          terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).catch(() => {}),
+      });
+
+      await desktopWorkspaceService.loadDesktopState().catch(console.error);
+
+      // Git subscriptions are started by workspace-startup-service.ts when each
+      // workspace becomes ready. Snapshots arrive via IPC events and are pushed
+      // into the React Query cache by applyGitSnapshot in git-events.ts.
+
+      await uiPreferencesService.hydrate().catch(console.error);
+    };
+    void init();
 
     const teardown = () => {
-      void runtime.runPromise(
-        Effect.gen(function* () {
-          const terminalSurface = yield* TerminalSurfaceService;
-          const daemonGateway = yield* DaemonGateway;
-          yield* terminalSurface.removeAllSurfaces().pipe(Effect.catchAll(() => Effect.void));
-          yield* daemonGateway.disconnect().pipe(Effect.catchAll(() => Effect.void));
-        }),
-      );
+      void terminalSurfaceService.removeAllSurfaces().catch(console.error);
+      desktopWorkspaceService.dispose();
+      stopIpcEventRouting();
     };
 
     window.addEventListener("beforeunload", teardown);
@@ -66,8 +41,8 @@ export function useBootstrapDesktop() {
     return () => {
       window.removeEventListener("beforeunload", teardown);
       window.removeEventListener("pagehide", teardown);
-      bootstrappedRef.current = false;
+      didBootstrap.current = false;
       teardown();
     };
-  }, [runtime]);
+  }, []);
 }

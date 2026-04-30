@@ -67,7 +67,7 @@ export function terminalDisplayForSlot(
     return liveDetected;
   }
 
-  // If the daemon says there's no live foreground app, don't resurrect a stale
+  // If the runtime says there's no live foreground app, don't resurrect a stale
   // regex-detected identity from earlier terminal input/output.
   if (session) {
     return { kind: "terminal", label: TERMINAL_LABEL };

@@ -141,7 +141,7 @@ export default function EditorFontPreview({ fontFamily, fontSize = 13 }: EditorF
         setEditorHeight(editor.getContentHeight());
       });
       editor.onDidFocusEditorWidget(() => {
-        workspaceCommands.setLayoutTargetRuntimeId(null);
+        workspaceCommands.setLayoutTargetScopeId(null);
         workspaceCommands.setNavigationArea("workspace");
       });
     },

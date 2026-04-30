@@ -100,6 +100,7 @@ export default memo(function OpenInDropdown({ worktreePath, workspaceName }: Ope
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       {/* Trigger wraps the ENTIRE split button so the Positioner anchors to it */}
       <DropdownMenuTrigger
+        nativeButton={false}
         render={
           <div className="flex items-center rounded-md border border-[var(--theme-border)] cursor-default" />
         }

@@ -30,6 +30,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 nix = { version = "0.31.2", features = ["process", "signal", "term", "fs"] }
 regex = "1.12.3"
 async-trait = "0.1.89"
+notify = "7"
+ignore = "0.4"
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 libproc = "0.14.11"

@@ -73,7 +73,57 @@ export interface SessionState {
   capabilities: ActionCapabilities;
 }
 
-export type ClientMessage =
+// ---------------------------------------------------------------------------
+// File-tree types
+// ---------------------------------------------------------------------------
+
+export interface FileTreeEntry {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+  isIgnored: boolean;
+}
+
+export interface FileTreeSnapshot {
+  rootPath: string;
+  directories: Record<string, FileTreeEntry[]>;
+  expandedPaths: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Git types (backend protocol names are prefixed with scm in Rust)
+// ---------------------------------------------------------------------------
+
+export interface ScmEntry {
+  path: string;
+  origPath: string | null;
+  stagedKind: string | null;
+  worktreeKind: string | null;
+  untracked: boolean;
+  lineStats: ScmLineStats;
+}
+
+export interface ScmLineStats {
+  added: number;
+  removed: number;
+}
+
+export interface ScmSnapshot {
+  branch: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  targetBranch: string | null;
+  staged: ScmEntry[];
+  unstaged: ScmEntry[];
+  lineStats: ScmLineStats;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime commands
+// ---------------------------------------------------------------------------
+
+export type RuntimeCommand =
   | { type: "create_slot"; slot: any }
   | { type: "update_slot"; slot: any }
   | { type: "remove_slot"; slotID: string }
@@ -94,20 +144,82 @@ export type ClientMessage =
   | { type: "close_session_instance"; sessionID: string }
   | { type: "input"; sessionID: string; data: string }
   | { type: "request_snapshot" }
-  | { type: "resize"; sessionID: string; cols: number; rows: number };
+  | { type: "resize"; sessionID: string; cols: number; rows: number }
+  | { type: "agent_cli_signal"; signal: any }
+  // File tree
+  | { type: "file_tree_subscribe"; expanded_paths?: string[] }
+  | { type: "file_tree_set_expanded_paths"; paths: string[] }
+  | { type: "file_tree_refresh"; path?: string }
+  | { type: "file_tree_create_file"; parent_relative_path: string; name: string; contents?: string }
+  | { type: "file_tree_create_directory"; relative_path: string }
+  | { type: "file_tree_rename"; source_relative_path: string; new_name: string }
+  | { type: "file_tree_delete"; relative_path: string }
+  | { type: "file_tree_move"; source_relative_path: string; dest_relative_path: string }
+  | { type: "file_tree_copy"; source_relative_path: string; dest_relative_path: string }
+  | { type: "file_tree_import"; dest_relative_path: string; source_absolute_paths: string[] }
+  | { type: "file_tree_read_text_file"; requestID: string; relative_path: string }
+  | { type: "file_tree_write_text_file"; requestID: string; relative_path: string; contents: string }
+  // Git commands (backend protocol names)
+  | { type: "scm_subscribe"; target_branch?: string | null }
+  | { type: "scm_refresh" }
+  | { type: "scm_stage"; paths: string[] }
+  | { type: "scm_stage_all" }
+  | { type: "scm_unstage"; paths: string[] }
+  | { type: "scm_unstage_all" }
+  | { type: "scm_discard_tracked"; paths: string[] }
+  | { type: "scm_discard_untracked"; paths: string[] }
+  | { type: "scm_commit"; message: string; push?: boolean }
+  | { type: "scm_push" }
+  | { type: "scm_fetch" }
+  | { type: "scm_pull" }
+  | { type: "scm_set_target_branch"; branch: string | null }
+  // Editor IO
+  | { type: "editor_read_text_file"; requestID: string; relative_path: string }
+  | { type: "editor_write_text_file"; requestID: string; relative_path: string; contents: string };
 
-export type DaemonMessage =
-  | { type: "slot_snapshot"; slots: SlotState[]; workspaceId?: string }
-  | { type: "session_snapshot"; sessions: SessionState[]; workspaceId?: string }
-  | { type: "slot_state_changed"; slot: SlotState; workspaceId?: string }
-  | { type: "session_state_changed"; session: SessionState; workspaceId?: string }
-  | { type: "slot_added"; slot: SlotState; workspaceId?: string }
-  | { type: "slot_removed"; slotID: string; workspaceId?: string }
-  | { type: "session_opened"; session: SessionState; workspaceId?: string }
-  | { type: "session_closed"; sessionID: string; workspaceId?: string }
-  | { type: "ports_snapshot"; ports: DetectedPort[]; workspaceId?: string }
-  | { type: "output_chunk"; sessionID: string; data: string; workspaceId?: string }
-  | { type: "error"; message: string; workspaceId?: string };
+// ---------------------------------------------------------------------------
+// Runtime events
+// ---------------------------------------------------------------------------
+
+export type RuntimeEvent =
+  | { type: "slot_snapshot"; slots: SlotState[] }
+  | { type: "session_snapshot"; sessions: SessionState[] }
+  | { type: "slot_state_changed"; slot: SlotState }
+  | { type: "session_state_changed"; session: SessionState }
+  | { type: "slot_added"; slot: SlotState }
+  | { type: "slot_removed"; slotID: string }
+  | { type: "session_opened"; session: SessionState }
+  | { type: "session_closed"; sessionID: string }
+  | { type: "ports_snapshot"; ports: DetectedPort[] }
+  | { type: "output_chunk"; sessionID: string; data: string }
+  | { type: "error"; message: string }
+  // File tree
+  | { type: "file_tree_snapshot"; snapshot: FileTreeSnapshot }
+  | { type: "file_tree_directory_changed"; path: string; entries: FileTreeEntry[] }
+  | { type: "file_tree_file_read"; requestID: string; relative_path: string; contents: string | null }
+  | { type: "file_tree_file_written"; requestID: string; relative_path: string }
+  | { type: "file_tree_error"; requestID?: string; message: string }
+  // Git events (backend protocol names)
+  | { type: "scm_snapshot"; snapshot: ScmSnapshot }
+  | { type: "scm_refreshing" }
+  | { type: "scm_operation_started"; opId: string }
+  | { type: "scm_error"; message: string }
+  // Editor IO
+  | { type: "editor_file_read"; requestID: string; relative_path: string; contents: string | null }
+  | { type: "editor_file_written"; requestID: string; relative_path: string }
+  | { type: "editor_file_changed"; relative_path: string }
+  | { type: "editor_error"; requestID?: string; message: string };
+
+export type RuntimeEventEnvelope = RuntimeEvent & {
+  runtimeId: string;
+};
+
+export type RuntimeConnectionState = "connected" | "error";
+
+export interface RuntimeConnectionEvent {
+  runtimeId: string;
+  state: RuntimeConnectionState;
+}
 
 export interface DetectedPort {
   port: number;
@@ -237,18 +349,4 @@ export interface AppState {
   selectedWorkspaceId: string | null;
 }
 
-export interface WorkspaceRuntimeState {
-  workspaceId: string;
-  slots: SlotState[];
-  sessions: SessionState[];
-  detectedPorts: DetectedPort[];
-  terminalDisplayBySlotId: Record<string, TerminalDisplayState>;
-  terminalAgentStatusBySlotId: Record<string, TerminalAgentStatus>;
-  connectionState: "disconnected" | "connecting" | "connected";
-  root: LayoutNode | null;
-  focusedPaneID: string | null;
-  terminalPanel: TerminalPanelState | null;
-  layoutLoading: boolean;
-  /** True once the persisted layout attempt has settled, even if the result is empty. */
-  layoutLoaded: boolean;
-}
+

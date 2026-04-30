@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
-import type { WorkspaceRuntimeState } from "@/lib/shared/types";
 import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
 import DotGridLoader from "@/components/dot-grid-loader";
 import type { SidebarRow } from "../project-terminal.types";
@@ -12,21 +11,21 @@ import {
   PROJECT_TERMINAL_DRAG_THRESHOLD,
 } from "../project-terminal.utils";
 import { ProjectTab } from "./project-tab";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 
 type ProjectTerminalSidebarProps = {
-  runtime: WorkspaceRuntimeState;
-  workspaceId: string;
+  scopeId: string;
 };
 
-export default function ProjectTerminalSidebar({
-  runtime,
-  workspaceId,
-}: ProjectTerminalSidebarProps) {
-  const panel = runtime.terminalPanel;
-  const slots = runtime.slots;
-  const displayMap = runtime.terminalDisplayBySlotId ?? {};
+export default function ProjectTerminalSidebar({ scopeId }: ProjectTerminalSidebarProps) {
+  const scope = useTerminalScopeStore((s) => s.byScopeId[scopeId]);
+  const panel = scope?.terminalPanel ?? null;
+  const slots = scope?.slots ?? [];
+  const sessions = scope?.sessions ?? [];
+  const displayMap = scope?.terminalDisplayBySlotId ?? {};
+
   const projectTerminalCommands = useProjectTerminalActions();
-  const sessionsMap = useMemo(() => createSessionMap(runtime.sessions), [runtime.sessions]);
+  const sessionsMap = useMemo(() => createSessionMap(sessions), [sessions]);
   const { startDrag, dragState } = useTabDrag();
 
   const slotMap = useMemo(() => createSlotMap(slots), [slots]);
@@ -45,9 +44,9 @@ export default function ProjectTerminalSidebar({
 
   const onSelectRow = useCallback(
     (row: SidebarRow) => {
-      projectTerminalCommands.selectProjectTerminalGroup(workspaceId, row.groupId, row.slotId);
+      projectTerminalCommands.selectProjectTerminalGroup(scopeId, row.groupId, row.slotId);
     },
-    [projectTerminalCommands, workspaceId],
+    [projectTerminalCommands, scopeId],
   );
 
   const handlePointerDown = useCallback((e: React.PointerEvent, row: SidebarRow) => {
@@ -69,7 +68,7 @@ export default function ProjectTerminalSidebar({
       if (Math.abs(dx) + Math.abs(dy) <= PROJECT_TERMINAL_DRAG_THRESHOLD) return;
       startDrag({
         kind: "bottom-terminal-slot",
-        runtimeId: workspaceId,
+        scopeId: scopeId,
         groupId: pending.row.groupId,
         groupIndex: pending.row.groupIndex,
         slotId: pending.row.slotId,
@@ -78,7 +77,7 @@ export default function ProjectTerminalSidebar({
       });
       pendingDragRef.current = null;
     },
-    [startDrag, workspaceId],
+    [startDrag, scopeId],
   );
 
   const handlePointerUp = useCallback(
@@ -101,8 +100,8 @@ export default function ProjectTerminalSidebar({
     const next = renameState.value.trim();
     setRenameState(null);
     if (!next || next === current) return;
-    projectTerminalCommands.renameTerminal(workspaceId, renameState.slotId, next);
-  }, [displayMap, projectTerminalCommands, renameState, sessionsMap, slotMap, workspaceId]);
+    projectTerminalCommands.renameTerminal(scopeId, renameState.slotId, next);
+  }, [displayMap, projectTerminalCommands, renameState, sessionsMap, slotMap, scopeId]);
 
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent, row: SidebarRow) => {
@@ -131,9 +130,9 @@ export default function ProjectTerminalSidebar({
   const handleCloseClick = useCallback(
     (event: React.MouseEvent, slotId: string) => {
       event.stopPropagation();
-      projectTerminalCommands.closeProjectTerminal(workspaceId, slotId);
+      projectTerminalCommands.closeProjectTerminal(scopeId, slotId);
     },
-    [projectTerminalCommands, workspaceId],
+    [projectTerminalCommands, scopeId],
   );
 
   if (!panel || panel.groups.length === 0) {
@@ -166,7 +165,7 @@ export default function ProjectTerminalSidebar({
         {panel.groups.map((group, groupIndex) => (
           <div
             key={group.id}
-            data-bottom-terminal-runtime-id={workspaceId}
+            data-bottom-terminal-scope-id={scopeId}
             data-bottom-terminal-group-id={group.id}
             data-bottom-terminal-group-index={groupIndex}
             data-bottom-terminal-group-block="true"
@@ -182,7 +181,7 @@ export default function ProjectTerminalSidebar({
                   <ProjectTab
                     key={row.slotId}
                     row={row}
-                    workspaceId={workspaceId}
+                    workspaceId={scopeId}
                     active={active}
                     isFirst={rowIndex === 0}
                     isLast={rowIndex === groupRows.length - 1}

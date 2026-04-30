@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useRuntimeState } from "@/hooks/use-desktop-view";
+import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import DotGridLoader from "@/components/dot-grid-loader";
 import {
@@ -11,36 +11,42 @@ import {
   SETTINGS_PREVIEW_RUNTIME_ID,
   isSettingsPreviewSlot,
 } from "@/lib/terminal/settings-preview";
-import type { ClientMessage, DaemonMessage, SessionState } from "@/lib/shared/types";
+import type {
+  RuntimeCommand,
+  RuntimeEventEnvelope,
+  SessionState,
+  SlotState,
+} from "@/lib/shared/types";
 
 const SETTINGS_PREVIEW_HEIGHT_CLASS = "h-[320px]";
+const EMPTY_SLOTS: readonly SlotState[] = [];
 
 const settingsPreviewState: {
-  runtimeId: string | null;
+  scopeId: string | null;
   slotId: string | null;
   sessionDefId: string | null;
   sessionId: string | null;
-  initializing: Promise<{ runtimeId: string; sessionId: string }> | null;
+  initializing: Promise<{ scopeId: string; sessionId: string }> | null;
 } = {
-  runtimeId: null,
+  scopeId: null,
   slotId: null,
   sessionDefId: null,
   sessionId: null,
   initializing: null,
 };
 
-async function sendRuntimeMessage(workspaceId: string, message: ClientMessage) {
-  await invoke("daemon_send", {
-    workspaceId,
+async function sendRuntimeMessage(scopeId: string, message: RuntimeCommand) {
+  await invoke("scope_send", {
+    scopeId,
     message: JSON.stringify(message),
   });
 }
 
 function ensureSettingsPreviewTerminal(workspacePath: string) {
-  const workspaceId = SETTINGS_PREVIEW_RUNTIME_ID;
-  if (settingsPreviewState.runtimeId === workspaceId && settingsPreviewState.sessionId) {
+  const scopeId = SETTINGS_PREVIEW_RUNTIME_ID;
+  if (settingsPreviewState.scopeId === scopeId && settingsPreviewState.sessionId) {
     return Promise.resolve({
-      runtimeId: workspaceId,
+      scopeId,
       sessionId: settingsPreviewState.sessionId,
     });
   }
@@ -51,37 +57,14 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
 
   const previewSlotId = `${SETTINGS_PREVIEW_SLOT_ID_PREFIX}${crypto.randomUUID()}`;
   const previewSessionDefId = `${SETTINGS_PREVIEW_SESSION_DEF_ID_PREFIX}${crypto.randomUUID()}`;
-  settingsPreviewState.runtimeId = workspaceId;
+  settingsPreviewState.scopeId = scopeId;
   settingsPreviewState.slotId = previewSlotId;
   settingsPreviewState.sessionDefId = previewSessionDefId;
 
   const init = (async () => {
-    const cleanup: {
-      connectionUnlisten: UnlistenFn | null;
-      sessionUnlisten: UnlistenFn | null;
-    } = {
-      connectionUnlisten: null,
-      sessionUnlisten: null,
-    };
+    const cleanup: { sessionUnlisten: UnlistenFn | null } = { sessionUnlisten: null };
 
     try {
-      const waitForConnection = new Promise<void>(async (resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("connection timeout")), 8000);
-
-        cleanup.connectionUnlisten = await listen<string>("daemon-connection", (event) => {
-          try {
-            const payload = JSON.parse(event.payload) as {
-              workspaceId?: string;
-              state?: string;
-            };
-            if (payload.workspaceId !== workspaceId) return;
-            if (payload.state !== "connected") return;
-            clearTimeout(timeout);
-            resolve();
-          } catch {}
-        });
-      });
-
       const waitForSession = new Promise<string>(async (resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("session timeout")), 8000);
 
@@ -92,14 +75,10 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
           resolve(session.id);
         };
 
-        cleanup.sessionUnlisten = await listen<string>("daemon-message", (event) => {
+        cleanup.sessionUnlisten = await listen<RuntimeEventEnvelope>("runtime-event", (event) => {
           try {
-            const payload =
-              typeof event.payload === "string"
-                ? (JSON.parse(event.payload) as DaemonMessage)
-                : (event.payload as DaemonMessage);
-
-            if (payload.workspaceId !== workspaceId) return;
+            const payload = event.payload;
+            if (payload.runtimeId !== scopeId) return;
 
             if (payload.type === "session_opened") {
               finish(payload.session);
@@ -120,14 +99,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
       const shellPath =
         (window as typeof window & { __PANDORA_SHELL__?: string }).__PANDORA_SHELL__ ?? "/bin/zsh";
 
-      await invoke("start_workspace_runtime", {
-        workspaceId,
-        workspacePath,
-        defaultCwd: workspacePath,
-      });
-      await waitForConnection;
-
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(scopeId, {
         type: "create_slot",
         slot: {
           id: previewSlotId,
@@ -142,7 +114,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
         },
       });
 
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(scopeId, {
         type: "create_session_def",
         session: {
           id: previewSessionDefId,
@@ -150,10 +122,10 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
           kind: "terminal",
           name: SETTINGS_PREVIEW_NAME,
           command: `exec ${shellPath} -i`,
-          cwd: null,
+          cwd: workspacePath,
           port: null,
           envOverrides: {
-            PANDORA_RUNTIME_ID: workspaceId,
+            PANDORA_RUNTIME_ID: scopeId,
             PANDORA_SLOT_ID: previewSlotId,
           },
           restartPolicy: "manual",
@@ -162,7 +134,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
         },
       });
 
-      await sendRuntimeMessage(workspaceId, {
+      await sendRuntimeMessage(scopeId, {
         type: "open_session_instance",
         sessionDefID: previewSessionDefId,
       });
@@ -170,14 +142,9 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
       const sessionId = await waitForSession;
       settingsPreviewState.sessionId = sessionId;
 
-      return { runtimeId: workspaceId, sessionId };
+      return { scopeId, sessionId };
     } finally {
-      if (cleanup.connectionUnlisten) {
-        await cleanup.connectionUnlisten();
-      }
-      if (cleanup.sessionUnlisten) {
-        await cleanup.sessionUnlisten();
-      }
+      if (cleanup.sessionUnlisten) cleanup.sessionUnlisten();
     }
   })();
 
@@ -188,7 +155,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
     },
     (error) => {
       settingsPreviewState.initializing = null;
-      settingsPreviewState.runtimeId = null;
+      settingsPreviewState.scopeId = null;
       settingsPreviewState.slotId = null;
       settingsPreviewState.sessionDefId = null;
       settingsPreviewState.sessionId = null;
@@ -212,12 +179,11 @@ export default function TerminalFontPreview({
 }: TerminalFontPreviewProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [previewRuntimeId, setPreviewRuntimeId] = useState<string | null>(
-    settingsPreviewState.runtimeId,
+    settingsPreviewState.scopeId,
   );
   const [error, setError] = useState(false);
-  const activeWorkspaceSlots = useRuntimeState(
-    activeWorkspaceId ?? "",
-    (runtime) => runtime?.slots ?? [],
+  const activeWorkspaceSlots = useTerminalScopeStore(
+    (s) => s.byScopeId[activeWorkspaceId ?? ""]?.slots ?? EMPTY_SLOTS,
   );
 
   useEffect(() => {
@@ -230,20 +196,20 @@ export default function TerminalFontPreview({
     const leakedPreviewSlots = activeWorkspaceSlots.filter((slot) => isSettingsPreviewSlot(slot));
     if (leakedPreviewSlots.length === 0) return;
 
-    void Promise.all(
+    Promise.all(
       leakedPreviewSlots.map((slot) =>
         sendRuntimeMessage(activeWorkspaceId, {
           type: "remove_slot",
           slotID: slot.id,
         }).catch(() => undefined),
       ),
-    );
+    ).catch((err) => console.warn("Failed to remove leaked preview slots:", err));
   }, [activeWorkspaceId, activeWorkspaceSlots]);
 
   useEffect(() => {
-    if (settingsPreviewState.sessionId && settingsPreviewState.runtimeId) {
+    if (settingsPreviewState.sessionId && settingsPreviewState.scopeId) {
       setSessionId(settingsPreviewState.sessionId);
-      setPreviewRuntimeId(settingsPreviewState.runtimeId);
+      setPreviewRuntimeId(settingsPreviewState.scopeId);
       setError(false);
       return;
     }
@@ -256,7 +222,7 @@ export default function TerminalFontPreview({
       try {
         const preview = await ensureSettingsPreviewTerminal(activeWorkspacePath);
         if (!cancelled) {
-          setPreviewRuntimeId(preview.runtimeId);
+          setPreviewRuntimeId(preview.scopeId);
           setSessionId(preview.sessionId);
           setError(false);
         }
@@ -268,7 +234,10 @@ export default function TerminalFontPreview({
       }
     };
 
-    void startPreview();
+    startPreview().catch((err) => {
+      console.error("[settings-terminal] unexpected startup error:", err);
+      if (!cancelled) setError(true);
+    });
 
     return () => {
       cancelled = true;
