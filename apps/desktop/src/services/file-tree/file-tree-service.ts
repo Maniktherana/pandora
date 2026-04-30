@@ -9,12 +9,6 @@ import { fileTreeExpansionCommitter } from "@/services/file-tree/file-tree-expan
 
 const subscribedScopeIds = new Set<string>();
 
-/**
- * Set boot loading state, load persisted expansion, and subscribe the scope.
- * Navigation does NOT wait for this — it fires from workspace startup and
- * resolves in the background.  Always resolves — errors fall back to
- * subscribing without paths.
- */
 export async function fileTreeInitExpansion(scopeId: string): Promise<void> {
   const current = useFileTreeStore.getState().byScopeId[scopeId];
   if (current?.bootStatus === "loaded" && subscribedScopeIds.has(scopeId)) {
@@ -33,34 +27,22 @@ export async function fileTreeInitExpansion(scopeId: string): Promise<void> {
       useFileTreeStore.getState().setExpandedPaths(scopeId, new Set(paths));
     }
     subscribedScopeIds.add(scopeId);
-    void client.fileTreeSubscribe(scopeId, paths).catch(() => {
+    client.fileTreeSubscribe(scopeId, paths).catch(() => {
       subscribedScopeIds.delete(scopeId);
     });
   } catch {
     subscribedScopeIds.add(scopeId);
-    void client.fileTreeSubscribe(scopeId).catch(() => {
+    client.fileTreeSubscribe(scopeId).catch(() => {
       subscribedScopeIds.delete(scopeId);
     });
   }
 }
 
-/**
- * Clean service object for all file tree user actions.
- *
- * setExpanded / setExpandedPaths update the store synchronously, then
- * schedule FileTreeExpansionCommitter which trailing-debounces the single
- * persist + IPC write.  No IPC or persistence in the click path.
- */
 export const fileTreeService = {
   ensureSubscribed: fileTreeInitExpansion,
 
   setExpanded(scopeId: string, relPath: string, expanded: boolean): void {
-    const current =
-      useFileTreeStore.getState().byScopeId[scopeId]?.expandedPaths ?? new Set<string>();
-    const next = new Set(current);
-    if (expanded) next.add(relPath);
-    else next.delete(relPath);
-    useFileTreeStore.getState().setExpandedPaths(scopeId, next);
+    useFileTreeStore.getState().toggleExpanded(scopeId, relPath, expanded);
     fileTreeExpansionCommitter.schedule(scopeId);
   },
 
@@ -141,7 +123,6 @@ export const fileTreeService = {
   },
 };
 
-// Named function re-exports for external callers.
 export function fileTreeRefresh(scopeId: string, path?: string): void {
   fileTreeService.refresh(scopeId, path);
 }

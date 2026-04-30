@@ -1,15 +1,6 @@
 import { create } from "zustand";
 import type { HeaderBranchContext } from "@/lib/shared/types";
 
-/**
- * Narrow git store — holds only branch-context data that has no natural home
- * in React Query (it is fetched lazily on demand rather than pushed by the
- * IPC subscription stream).
- *
- * All SCM snapshot/status/decoration data has been migrated to React Query.
- * See git-queries.ts for the authoritative data path.
- */
-
 export interface GitBranchContextState {
   branchContext: HeaderBranchContext | null;
   branchContextLoading: boolean;
@@ -59,3 +50,11 @@ export const useGitStore = create<GitStoreState>((set) => ({
       return { byScopeId: next };
     }),
 }));
+
+export function useBranchContext(scopeId: string) {
+  const branchContext = useGitStore((s) => s.byScopeId[scopeId]?.branchContext ?? null);
+  const branchContextLoading = useGitStore(
+    (s) => s.byScopeId[scopeId]?.branchContextLoading ?? false,
+  );
+  return { branchContext, branchContextLoading };
+}

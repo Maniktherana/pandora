@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { fileTreeService } from "@/services/file-tree/file-tree-service";
 import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
 
@@ -103,18 +103,36 @@ export function useFileTreeController(scopeId: string) {
     [scopeId],
   );
 
-  return {
-    setPathExpanded,
-    setAllExpandedPaths,
-    refresh,
-    createFile,
-    createDirectory,
-    rename,
-    deleteEntry,
-    move,
-    copy,
-    importFiles,
-    readTextFile,
-    writeTextFile,
-  };
+  // Stable object identity: all callbacks are already useCallback([scopeId]),
+  // so this object only changes when scopeId changes — never on expand/collapse.
+  return useMemo(
+    () => ({
+      setPathExpanded,
+      setAllExpandedPaths,
+      refresh,
+      createFile,
+      createDirectory,
+      rename,
+      deleteEntry,
+      move,
+      copy,
+      importFiles,
+      readTextFile,
+      writeTextFile,
+    }),
+    [
+      setPathExpanded,
+      setAllExpandedPaths,
+      refresh,
+      createFile,
+      createDirectory,
+      rename,
+      deleteEntry,
+      move,
+      copy,
+      importFiles,
+      readTextFile,
+      writeTextFile,
+    ],
+  );
 }

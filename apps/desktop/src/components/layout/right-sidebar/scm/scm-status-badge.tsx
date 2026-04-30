@@ -1,4 +1,4 @@
-import { cn } from "@/lib/shared/utils";
+import { clsx } from "clsx";
 import type { TreeGitTone } from "@/services/git/git-types";
 import { gitToneTextClass } from "@/services/git/git-utils";
 
@@ -21,7 +21,7 @@ export function ScmStatusBadge({
     return (
       <span
         aria-hidden
-        className={cn(
+        className={clsx(
           "size-1.5 shrink-0 rounded-full bg-current",
           gitToneTextClass(tone, dimmed),
           className,
@@ -32,7 +32,7 @@ export function ScmStatusBadge({
 
   return (
     <span
-      className={cn(
+      className={clsx(
         "shrink-0 font-mono text-xs font-semibold leading-none",
         gitToneTextClass(tone, dimmed),
         className,

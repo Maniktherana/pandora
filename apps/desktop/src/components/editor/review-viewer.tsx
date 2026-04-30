@@ -28,13 +28,19 @@ import {
   DIFF_CONTENTS_STALE_TIME_MS,
   diffContentsQueryKey,
   fetchDiffContents,
+  type DiffContentsData,
 } from "@/components/editor/diff-data";
-import DiffViewer from "@/components/editor/diff-viewer";
+import {
+  parsedDiffQueryKey,
+  parseDiffInWorker,
+} from "@/services/diff/diff-worker-client";
+import { buildRowModel, reviewStatsKey, type ReviewRowData } from "@/components/editor/review-row-model";
+import DiffViewer, { type DiffViewerStats } from "@/components/editor/diff-viewer";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { getPierreSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/pierre-pandora";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import { decorationForGitEntry } from "@/services/git/git-utils";
+
 import type {
   GitLineStats,
   TreeGitDecoration,
@@ -54,8 +60,8 @@ import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
 } from "@/components/layout/right-sidebar/scm/target-branch";
-import { useScmStatusQuery, scmStatusQueryKey } from "@/services/git/git-queries";
-import { useBranchContext } from "@/services/git/use-git";
+import { useScmStatusCached, scmStatusQueryKey } from "@/services/git/git-queries";
+import { useBranchContext } from "@/services/git/git-store";
 import {
   gitRefresh,
   gitStage,
@@ -84,6 +90,7 @@ const MAX_ESTIMATED_DIFF_BODY_HEIGHT = 2200;
 type ReviewViewerProps = {
   workspaceId: string;
   workspaceRoot: string;
+  isActive?: boolean;
 };
 
 type DiffLayout = "split" | "unified";
@@ -132,10 +139,6 @@ function sourceForMode(mode: ReviewMode): DiffSource | null {
   if (mode === "staged") return "staged";
   if (mode === "unstaged") return "working";
   return null;
-}
-
-function statsKey(path: string, source: DiffSource) {
-  return `${source}:${path}`;
 }
 
 function splitDisplayPath(path: string): { directory: string; fileName: string } {
@@ -211,7 +214,7 @@ type ReviewFileEntryProps = {
 };
 
 type ReviewDiffBodyProps = {
-  entry: ScmEntry;
+  path: string;
   source: DiffSource;
   stats: GitLineStats | undefined;
   workspaceId: string;
@@ -224,7 +227,7 @@ type ReviewDiffBodyProps = {
 };
 
 const ReviewDiffBody = memo(function ReviewDiffBody({
-  entry,
+  path,
   source,
   stats,
   workspaceId,
@@ -269,12 +272,26 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
     return () => observer.disconnect();
   }, [shouldMountDiff]);
 
+  const handleStatsChange = useCallback(
+    (next: DiffViewerStats) => {
+      if (!next.loading && !next.error) {
+        onStatsChange(path, source, { added: next.additions, removed: next.deletions });
+      }
+    },
+    [path, source, onStatsChange],
+  );
+
+  const readWorkingCopy = useCallback(
+    (p: string) => editorReadWorkingCopyText(workspaceId, p),
+    [workspaceId],
+  );
+
   return (
     <div ref={bodyRef} className="border-t border-[var(--theme-code-surface-separator)]">
       {shouldMountDiff ? (
         <DiffViewer
           workspaceRoot={workspaceRoot}
-          relativePath={entry.path}
+          relativePath={path}
           source={source}
           showHeader={false}
           fillHeight={false}
@@ -283,15 +300,8 @@ const ReviewDiffBody = memo(function ReviewDiffBody({
           reloadKey={reloadKey}
           targetBranch={targetBranch}
           metrics={REVIEW_DIFF_METRICS}
-          readWorkingCopy={(path) => editorReadWorkingCopyText(workspaceId, path)}
-          onStatsChange={(next) => {
-            if (!next.loading && !next.error) {
-              onStatsChange(entry.path, source, {
-                added: next.additions,
-                removed: next.deletions,
-              });
-            }
-          }}
+          readWorkingCopy={readWorkingCopy}
+          onStatsChange={handleStatsChange}
         />
       ) : (
         <div
@@ -419,7 +429,7 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
 
       {isOpen ? (
         <ReviewDiffBody
-          entry={entry}
+          path={entry.path}
           source={source}
           stats={stats}
           workspaceId={workspaceId}
@@ -437,12 +447,12 @@ const ReviewFileEntry = memo(function ReviewFileEntry({
 
 const EMPTY_SCM_ENTRIES: ScmEntry[] = [];
 
-function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
+function ReviewViewer({ workspaceId, workspaceRoot, isActive = true }: ReviewViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { openFile } = useEditorActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const { data: statusData, isFetching } = useScmStatusQuery(workspaceId);
+  const statusData = useScmStatusCached(workspaceId);
   const { branchContext } = useBranchContext(workspaceId);
   const [diffLayout, setDiffLayout] = useState<DiffLayout>(loadDiffLayout);
   const [wrapLines, setWrapLines] = useState(loadWrapLines);
@@ -483,37 +493,32 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     }
   }, [mode, statusData?.stagedEntries, statusData?.unstagedEntries]);
 
+  const prefetchKey = useMemo(
+    () => filteredEntries.map((e) => e.path).join("\0"),
+    [filteredEntries],
+  );
+
   const unstagedCount = statusData?.unstagedEntries.length ?? 0;
   const stagedCount = statusData?.stagedEntries.length ?? 0;
 
   const activeSource = sourceForMode(mode);
-  const prefetchPathKey = useMemo(
-    () => filteredEntries.map((entry) => entry.path).join("\0"),
-    [filteredEntries],
-  );
-  const statsByKey = useMemo((): Record<string, GitLineStats> => {
-    if (!activeSource) return loadedStatsByKey;
-    const next: Record<string, GitLineStats> = {};
-    for (const entry of filteredEntries) {
-      next[statsKey(entry.path, activeSource)] = entry.lineStats;
-    }
-    return { ...next, ...loadedStatsByKey };
-  }, [activeSource, filteredEntries, loadedStatsByKey]);
-  const decorationByPath = useMemo(
-    () =>
-      Object.fromEntries(
-        filteredEntries.map((entry) => [entry.path, decorationForGitEntry(entry)]),
-      ),
-    [filteredEntries],
+  const rowModel = useMemo(
+    (): ReviewRowData[] =>
+      activeSource ? buildRowModel(filteredEntries, activeSource, loadedStatsByKey) : [],
+    [activeSource, filteredEntries, loadedStatsByKey],
   );
 
   useEffect(() => {
+    if (filteredEntries.length === 0) return;
     setOpenByPath((current) => {
-      const next: Record<string, boolean> = {};
+      let additions: Record<string, boolean> | null = null;
       for (const entry of filteredEntries) {
-        next[entry.path] = current[entry.path] ?? true;
+        if (!(entry.path in current)) {
+          additions ??= {};
+          additions[entry.path] = true;
+        }
       }
-      return next;
+      return additions ? { ...current, ...additions } : current;
     });
   }, [filteredEntries]);
 
@@ -523,7 +528,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
 
   const handleDiffStatsChange = useCallback(
     (path: string, source: DiffSource, stats: GitLineStats) => {
-      const key = statsKey(path, source);
+      const key = reviewStatsKey(path, source);
       setLoadedStatsByKey((current) => {
         const previous = current[key];
         if (previous?.added === stats.added && previous?.removed === stats.removed) {
@@ -535,23 +540,38 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
     [],
   );
 
-  // Named helper so callers can attach explicit .catch() instead of suppressing promises.
-  // Declared before effects that depend on it so TypeScript sees it in scope.
-  const prefetchEntry = useCallback(
-    (path: string, source: DiffSource) =>
-      queryClient.prefetchQuery({
-        queryKey: diffContentsQueryKey(workspaceRoot, path, source, targetBranch),
+  const prefetchTextAndParse = useCallback(
+    async (path: string, source: DiffSource) => {
+      const textQueryKey = diffContentsQueryKey(workspaceRoot, path, source, targetBranch);
+      await queryClient.prefetchQuery({
+        queryKey: textQueryKey,
         queryFn: () =>
           fetchDiffContents(workspaceRoot, path, source, targetBranch, (p) =>
             editorReadWorkingCopyText(workspaceId, p),
           ),
         staleTime: DIFF_CONTENTS_STALE_TIME_MS,
-      }),
+      });
+      const data = queryClient.getQueryData<DiffContentsData>(textQueryKey);
+      if (!data || data.original === data.modified) return;
+      await queryClient.prefetchQuery({
+        queryKey: parsedDiffQueryKey(workspaceRoot, source, path, targetBranch, data.originalHash, data.modifiedHash),
+        queryFn: () =>
+          parseDiffInWorker({
+            workspaceRoot,
+            relativePath: path,
+            source,
+            targetBranch,
+            original: data.original,
+            modified: data.modified,
+          }),
+        staleTime: Infinity,
+      });
+    },
     [queryClient, workspaceRoot, targetBranch, workspaceId],
   );
 
   useEffect(() => {
-    if (!reviewNavigationRequest) return;
+    if (!isActive || !reviewNavigationRequest) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     setMode((current) => (current === requestedMode ? current : requestedMode));
@@ -561,15 +581,15 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         : { ...current, [reviewNavigationRequest.path]: true },
     );
 
-    // prefetchEntry captures queryClient/workspaceRoot/targetBranch/workspaceId —
-    // no need to list them separately here.
-    prefetchEntry(reviewNavigationRequest.path, reviewNavigationRequest.source).catch((error) => {
-      console.warn("[ReviewViewer] navigation prefetch failed:", error);
-    });
-  }, [prefetchEntry, reviewNavigationRequest]);
+    prefetchTextAndParse(reviewNavigationRequest.path, reviewNavigationRequest.source).catch(
+      (error) => {
+        console.warn("[ReviewViewer] navigation prefetch failed:", error);
+      },
+    );
+  }, [isActive, prefetchTextAndParse, reviewNavigationRequest]);
 
   useEffect(() => {
-    if (!reviewNavigationRequest || statusData == null) return;
+    if (!isActive || !reviewNavigationRequest || statusData == null) return;
 
     const requestedMode = reviewNavigationRequest.source === "staged" ? "staged" : "unstaged";
     if (mode !== requestedMode) return;
@@ -607,6 +627,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       window.cancelAnimationFrame(frameId);
     };
   }, [
+    isActive,
     clearReviewNavigation,
     statusData,
     filteredEntries,
@@ -616,11 +637,10 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   ]);
 
   useEffect(() => {
-    if (!activeSource || prefetchPathKey.length === 0) return;
+    if (!isActive || !activeSource || prefetchKey.length === 0) return;
 
     let cancelled = false;
-    // Cheap array derivation — no expensive work here.
-    const queue = prefetchPathKey.split("\0");
+    const queue = prefetchKey.split("\0");
     const maxConcurrent = Math.min(4, queue.length);
 
     const schedule =
@@ -642,7 +662,34 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
         if (cancelled) return;
         const queryKey = diffContentsQueryKey(workspaceRoot, nextPath, activeSource, targetBranch);
         const queryState = queryClient.getQueryState(queryKey);
-        if (queryState?.data != null && !queryState.isInvalidated) {
+        const cachedData = queryState?.data as DiffContentsData | undefined;
+        if (cachedData != null && !queryState?.isInvalidated) {
+          if (cachedData.original !== cachedData.modified) {
+            queryClient
+              .prefetchQuery({
+                queryKey: parsedDiffQueryKey(
+                  workspaceRoot,
+                  activeSource,
+                  nextPath,
+                  targetBranch,
+                  cachedData.originalHash,
+                  cachedData.modifiedHash,
+                ),
+                queryFn: () =>
+                  parseDiffInWorker({
+                    workspaceRoot,
+                    relativePath: nextPath,
+                    source: activeSource,
+                    targetBranch,
+                    original: cachedData.original,
+                    modified: cachedData.modified,
+                  }),
+                staleTime: Infinity,
+              })
+              .catch((error) => {
+                console.warn("[ReviewViewer] idle parse prefetch failed:", error);
+              });
+          }
           runWorker();
           return;
         }
@@ -658,6 +705,34 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
                 readWorkingCopy,
               ),
             staleTime: DIFF_CONTENTS_STALE_TIME_MS,
+          })
+          .then(() => {
+            const data = queryClient.getQueryData<DiffContentsData>(queryKey);
+            if (!data || data.original === data.modified) return;
+            queryClient
+              .prefetchQuery({
+                queryKey: parsedDiffQueryKey(
+                  workspaceRoot,
+                  activeSource,
+                  nextPath,
+                  targetBranch,
+                  data.originalHash,
+                  data.modifiedHash,
+                ),
+                queryFn: () =>
+                  parseDiffInWorker({
+                    workspaceRoot,
+                    relativePath: nextPath,
+                    source: activeSource,
+                    targetBranch,
+                    original: data.original,
+                    modified: data.modified,
+                  }),
+                staleTime: Infinity,
+              })
+              .catch((error) => {
+                console.warn("[ReviewViewer] idle parse prefetch failed:", error);
+              });
           })
           .catch((error) => {
             console.warn("[ReviewViewer] idle prefetch failed:", error);
@@ -683,8 +758,9 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       window.clearTimeout(startTimeout);
     };
   }, [
+    isActive,
     activeSource,
-    prefetchPathKey,
+    prefetchKey,
     queryClient,
     reloadKey,
     targetBranch,
@@ -693,8 +769,7 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
   ]);
 
   const allCollapsed =
-    filteredEntries.length > 0 &&
-    filteredEntries.every((entry) => openByPath[entry.path] === false);
+    rowModel.length > 0 && rowModel.every((row) => openByPath[row.entry.path] === false);
 
   const refreshAll = useCallback(async () => {
     gitRefresh(workspaceId);
@@ -753,11 +828,11 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
       // Synchronous UI update — expand/collapse is direct user intent, no deferral needed.
       setOpenByPath((current) => ({ ...current, [path]: nextOpen }));
       if (!nextOpen || !activeSource) return;
-      prefetchEntry(path, activeSource).catch((error) => {
+      prefetchTextAndParse(path, activeSource).catch((error) => {
         console.warn("[ReviewViewer] entry prefetch failed:", error);
       });
     },
-    [activeSource, prefetchEntry],
+    [activeSource, prefetchTextAndParse],
   );
 
   const handleOpenFile = useCallback(
@@ -880,18 +955,17 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
               className="text-[var(--theme-text-muted)] hover:text-[var(--theme-text)]"
               title="Refresh review"
               onClick={handleRefreshClick}
-              disabled={isFetching}
             >
               <HugeiconsIcon
                 icon={Refresh01Icon}
                 strokeWidth={1.5}
-                className={cn("size-3.5", isFetching && "animate-spin")}
+                className="size-3.5"
               />
             </Button>
           </div>
         </div>
 
-        {statusData == null || filteredEntries.length === 0 ? (
+        {statusData == null || rowModel.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
             {statusData == null ? (
               <div className="px-2 py-3 text-sm text-[var(--theme-text-subtle)]">
@@ -910,36 +984,31 @@ function ReviewViewer({ workspaceId, workspaceRoot }: ReviewViewerProps) {
             className="pandora-review-scroll-root min-h-0 flex-1 overflow-auto"
             contentClassName="bg-[var(--theme-code-surface-base)]"
           >
-            {filteredEntries.map((entry, index) => {
-              const source = activeSource!;
-              const statKey = statsKey(entry.path, source);
-
-              return (
-                <ReviewFileEntry
-                  key={statKey}
-                  entry={entry}
-                  source={source}
-                  stats={statsByKey[statKey]}
-                  decoration={decorationByPath[entry.path]}
-                  isOpen={openByPath[entry.path] ?? true}
-                  canStage={mode === "unstaged" && hasUnstaged(entry)}
-                  busy={busyPath === entry.path}
-                  mode={mode}
-                  workspaceId={workspaceId}
-                  workspaceRoot={workspaceRoot}
-                  diffLayout={diffLayout}
-                  wrapLines={wrapLines}
-                  reloadKey={reloadKey}
-                  targetBranch={targetBranch}
-                  isFirst={index === 0}
-                  onToggle={handleToggleEntry}
-                  onOpenFile={handleOpenFile}
-                  onRevert={handleRevert}
-                  onStage={handleStage}
-                  onStatsChange={handleDiffStatsChange}
-                />
-              );
-            })}
+            {rowModel.map((row, index) => (
+              <ReviewFileEntry
+                key={row.statsKey}
+                entry={row.entry}
+                source={activeSource!}
+                stats={row.stats}
+                decoration={row.decoration}
+                isOpen={openByPath[row.entry.path] ?? true}
+                canStage={mode === "unstaged" && hasUnstaged(row.entry)}
+                busy={busyPath === row.entry.path}
+                mode={mode}
+                workspaceId={workspaceId}
+                workspaceRoot={workspaceRoot}
+                diffLayout={diffLayout}
+                wrapLines={wrapLines}
+                reloadKey={reloadKey}
+                targetBranch={targetBranch}
+                isFirst={index === 0}
+                onToggle={handleToggleEntry}
+                onOpenFile={handleOpenFile}
+                onRevert={handleRevert}
+                onStage={handleStage}
+                onStatsChange={handleDiffStatsChange}
+              />
+            ))}
           </Virtualizer>
         )}
     </div>

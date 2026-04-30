@@ -3,10 +3,13 @@ import {
   gitReadBlob,
   gitReadCompareBlob,
 } from "@/services/git/git-api";
+import { hashDiffText } from "@/services/diff/diff-worker-client";
 
 export type DiffContentsData = {
   original: string;
   modified: string;
+  originalHash: string;
+  modifiedHash: string;
 };
 
 export const DIFF_CONTENTS_STALE_TIME_MS = 2 * 60_000;
@@ -29,12 +32,14 @@ export async function fetchDiffContents(
   readWorkingCopy?: (relativePath: string) => Promise<string | null>,
 ): Promise<DiffContentsData> {
   if (source === "branch") {
-    if (!targetBranch) return { original: "", modified: "" };
+    if (!targetBranch) {
+      return { original: "", modified: "", originalHash: hashDiffText(""), modifiedHash: hashDiffText("") };
+    }
     const [original, modified] = await Promise.all([
       gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "base"),
       gitReadCompareBlob(workspaceRoot, relativePath, targetBranch, "head"),
     ]);
-    return { original, modified };
+    return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
   }
 
   if (source === "staged") {
@@ -42,7 +47,7 @@ export async function fetchDiffContents(
       gitReadBlob(workspaceRoot, relativePath, "head"),
       gitReadBlob(workspaceRoot, relativePath, "index"),
     ]);
-    return { original, modified };
+    return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
   }
 
   const original = await gitReadBlob(workspaceRoot, relativePath, "head");
@@ -54,5 +59,5 @@ export async function fetchDiffContents(
       modified = "";
     }
   }
-  return { original, modified };
+  return { original, modified, originalHash: hashDiffText(original), modifiedHash: hashDiffText(modified) };
 }

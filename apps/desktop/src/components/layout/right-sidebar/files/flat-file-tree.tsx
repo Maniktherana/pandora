@@ -1,81 +1,341 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useRef, type RefObject } from "react";
+import { clsx } from "clsx";
+import { ChevronRight } from "lucide-react";
 import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
 import { fileTreeService } from "@/services/file-tree/file-tree-service";
-import type { FileTreeVisibleRow } from "@/services/file-tree/file-tree-types";
+import { joinAbsolutePath } from "@/lib/shared/utils";
+import { gitToneTextClass } from "@/services/git/git-utils";
+import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
+import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
+import type { FileTreeEntry } from "@/lib/shared/types";
 import type { GitDecorationIndex, TreeGitDecoration } from "@/services/git/git-types";
 import type {
   FileTreeRowHandle,
   PendingCreateState,
   PendingRenameState,
 } from "./files.types";
-import { FileTreeVisibleRowView } from "./file-tree-visible-row";
+import {
+  TREE_ROW_HEIGHT_PX,
+  TREE_ROW_INDENT_PX,
+  TREE_ROW_PADDING_LEFT_PX,
+} from "./files.types";
 import { TreeCreateInput } from "./tree-create-input";
 import { TreeRenameInput } from "./tree-rename-input";
 import DotGridLoader from "@/components/dot-grid-loader";
 
-const EMPTY_ROWS: FileTreeVisibleRow[] = [];
 const EMPTY_DECORATION: TreeGitDecoration = { badge: null, tone: null, dimmed: false };
 const IGNORED_DECORATION: TreeGitDecoration = { badge: null, tone: "ignored", dimmed: true };
 
-// ---------------------------------------------------------------------------
-// Display item list — merges pending create/rename into the visible row list.
-// ---------------------------------------------------------------------------
+type SharedTreeProps = {
+  workspaceId: string;
+  workspaceRoot: string;
+  activePath: string | null;
+  decorationIndexRef: RefObject<GitDecorationIndex>;
+  targetDirectory: string | null;
+  highlightedLeafDirectory: string | null;
+  isHoverSuppressed: boolean;
+  pendingCreate: PendingCreateState;
+  pendingRename: PendingRenameState;
+  onOpen: (path: string) => void;
+  onToggleExpand: (path: string, expanded: boolean) => void;
+  onPointerDown: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
+  onClickCapture: (event: React.MouseEvent) => void;
+  onSelect?: ((handle: FileTreeRowHandle) => void) | undefined;
+  onConfirmCreate: (name: string, kind: "file" | "directory", parentRelPath: string) => void;
+  onCancelCreate: () => void;
+  onConfirmRename: (sourceRelPath: string, nextName: string) => void;
+  onCancelRename: () => void;
+};
 
-type DisplayItem =
-  | { type: "row"; row: FileTreeVisibleRow }
-  | { type: "create-input"; parentRelPath: string; kind: "file" | "directory"; depth: number }
-  | { type: "rename-input"; row: FileTreeVisibleRow; initialName: string };
+const TreeFileRow = React.memo(function TreeFileRow({
+  path,
+  parentPath,
+  entry,
+  depth,
+  shared,
+}: {
+  path: string;
+  parentPath: string;
+  entry: FileTreeEntry;
+  depth: number;
+  shared: SharedTreeProps;
+}) {
+  const isActive = path === shared.activePath;
+  const idx = shared.decorationIndexRef.current;
+  const decoration = entry.isIgnored
+    ? IGNORED_DECORATION
+    : idx.byPath[path] ?? EMPTY_DECORATION;
 
-function buildDisplayItems(
-  rows: FileTreeVisibleRow[],
-  pendingCreate: PendingCreateState,
-  pendingRename: PendingRenameState,
-): DisplayItem[] {
-  if (!pendingCreate && !pendingRename) {
-    return rows.map((row) => ({ type: "row", row }));
+  const paddingLeft = TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX;
+  const absolutePath = joinAbsolutePath(shared.workspaceRoot, path);
+
+  const handle: FileTreeRowHandle = {
+    kind: "file",
+    relPath: path,
+    parentRelPath: parentPath,
+    label: entry.name,
+    absolutePath,
+  };
+
+  const isHighlightedLeaf =
+    shared.highlightedLeafDirectory !== null &&
+    parentPath === shared.highlightedLeafDirectory;
+
+  return (
+    <button
+      type="button"
+      data-tree-row-path={path}
+      data-tree-row-kind="file"
+      data-tree-parent-path={parentPath}
+      className={clsx(
+        "relative flex min-w-0 w-full select-none items-center gap-2 rounded-md py-0 pr-2 text-left text-xs font-normal",
+        !shared.isHoverSuppressed && "hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
+        gitToneTextClass(decoration.tone, decoration.dimmed),
+        decoration.dimmed && "opacity-55",
+        isActive && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
+        isHighlightedLeaf && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
+      )}
+      style={{ height: TREE_ROW_HEIGHT_PX, paddingLeft }}
+      onClick={() => { shared.onSelect?.(handle); shared.onOpen(path); }}
+      onPointerDown={(e) => shared.onPointerDown(e, handle)}
+      onClickCapture={shared.onClickCapture}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <FileTypeIcon path={path} kind="file" />
+      <span className="truncate">{entry.name}</span>
+      {decoration.badge ? (
+        <ScmStatusBadge text={decoration.badge} tone={decoration.tone} className="ml-auto" />
+      ) : null}
+    </button>
+  );
+});
+
+const TreeDirectoryRow = React.memo(function TreeDirectoryRow({
+  path,
+  parentPath,
+  entry,
+  depth,
+  isExpanded,
+  shared,
+}: {
+  path: string;
+  parentPath: string;
+  entry: FileTreeEntry;
+  depth: number;
+  isExpanded: boolean;
+  shared: SharedTreeProps;
+}) {
+  const isActive = path === shared.activePath;
+  const idx = shared.decorationIndexRef.current;
+  const decoration = entry.isIgnored
+    ? IGNORED_DECORATION
+    : idx.byDirectory[path] ?? EMPTY_DECORATION;
+
+  const paddingLeft = TREE_ROW_PADDING_LEFT_PX + depth * TREE_ROW_INDENT_PX;
+  const absolutePath = joinAbsolutePath(shared.workspaceRoot, path);
+
+  const handle: FileTreeRowHandle = {
+    kind: "directory",
+    relPath: path,
+    parentRelPath: parentPath,
+    label: entry.name,
+    absolutePath,
+  };
+
+  const isTargeted = shared.targetDirectory === path;
+
+  return (
+    <button
+      type="button"
+      data-tree-row-path={path}
+      data-tree-row-kind="directory"
+      data-tree-parent-path={parentPath}
+      className={clsx(
+        "relative flex min-w-0 w-full select-none items-center gap-2 rounded-md py-0 pr-2 text-left text-xs font-normal",
+        !shared.isHoverSuppressed && "hover:bg-[var(--theme-panel-hover)] hover:text-[var(--theme-text)]",
+        gitToneTextClass(decoration.tone, decoration.dimmed),
+        decoration.dimmed && "opacity-55",
+        "transition-none",
+        isActive && "bg-[var(--theme-panel-elevated)] text-[var(--theme-text)]",
+        isTargeted && "bg-[var(--theme-panel-hover)] text-[var(--theme-text)]",
+      )}
+      style={{ height: TREE_ROW_HEIGHT_PX, paddingLeft }}
+      onClick={() => { shared.onSelect?.(handle); shared.onToggleExpand(path, !isExpanded); }}
+      onPointerDown={(e) => shared.onPointerDown(e, handle)}
+      onClickCapture={shared.onClickCapture}
+      onContextMenu={(e) => e.preventDefault()}
+      aria-expanded={isExpanded}
+    >
+      <ChevronRight
+        className={clsx("size-4 shrink-0 transition-transform duration-100", {
+          "rotate-90": isExpanded,
+        })}
+      />
+      <FileTypeIcon path={path} kind="directory" expanded={isExpanded} />
+      <span className="truncate">{entry.name}</span>
+      {decoration.badge ? (
+        <ScmStatusBadge
+          text={decoration.badge}
+          tone={decoration.tone}
+          variant="dot"
+          className="ml-auto"
+        />
+      ) : null}
+    </button>
+  );
+});
+
+const TreeDirectoryEntry = React.memo(function TreeDirectoryEntry({
+  path,
+  parentPath,
+  entry,
+  depth,
+  shared,
+}: {
+  path: string;
+  parentPath: string;
+  entry: FileTreeEntry;
+  depth: number;
+  shared: SharedTreeProps;
+}) {
+  const isExpanded = useFileTreeStore(
+    (s) => s.byScopeId[shared.workspaceId]?.expandedPaths.has(path) ?? false,
+  );
+
+  const isBeingRenamed =
+    shared.pendingRename !== null && shared.pendingRename.relPath === path;
+
+  if (isBeingRenamed) {
+    return (
+      <TreeRenameInput
+        kind="directory"
+        depth={depth}
+        initialName={shared.pendingRename!.currentName}
+        sourceRelPath={path}
+        onConfirm={shared.onConfirmRename}
+        onCancel={shared.onCancelRename}
+      />
+    );
   }
 
-  const items: DisplayItem[] = [];
+  return (
+    <>
+      <TreeDirectoryRow
+        path={path}
+        parentPath={parentPath}
+        entry={entry}
+        depth={depth}
+        isExpanded={isExpanded}
+        shared={shared}
+      />
+      {isExpanded && (
+        <TreeDirectory
+          parentPath={path}
+          depth={depth + 1}
+          shared={shared}
+        />
+      )}
+    </>
+  );
+});
 
-  if (pendingCreate && pendingCreate.parentRelPath === "") {
-    items.push({
-      type: "create-input",
-      parentRelPath: "",
-      kind: pendingCreate.kind,
-      depth: 0,
-    });
+const TreeFileEntry = React.memo(function TreeFileEntry({
+  path,
+  parentPath,
+  entry,
+  depth,
+  shared,
+}: {
+  path: string;
+  parentPath: string;
+  entry: FileTreeEntry;
+  depth: number;
+  shared: SharedTreeProps;
+}) {
+  const isBeingRenamed =
+    shared.pendingRename !== null && shared.pendingRename.relPath === path;
+
+  if (isBeingRenamed) {
+    return (
+      <TreeRenameInput
+        kind="file"
+        depth={depth}
+        initialName={shared.pendingRename!.currentName}
+        sourceRelPath={path}
+        onConfirm={shared.onConfirmRename}
+        onCancel={shared.onCancelRename}
+      />
+    );
   }
 
-  for (const row of rows) {
-    if (pendingRename && pendingRename.relPath === row.path) {
-      items.push({ type: "rename-input", row, initialName: pendingRename.currentName });
-    } else {
-      items.push({ type: "row", row });
-    }
+  return (
+    <TreeFileRow
+      path={path}
+      parentPath={parentPath}
+      entry={entry}
+      depth={depth}
+      shared={shared}
+    />
+  );
+});
 
-    if (
-      pendingCreate &&
-      pendingCreate.parentRelPath !== "" &&
-      pendingCreate.parentRelPath === row.path &&
-      row.kind === "directory" &&
-      row.isExpanded
-    ) {
-      items.push({
-        type: "create-input",
-        parentRelPath: pendingCreate.parentRelPath,
-        kind: pendingCreate.kind,
-        depth: row.depth + 1,
-      });
-    }
-  }
+const TreeDirectory = React.memo(function TreeDirectory({
+  parentPath,
+  depth,
+  shared,
+}: {
+  parentPath: string;
+  depth: number;
+  shared: SharedTreeProps;
+}) {
+  const entries = useFileTreeStore(
+    (s) => s.byScopeId[shared.workspaceId]?.directories[parentPath],
+  );
 
-  return items;
-}
+  if (!entries) return null;
 
-// ---------------------------------------------------------------------------
-// FlatFileTree — no virtualization, no ResizeObserver, no scroll state.
-// Reads visibleRows from the store and renders them with a plain .map().
-// ---------------------------------------------------------------------------
+  const pendingCreateHere =
+    shared.pendingCreate !== null && shared.pendingCreate.parentRelPath === parentPath;
+
+  return (
+    <>
+      {pendingCreateHere && (
+        <TreeCreateInput
+          kind={shared.pendingCreate!.kind}
+          parentRelPath={parentPath}
+          depth={depth}
+          onConfirm={shared.onConfirmCreate}
+          onCancel={shared.onCancelCreate}
+        />
+      )}
+      {entries.map((entry) => {
+        const path = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+        if (entry.isDirectory) {
+          return (
+            <TreeDirectoryEntry
+              key={path}
+              path={path}
+              parentPath={parentPath}
+              entry={entry}
+              depth={depth}
+              shared={shared}
+            />
+          );
+        }
+        return (
+          <TreeFileEntry
+            key={path}
+            path={path}
+            parentPath={parentPath}
+            entry={entry}
+            depth={depth}
+            shared={shared}
+          />
+        );
+      })}
+    </>
+  );
+});
 
 export type FlatFileTreeProps = {
   workspaceId: string;
@@ -91,6 +351,7 @@ export type FlatFileTreeProps = {
   onFileOpen: (path: string) => void;
   onRowPointerDown: (event: React.PointerEvent, handle: FileTreeRowHandle) => void;
   onRowClickCapture: (event: React.MouseEvent) => void;
+  onRowSelect?: (handle: FileTreeRowHandle) => void;
   onConfirmCreate: (name: string, kind: "file" | "directory", parentRelPath: string) => void;
   onCancelCreate: () => void;
   onConfirmRename: (sourceRelPath: string, nextName: string) => void;
@@ -116,6 +377,7 @@ export function FlatFileTree({
   onFileOpen,
   onRowPointerDown,
   onRowClickCapture,
+  onRowSelect,
   onConfirmCreate,
   onCancelCreate,
   onConfirmRename,
@@ -128,11 +390,7 @@ export function FlatFileTree({
 }: FlatFileTreeProps) {
   const bootStatus = useFileTreeStore((s) => s.byScopeId[workspaceId]?.bootStatus ?? "idle");
   const rootError = useFileTreeStore((s) => s.byScopeId[workspaceId]?.lastError ?? null);
-  const visibleRows = useFileTreeStore(
-    (s) => s.byScopeId[workspaceId]?.visibleRows ?? EMPTY_ROWS,
-  );
 
-  // Stable ref for drag hook — no scroll/resize measurement needed.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const setContainerRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -142,20 +400,9 @@ export function FlatFileTree({
     [onContainerRef],
   );
 
-  // O(1) decoration lookup — decorationIndex is pre-built in GitStore.applySnapshot.
-  const resolveDecoration = useCallback(
-    (row: FileTreeVisibleRow): TreeGitDecoration => {
-      if (row.isIgnored) return IGNORED_DECORATION;
-      return (
-        (row.kind === "directory"
-          ? decorationIndex.byDirectory[row.path]
-          : decorationIndex.byPath[row.path]) ?? EMPTY_DECORATION
-      );
-    },
-    [decorationIndex],
-  );
+  const decorationIndexRef: RefObject<GitDecorationIndex> = useRef(decorationIndex);
+  decorationIndexRef.current = decorationIndex;
 
-  // Directory click → synchronous store update → no IPC, no async, no transitions.
   const handleToggleExpand = useCallback(
     (path: string, expanded: boolean) => {
       fileTreeService.setExpanded(workspaceId, path, expanded);
@@ -163,13 +410,27 @@ export function FlatFileTree({
     [workspaceId],
   );
 
-  // Display items merge pending create/rename into the visible row list.
-  const displayItems = useMemo(
-    () => buildDisplayItems(visibleRows, pendingCreate, pendingRename),
-    [visibleRows, pendingCreate, pendingRename],
-  );
+  const shared: SharedTreeProps = {
+    workspaceId,
+    workspaceRoot,
+    activePath,
+    decorationIndexRef,
+    targetDirectory,
+    highlightedLeafDirectory,
+    isHoverSuppressed,
+    pendingCreate,
+    pendingRename,
+    onOpen: onFileOpen,
+    onToggleExpand: handleToggleExpand,
+    onPointerDown: onRowPointerDown,
+    onClickCapture: onRowClickCapture,
+    onSelect: onRowSelect,
+    onConfirmCreate,
+    onCancelCreate,
+    onConfirmRename,
+    onCancelRename,
+  };
 
-  // Show loader only during initial boot — never again once loaded.
   if (bootStatus === "idle" || bootStatus === "loading") {
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4">
@@ -194,54 +455,11 @@ export function FlatFileTree({
       {rootError && (
         <div className="px-2 py-2 text-xs text-[var(--theme-error)]">{rootError}</div>
       )}
-
-      {displayItems.map((item) => {
-        if (item.type === "create-input") {
-          return (
-            <TreeCreateInput
-              key={`create:${item.parentRelPath}`}
-              kind={item.kind}
-              parentRelPath={item.parentRelPath}
-              depth={item.depth}
-              onConfirm={onConfirmCreate}
-              onCancel={onCancelCreate}
-            />
-          );
-        }
-
-        if (item.type === "rename-input") {
-          return (
-            <TreeRenameInput
-              key={`rename:${item.row.path}`}
-              kind={item.row.kind}
-              depth={item.row.depth}
-              initialName={item.initialName}
-              sourceRelPath={item.row.path}
-              onConfirm={onConfirmRename}
-              onCancel={onCancelRename}
-            />
-          );
-        }
-
-        const { row } = item;
-        return (
-          <FileTreeVisibleRowView
-            key={row.id}
-            row={row}
-            workspaceRoot={workspaceRoot}
-            workspaceId={workspaceId}
-            decoration={resolveDecoration(row)}
-            active={row.path === activePath}
-            isTargetedDirectory={targetDirectory === row.path}
-            highlightedLeafDirectory={highlightedLeafDirectory}
-            isHoverSuppressed={isHoverSuppressed}
-            onOpen={onFileOpen}
-            onToggleExpand={handleToggleExpand}
-            onPointerDown={onRowPointerDown}
-            onClickCapture={onRowClickCapture}
-          />
-        );
-      })}
+      <TreeDirectory
+        parentPath=""
+        depth={0}
+        shared={shared}
+      />
     </div>
   );
 }

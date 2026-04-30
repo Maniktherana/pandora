@@ -2,33 +2,15 @@ import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import { useGitStore } from "./git-store";
 import { gitHeaderBranchContext } from "@/services/git/git-api";
 
-/**
- * Tracks which workspace scopes currently have an active backend git
- * subscription, keyed by scopeId. A scope is present here once gitSubscribe
- * has been sent and the promise has not yet rejected.
- */
 const subscribedTargetsByScopeId = new Map<string, string | null>();
-
 const branchContextRequestsByScopeId = new Map<string, Promise<void>>();
 
-/**
- * Resolve the IPC client or throw so action callers always get a rejected
- * promise rather than a silent no-op.
- */
 function requireClient() {
   const client = getIpcClient();
   if (!client) throw new Error("IPC client not available");
   return client;
 }
 
-/**
- * Ensure the backend git subscription for `scopeId` is started.
- *
- * Returns `true` when a new subscription was sent (a scm_snapshot event will
- * arrive shortly), or `false` when the subscription was already active (no
- * automatic event will be sent). Callers that need a guaranteed fresh snapshot
- * should call `gitRefresh` when this returns `false`.
- */
 export function gitInit(scopeId: string): boolean {
   if (subscribedTargetsByScopeId.has(scopeId)) return false;
 
@@ -91,10 +73,6 @@ export function gitSetTargetBranch(scopeId: string, branch: string | null): Prom
   return requireClient().gitSetTargetBranch(scopeId, branch);
 }
 
-/**
- * Load branch context for the branch picker.
- * Self-managing (deduplicates in-flight requests); intentionally stays void.
- */
 export function gitLoadBranchContext(scopeId: string): void {
   const store = useGitStore.getState();
   const current = store.byScopeId[scopeId];

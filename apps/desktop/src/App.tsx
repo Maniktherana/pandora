@@ -391,10 +391,10 @@ export default function App() {
                     </ResizablePanelGroup>
                   </div>
 
-                  {fileTreePanelVisible && selectedWs && (
+                  {selectedWs && (
                     <div
                       className="relative h-full shrink-0"
-                      style={{ width: rightSidebarWidth }}
+                      style={{ width: rightSidebarWidth, ...(!fileTreePanelVisible && { display: "none" }) }}
                       onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
                     >
                       <div

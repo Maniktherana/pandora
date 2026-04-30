@@ -1,7 +1,5 @@
 import { create } from "zustand";
 import type { FileTreeEntry } from "@/lib/shared/types";
-import type { FileTreeVisibleRow } from "./file-tree-types";
-import { buildVisibleRows } from "./file-tree-projection";
 
 export type FileTreeBootStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -10,12 +8,8 @@ export interface FileTreeRuntimeState {
   bootStatus: FileTreeBootStatus;
   directories: Record<string, FileTreeEntry[]>;
   expandedPaths: Set<string>;
-  /** Flat ordered row list — recomputed synchronously on every tree/expansion mutation. */
-  visibleRows: FileTreeVisibleRow[];
   lastError: string | null;
 }
-
-const EMPTY_VISIBLE_ROWS: FileTreeVisibleRow[] = [];
 
 function emptyFileTreeState(): FileTreeRuntimeState {
   return {
@@ -23,7 +17,6 @@ function emptyFileTreeState(): FileTreeRuntimeState {
     bootStatus: "idle",
     directories: {},
     expandedPaths: new Set(),
-    visibleRows: EMPTY_VISIBLE_ROWS,
     lastError: null,
   };
 }
@@ -39,6 +32,7 @@ interface FileTreeStoreState {
   ) => void;
   applyDirectoryChanged: (scopeId: string, path: string, entries: FileTreeEntry[]) => void;
   setExpandedPaths: (scopeId: string, paths: Set<string>) => void;
+  toggleExpanded: (scopeId: string, relPath: string, expanded: boolean) => void;
   setError: (scopeId: string, error: string, options?: { forceErrorStatus?: boolean }) => void;
   resetScope: (scopeId: string) => void;
 }
@@ -69,7 +63,6 @@ export const useFileTreeStore = create<FileTreeStoreState>((set) => ({
             bootStatus: "loaded",
             directories,
             expandedPaths: paths,
-            visibleRows: buildVisibleRows(directories, paths),
             lastError: null,
           },
         },
@@ -86,7 +79,6 @@ export const useFileTreeStore = create<FileTreeStoreState>((set) => ({
           [scopeId]: {
             ...current,
             directories,
-            visibleRows: buildVisibleRows(directories, current.expandedPaths),
           },
         },
       };
@@ -101,7 +93,23 @@ export const useFileTreeStore = create<FileTreeStoreState>((set) => ({
           [scopeId]: {
             ...current,
             expandedPaths: paths,
-            visibleRows: buildVisibleRows(current.directories, paths),
+          },
+        },
+      };
+    }),
+
+  toggleExpanded: (scopeId, relPath, expanded) =>
+    set((s) => {
+      const current = s.byScopeId[scopeId] ?? emptyFileTreeState();
+      const paths = new Set(current.expandedPaths);
+      if (expanded) paths.add(relPath);
+      else paths.delete(relPath);
+      return {
+        byScopeId: {
+          ...s.byScopeId,
+          [scopeId]: {
+            ...current,
+            expandedPaths: paths,
           },
         },
       };

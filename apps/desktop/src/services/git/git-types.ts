@@ -1,6 +1,5 @@
 import type { ScmEntry } from "@/lib/shared/types";
 
-export const GIT_CHANGES_REFRESH_INTERVAL_MS = 2000;
 export const GIT_SECTION_STICKY_ROW_HEIGHT_PX = 28;
 export const GIT_SECTION_STICKY_Z_INDEX_BASE = 20;
 

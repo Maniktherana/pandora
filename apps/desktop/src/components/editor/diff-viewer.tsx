@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileDiff as PierreFileDiff } from "@pierre/diffs/react";
-import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffMetadata, FileDiffOptions, VirtualFileMetrics } from "@pierre/diffs";
+import {
+  parsedDiffQueryKey,
+  parseDiffInWorker,
+} from "@/services/diff/diff-worker-client";
 import type { DiffSource } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import {
   createPierreDiffOptions,
-  createPierreFile,
   getLargeDiffOptions,
   getPierreSurfaceStyle,
 } from "@/components/editor/pierre-pandora";
@@ -16,7 +18,6 @@ import {
   DIFF_CONTENTS_STALE_TIME_MS,
   diffContentsQueryKey,
   fetchDiffContents,
-  type DiffContentsData,
 } from "@/components/editor/diff-data";
 import { defaultTheme } from "@/lib/theme";
 import { AlertCircle, RefreshCw } from "lucide-react";
@@ -25,13 +26,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
-
-type ParsedDiffCacheValue = {
-  diffMetadata: FileDiffMetadata | null;
-  parseError: string | null;
-};
-
-const parsedDiffCache = new WeakMap<DiffContentsData, Map<string, ParsedDiffCacheValue>>();
 
 function loadSideBySide(): boolean {
   if (typeof window === "undefined") return true;
@@ -53,7 +47,7 @@ export type DiffViewerStats = {
   error: string | null;
 };
 
-export default function DiffViewer({
+export default memo(function DiffViewer({
   workspaceRoot,
   relativePath,
   source,
@@ -124,58 +118,57 @@ export default function DiffViewer({
     gcTime: DIFF_CONTENTS_GC_TIME_MS,
   });
 
-  // Explicit reload on reloadKey bump — only fires when this tab is the active one
-  // so hidden tabs don't wastefully re-fetch on a refresh triggered elsewhere.
+  const refetchRef = useRef(diffQuery.refetch);
+  refetchRef.current = diffQuery.refetch;
+
   useEffect(() => {
     if (!isActive || reloadKey === 0) return;
-    diffQuery.refetch().catch((error) => {
+    refetchRef.current().catch((error: unknown) => {
       console.warn("[DiffViewer] reload refetch failed:", error);
     });
-  }, [diffQuery.refetch, isActive, reloadKey]);
+  }, [isActive, reloadKey]);
 
   const original = diffQuery.data?.original ?? "";
   const modified = diffQuery.data?.modified ?? "";
-  const loading = diffQuery.status === "pending" && diffQuery.data == null;
-  const error = diffQuery.error ? String(diffQuery.error) : null;
+  const originalHash = diffQuery.data?.originalHash ?? "";
+  const modifiedHash = diffQuery.data?.modifiedHash ?? "";
+  const contentLoading = diffQuery.status === "pending" && diffQuery.data == null;
+  const contentError = diffQuery.error ? String(diffQuery.error) : null;
 
-  const noDiff = !loading && !error && original === modified;
+  const hasDiff = !contentLoading && !contentError && original !== modified;
+  const parseQuery = useQuery({
+    queryKey: parsedDiffQueryKey(
+      workspaceRoot,
+      source,
+      relativePath,
+      targetBranch,
+      originalHash,
+      modifiedHash,
+    ),
+    queryFn: () =>
+      parseDiffInWorker({
+        workspaceRoot,
+        relativePath,
+        source,
+        targetBranch: targetBranch ?? null,
+        original,
+        modified,
+      }),
+    enabled: hasDiff,
+    staleTime: Infinity,
+    gcTime: DIFF_CONTENTS_GC_TIME_MS,
+  });
+
+  const loading = contentLoading || (hasDiff && parseQuery.status === "pending");
+  const error = contentError;
+  const noDiff = !contentLoading && !contentError && original === modified;
   const diffStyle: PierreDiffStyle = controlledDiffStyle ?? (sideBySide ? "split" : "unified");
   const wrapLines = controlledWrapLines ?? storedWrapLines;
   const isLarge = Math.max(original.length, modified.length) > 500_000;
 
-  const parsed = useMemo((): ParsedDiffCacheValue => {
-    const data = diffQuery.data;
-    if (loading || error || data == null || original === modified) {
-      return { diffMetadata: null, parseError: null as string | null };
-    }
-
-    const cachedByPath = parsedDiffCache.get(data);
-    const cached = cachedByPath?.get(relativePath);
-    if (cached) return cached;
-
-    let next: ParsedDiffCacheValue;
-    try {
-      next = {
-        diffMetadata: parseDiffFromFile(
-          createPierreFile(relativePath, original),
-          createPierreFile(relativePath, modified),
-        ),
-        parseError: null as string | null,
-      };
-    } catch (parseError) {
-      next = { diffMetadata: null, parseError: String(parseError) };
-    }
-
-    if (cachedByPath) {
-      cachedByPath.set(relativePath, next);
-    } else {
-      parsedDiffCache.set(data, new Map([[relativePath, next]]));
-    }
-    return next;
-  }, [diffQuery.data, error, loading, relativePath]);
-
-  const diffMetadata = parsed.diffMetadata;
-  const displayError = error ?? parsed.parseError;
+  const diffMetadata: FileDiffMetadata | null = parseQuery.data?.diffMetadata ?? null;
+  const parseError = parseQuery.data?.parseError ?? (parseQuery.error ? String(parseQuery.error) : null);
+  const displayError = error ?? parseError;
 
   const options = useMemo(() => {
     const base = createPierreDiffOptions(diffStyle, wrapLines);
@@ -323,4 +316,4 @@ export default function DiffViewer({
       </div>
     </div>
   );
-}
+});

@@ -33,7 +33,7 @@ import { useSelectedWorkspaceId, useNavigationArea } from "@/hooks/use-navigatio
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
 import type { WorkspaceRecord } from "@/lib/shared/types";
-import { useScmSummaryQuery } from "@/services/git/git-queries";
+import { useScmSummaryCached } from "@/services/git/git-queries";
 import { useWorkspaceAgentStatus } from "@/services/terminal/terminal-scope-store";
 import DotGridLoader from "@/components/dot-grid-loader";
 import { isTerminalAgentAttentionStatus } from "@/lib/terminal/agent-activity";
@@ -55,9 +55,9 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
   const agentStatus = useWorkspaceAgentStatus(workspace.id);
-  // Read Git summary from React Query — populated by prefetch at launch and
-  // kept warm by the IPC event bridge in git-events.ts.
-  const { data: gitSummary } = useScmSummaryQuery(
+  // Read Git summary from React Query cache — written by applyGitSnapshot in
+  // git-events.ts whenever the backend emits a scm_snapshot event.
+  const gitSummary = useScmSummaryCached(
     workspace.status === "ready" ? workspace.id : null,
   );
 

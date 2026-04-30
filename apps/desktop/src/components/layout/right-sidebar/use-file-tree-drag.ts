@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Channel } from "@tauri-apps/api/core";
 import { getParentRelPath } from "@/lib/shared/utils";
+import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
 import type {
   DragPointer,
   FileTreeRowHandle,
@@ -26,20 +27,14 @@ interface UseFileTreeDragParams {
   workspaceId: string;
   workspaceRoot: string;
   mode: LeftPanelMode;
-  expandedPaths: ReadonlySet<string>;
-  fileTree: {
-    move: (sourceRelPath: string, destRelativePath: string) => void;
-    importFiles: (destDir: string, paths: string[]) => void;
-  };
+  onMove: (sourceRelPath: string, destRelativePath: string) => void;
+  onImportFiles: (destDir: string, paths: string[]) => void;
   startDrag: (state: DragState) => void;
-  setSelectedTreePath: (path: string | null) => void;
-  setSelectedTreeKind: (kind: "file" | "directory" | null) => void;
 }
 
 export interface UseFileTreeDragResult {
   treeBodyRef: React.RefObject<HTMLDivElement | null>;
   dragSession: TreeDragSession | null;
-  pendingPointerDrag: PendingPointerDrag | null;
   isHoverSuppressed: boolean;
   isDragActive: boolean;
   targetDirectory: string | null;
@@ -69,34 +64,40 @@ function isExternalFileDrag(
   return Array.isArray(types) ? types.includes("Files") : Array.from(types ?? []).includes("Files");
 }
 
+const emptySet = new Set<string>();
+
 export function useFileTreeDrag({
   workspaceId,
   workspaceRoot,
   mode,
-  expandedPaths,
-  fileTree,
+  onMove,
+  onImportFiles,
   startDrag,
-  setSelectedTreePath,
-  setSelectedTreeKind,
 }: UseFileTreeDragParams): UseFileTreeDragResult {
-  const [pendingPointerDrag, setPendingPointerDrag] = useState<PendingPointerDrag | null>(null);
+  // pendingPointerDrag is a ref — never React state.
+  // Writing to it on pointerdown costs zero React work.
+  const pendingPointerDragRef = useRef<PendingPointerDrag | null>(null);
   const [dragSession, setDragSession] = useState<TreeDragSession | null>(null);
   const [hoverSuppressed, setHoverSuppressed] = useState(false);
 
   const treeBodyRef = useRef<HTMLDivElement | null>(null);
   const workspaceRootRef = useRef(workspaceRoot);
   const modeRef = useRef(mode);
-  const pendingPointerDragRef = useRef<PendingPointerDrag | null>(pendingPointerDrag);
   const dragSessionRef = useRef<TreeDragSession | null>(dragSession);
   const suppressClickUntilRef = useRef(0);
   const suppressHoverTimerRef = useRef<number | null>(null);
   const externalTargetRef = useRef<TreeDropTarget | null>(null);
   const externalLeaveTimerRef = useRef<number | null>(null);
+  // Stable refs for callbacks that must not appear in effect dependency arrays.
+  // Updated synchronously at render time so effects always call the current version.
+  const moveRef = useRef(onMove);
+  const importFilesRef = useRef(onImportFiles);
 
   workspaceRootRef.current = workspaceRoot;
   modeRef.current = mode;
-  pendingPointerDragRef.current = pendingPointerDrag;
   dragSessionRef.current = dragSession;
+  moveRef.current = onMove;
+  importFilesRef.current = onImportFiles;
 
   const suppressHoverBriefly = useCallback(() => {
     if (suppressHoverTimerRef.current !== null) {
@@ -249,13 +250,13 @@ export function useFileTreeDrag({
   );
 
   const clearPointerDragState = useCallback(() => {
-    setPendingPointerDrag(null);
+    pendingPointerDragRef.current = null;
     setDragSession((current) => (current?.kind === "internal" ? null : current));
     suppressHoverBriefly();
   }, [suppressHoverBriefly]);
 
   const clearAllDragState = useCallback(() => {
-    setPendingPointerDrag(null);
+    pendingPointerDragRef.current = null;
     setDragSession(null);
     externalTargetRef.current = null;
     if (externalLeaveTimerRef.current !== null) {
@@ -287,9 +288,9 @@ export function useFileTreeDrag({
           return;
         }
       }
-      fileTree.move(sourceRelPath, destRelativePath);
+      moveRef.current(sourceRelPath, destRelativePath);
     },
-    [fileTree, resolveDestinationDirectory],
+    [resolveDestinationDirectory],
   );
 
   const startNativeFileDrag = useCallback(async (sourceAbsPath: string) => {
@@ -314,21 +315,76 @@ export function useFileTreeDrag({
     [armSuppressClick, clearAllDragState, startNativeFileDrag],
   );
 
+  /**
+   * Records a drag candidate in a ref and installs lightweight imperative
+   * listeners to detect whether the user drags or just clicks.
+   *
+   * No React state is written here. The listeners remove themselves on the
+   * first pointerup (normal click) or when movement exceeds
+   * INTERNAL_DRAG_THRESHOLD_PX (drag start). Only the drag-start path calls
+   * setDragSession, which triggers the active-drag useEffect below.
+   */
   const onRowPointerDown = useCallback(
     (event: React.PointerEvent, handle: FileTreeRowHandle) => {
       if (event.button !== 0 || mode !== "files") return;
-      setSelectedTreePath(handle.relPath);
-      setSelectedTreeKind(handle.kind);
-      setPendingPointerDrag({
+      // Only one candidate at a time (guard against multi-touch edge cases).
+      if (pendingPointerDragRef.current) return;
+
+      // Clear any external-native session that might still be visually active.
+      if (dragSessionRef.current?.kind === "external-native") {
+        setDragSession(null);
+      }
+
+      pendingPointerDragRef.current = {
         sourceRelPath: handle.relPath,
         sourceAbsPath: handle.absolutePath,
         sourceKind: handle.kind,
         label: handle.label,
         startPointer: { x: event.clientX, y: event.clientY },
-      });
-      setDragSession((current) => (current?.kind === "external-native" ? null : current));
+      };
+
+      const removeListeners = () => {
+        document.removeEventListener("pointermove", onPendingMove);
+        document.removeEventListener("pointerup", onPendingUp);
+        document.removeEventListener("pointercancel", onPendingCancel);
+      };
+
+      const onPendingMove = (ev: PointerEvent) => {
+        const pending = pendingPointerDragRef.current;
+        if (!pending) { removeListeners(); return; }
+        const dx = ev.clientX - pending.startPointer.x;
+        const dy = ev.clientY - pending.startPointer.y;
+        if (Math.hypot(dx, dy) < INTERNAL_DRAG_THRESHOLD_PX) return;
+        // Threshold exceeded: promote to a real drag session.
+        removeListeners();
+        pendingPointerDragRef.current = null;
+        armSuppressClick();
+        setDragSession({
+          kind: "internal",
+          sourceRelPath: pending.sourceRelPath,
+          sourceAbsPath: pending.sourceAbsPath,
+          sourceKind: pending.sourceKind,
+          label: pending.label,
+          pointer: { x: ev.clientX, y: ev.clientY },
+          target: computeDropTargetFromPoint(ev.clientX, ev.clientY),
+        });
+      };
+
+      const onPendingUp = () => {
+        pendingPointerDragRef.current = null;
+        removeListeners();
+      };
+
+      const onPendingCancel = () => {
+        pendingPointerDragRef.current = null;
+        removeListeners();
+      };
+
+      document.addEventListener("pointermove", onPendingMove);
+      document.addEventListener("pointerup", onPendingUp);
+      document.addEventListener("pointercancel", onPendingCancel);
     },
-    [mode, setSelectedTreeKind, setSelectedTreePath],
+    [armSuppressClick, computeDropTargetFromPoint, mode],
   );
 
   const onRowClickCapture = useCallback(
@@ -342,7 +398,7 @@ export function useFileTreeDrag({
 
   const handleTreeDragEnter = useCallback(
     (event: React.DragEvent) => {
-      if (pendingPointerDrag || dragSession?.kind === "internal") return;
+      if (pendingPointerDragRef.current || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
       setExternalDragTarget(computeDropTargetFromDragEvent(event), {
@@ -350,12 +406,12 @@ export function useFileTreeDrag({
         y: event.clientY,
       });
     },
-    [computeDropTargetFromDragEvent, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
+    [computeDropTargetFromDragEvent, dragSession?.kind, setExternalDragTarget],
   );
 
   const handleTreeDragOver = useCallback(
     (event: React.DragEvent) => {
-      if (pendingPointerDrag || dragSession?.kind === "internal") return;
+      if (pendingPointerDragRef.current || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
       setExternalDragTarget(computeDropTargetFromDragEvent(event), {
@@ -363,12 +419,12 @@ export function useFileTreeDrag({
         y: event.clientY,
       });
     },
-    [computeDropTargetFromDragEvent, dragSession?.kind, pendingPointerDrag, setExternalDragTarget],
+    [computeDropTargetFromDragEvent, dragSession?.kind, setExternalDragTarget],
   );
 
   const handleTreeDragLeave = useCallback(
     (event: React.DragEvent) => {
-      if (pendingPointerDrag || dragSession?.kind === "internal") return;
+      if (pendingPointerDragRef.current || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       if (isPointWithinTreeBody(event.clientX, event.clientY)) return;
       if (externalLeaveTimerRef.current !== null) {
@@ -379,12 +435,12 @@ export function useFileTreeDrag({
         externalLeaveTimerRef.current = null;
       }, 60);
     },
-    [clearAllDragState, dragSession?.kind, isPointWithinTreeBody, pendingPointerDrag],
+    [clearAllDragState, dragSession?.kind, isPointWithinTreeBody],
   );
 
   const handleTreeDrop = useCallback(
     (event: React.DragEvent) => {
-      if (pendingPointerDrag || dragSession?.kind === "internal") return;
+      if (pendingPointerDragRef.current || dragSession?.kind === "internal") return;
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
       externalTargetRef.current = computeDropTargetFromDragEvent(event);
@@ -394,37 +450,17 @@ export function useFileTreeDrag({
       clearExternalDragVisualState,
       computeDropTargetFromDragEvent,
       dragSession?.kind,
-      pendingPointerDrag,
     ],
   );
 
-  // Pointer-tracking effect for internal drag
+  // Active-drag pointer tracking — only runs while an internal drag is live.
+  // The pending phase (before threshold) is handled imperatively in onRowPointerDown.
   useEffect(() => {
-    if (!pendingPointerDrag && dragSession?.kind !== "internal") return;
+    if (dragSession?.kind !== "internal") return;
 
     const onPointerMove = (event: PointerEvent) => {
       const pointer = { x: event.clientX, y: event.clientY };
 
-      if (pendingPointerDrag) {
-        const dx = pointer.x - pendingPointerDrag.startPointer.x;
-        const dy = pointer.y - pendingPointerDrag.startPointer.y;
-        if (Math.hypot(dx, dy) < INTERNAL_DRAG_THRESHOLD_PX) return;
-
-        armSuppressClick();
-        setDragSession({
-          kind: "internal",
-          sourceRelPath: pendingPointerDrag.sourceRelPath,
-          sourceAbsPath: pendingPointerDrag.sourceAbsPath,
-          sourceKind: pendingPointerDrag.sourceKind,
-          label: pendingPointerDrag.label,
-          pointer,
-          target: computeDropTargetFromPoint(pointer.x, pointer.y),
-        });
-        setPendingPointerDrag(null);
-        return;
-      }
-
-      if (dragSession?.kind !== "internal") return;
       if (event.buttons === 0) {
         clearPointerDragState();
         return;
@@ -461,10 +497,6 @@ export function useFileTreeDrag({
     };
 
     const onPointerUp = (event: PointerEvent) => {
-      if (pendingPointerDrag) {
-        setPendingPointerDrag(null);
-        return;
-      }
       if (dragSession?.kind !== "internal") return;
       const pointer = { x: event.clientX, y: event.clientY };
       const target = computeDropTargetFromPoint(pointer.x, pointer.y) ?? dragSession.target;
@@ -494,22 +526,20 @@ export function useFileTreeDrag({
       window.removeEventListener("blur", onWindowBlur);
     };
   }, [
-    armSuppressClick,
     clearPointerDragState,
     computeDropTargetFromPoint,
     dragSession,
     handoffInternalDragToNative,
     isPointWithinTreeBody,
     isPointWithinWorkspaceDropRoot,
-    pendingPointerDrag,
     performInternalMove,
     startDrag,
     workspaceId,
   ]);
 
-  // Grab cursor while dragging
+  // Grab cursor while an internal drag is active.
   useEffect(() => {
-    if (!pendingPointerDrag && dragSession?.kind !== "internal") return;
+    if (dragSession?.kind !== "internal") return;
     const previousUserSelect = document.body.style.userSelect;
     const previousCursor = document.body.style.cursor;
     document.body.style.userSelect = "none";
@@ -518,7 +548,7 @@ export function useFileTreeDrag({
       document.body.style.userSelect = previousUserSelect;
       document.body.style.cursor = previousCursor;
     };
-  }, [dragSession, pendingPointerDrag]);
+  }, [dragSession]);
 
   // Tauri native drag-drop events
   useEffect(() => {
@@ -581,14 +611,14 @@ export function useFileTreeDrag({
             ) {
               continue;
             }
-            fileTree.move(sourceRelPath, destRelativePath);
+            moveRef.current(sourceRelPath, destRelativePath);
           } else {
             externalPaths.push(path);
           }
         }
 
         if (externalPaths.length > 0) {
-          fileTree.importFiles(destRelativePath, externalPaths);
+          importFilesRef.current(destRelativePath, externalPaths);
         }
       })
       .then((fn) => {
@@ -600,9 +630,10 @@ export function useFileTreeDrag({
   }, [
     clearAllDragState,
     computeDropTargetFromPoint,
-    fileTree,
     resolveDestinationDirectory,
     setExternalDragTarget,
+    // moveRef and importFilesRef are refs — intentionally excluded so this
+    // effect never re-registers the native listener on expand/collapse rerenders.
   ]);
 
   // Cleanup timers on unmount
@@ -618,22 +649,23 @@ export function useFileTreeDrag({
   }, []);
 
   const activeDropTarget = dragSession?.target ?? null;
-  const isDragActive = pendingPointerDrag !== null || dragSession !== null;
+  const isDragActive = dragSession !== null;
   const isHoverSuppressed = isDragActive || hoverSuppressed;
   const targetDirectory =
     activeDropTarget?.mode === "directory" ? (activeDropTarget.targetRelPath ?? "") : null;
+  const currentExpandedPaths =
+    useFileTreeStore.getState().byScopeId[workspaceId]?.expandedPaths ?? emptySet;
   const highlightedLeafDirectory =
     activeDropTarget?.mode === "root"
       ? ""
       : targetDirectory !== null &&
-          (targetDirectory === "" || expandedPaths.has(targetDirectory))
+          (targetDirectory === "" || currentExpandedPaths.has(targetDirectory))
         ? targetDirectory
         : null;
 
   return {
     treeBodyRef,
     dragSession,
-    pendingPointerDrag,
     isHoverSuppressed,
     isDragActive,
     targetDirectory,

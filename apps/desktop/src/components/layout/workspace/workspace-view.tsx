@@ -184,6 +184,21 @@ function PaneView({
     terminalCommands.createWorkspaceTerminal(workspaceId);
   }, [terminalCommands, workspaceId]);
 
+  // Track the last-known editor-tab path so PaneEditor stays mounted and warm
+  // while a diff/review tab is active.  CSS visibility-hiding (not unmounting)
+  // preserves warm Monaco models and per-file scroll state so switching back to
+  // an editor tab never triggers a fresh mount + editorReady RAF delay.
+  const activeTab = leaf.tabs[leaf.selectedIndex];
+  const activeEditorPath: string | null =
+    activeTab !== undefined && activeTab.kind === "editor" ? activeTab.path : null;
+  const lastEditorPathRef = useRef<string | null>(null);
+  if (activeEditorPath !== null) {
+    lastEditorPathRef.current = activeEditorPath;
+  }
+  const hasEditorTabs = leaf.tabs.some((t) => t.kind === "editor");
+  const editorPath = activeEditorPath ?? lastEditorPathRef.current;
+  const isEditorActive = activeTab?.kind === "editor";
+
   return (
     <div
       data-pane-id={leaf.id}
@@ -209,14 +224,23 @@ function PaneView({
         }}
         onPointerDownCapture={handlePanePointerDownCapture}
       >
-        {/* Mount PaneEditor only for the active editor tab — dirty buffers survive via EditorStore and Monaco model registry */}
-        {leaf.tabs[leaf.selectedIndex]?.kind === "editor" && (
-          <PaneEditor
-            key={`pane-editor-${leaf.id}`}
-            workspaceId={workspaceId}
-            workspaceRoot={workspaceRoot}
-            relativePath={(leaf.tabs[leaf.selectedIndex] as { path: string }).path}
-          />
+        {/* Keep PaneEditor mounted while any editor tab exists in this pane.
+            CSS visibility (not unmount) preserves warm Monaco models and per-file
+            scroll state across editor↔diff/review tab switches.
+            Dirty buffers survive separately via EditorStore + Monaco model registry. */}
+        {hasEditorTabs && editorPath && (
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={!isEditorActive ? { visibility: "hidden", pointerEvents: "none" } : undefined}
+            aria-hidden={!isEditorActive || undefined}
+          >
+            <PaneEditor
+              key={`pane-editor-${leaf.id}`}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
+              relativePath={editorPath}
+            />
+          </div>
         )}
 
         {leaf.tabs.map((tab, idx) => {
@@ -251,6 +275,7 @@ function PaneView({
                 <ReviewViewer
                   workspaceId={workspaceId}
                   workspaceRoot={workspaceRoot}
+                  isActive={isActiveTab}
                 />
               </div>
             );

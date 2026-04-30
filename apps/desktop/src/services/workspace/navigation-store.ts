@@ -37,7 +37,14 @@ export const useNavigationStore = create<NavigationStoreState>((set) => ({
   setNavigationArea: (area) => set({ navigationArea: area }),
 
   setLayoutTargetScopeId: (scopeId) =>
-    set({ layoutTargetScopeId: scopeId }),
+    set((state) => {
+      // Return the same reference when the value is unchanged so Zustand skips
+      // subscriber notifications entirely (Object.is bail-out). This prevents
+      // the right-sidebar onPointerDownCapture from publishing a store update
+      // on every file-tree click when layoutTargetScopeId is already null.
+      if (state.layoutTargetScopeId === scopeId) return state;
+      return { layoutTargetScopeId: scopeId };
+    }),
 
   setSearchText: (text) => set({ searchText: text }),
 

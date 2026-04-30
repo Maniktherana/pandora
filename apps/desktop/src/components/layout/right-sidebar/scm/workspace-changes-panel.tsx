@@ -23,12 +23,12 @@ import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useBranchContext } from "@/services/git/use-git";
+import { useBranchContext } from "@/services/git/git-store";
 import {
-  useScmStatusQuery,
+  useScmStatusCached,
   scmStatusQueryKey,
-  scmSummaryQueryKey,
   applyOptimisticEntriesToStatus,
+  type ScmStatusData,
 } from "@/services/git/git-queries";
 import {
   optimisticallyStageEntries,
@@ -105,18 +105,18 @@ export default function WorkspaceChangesPanel({
   const [inflightPaths, setInflightPaths] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // React Query — primary data source for SCM status.
-  const statusQuery = useScmStatusQuery(workspaceId);
+  // React Query cache — written by applyGitSnapshot in git-events.ts.
+  const statusData = useScmStatusCached(workspaceId);
   const queryClient = useQueryClient();
 
   // Branch context still lives in the GitStore (not part of ScmStatusData).
   const { branchContext, branchContextLoading } = useBranchContext(workspaceId);
 
   // Derived lists from the React Query cache.
-  const snapshot = statusQuery.data?.snapshot ?? null;
-  const entries = statusQuery.data?.entries ?? EMPTY_ENTRIES;
-  const stagedList = statusQuery.data?.stagedEntries ?? EMPTY_ENTRIES;
-  const unstagedList = statusQuery.data?.unstagedEntries ?? EMPTY_ENTRIES;
+  const snapshot = statusData?.snapshot ?? null;
+  const entries = statusData?.entries ?? EMPTY_ENTRIES;
+  const stagedList = statusData?.stagedEntries ?? EMPTY_ENTRIES;
+  const unstagedList = statusData?.unstagedEntries ?? EMPTY_ENTRIES;
 
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
@@ -237,7 +237,7 @@ export default function WorkspaceChangesPanel({
     (transform: (currentEntries: ScmEntry[]) => ScmEntry[]) => {
       queryClient.setQueryData(
         scmStatusQueryKey(workspaceId),
-        (old: ReturnType<typeof useScmStatusQuery>["data"]) => {
+        (old: ScmStatusData | undefined) => {
           if (!old) return old;
           return applyOptimisticEntriesToStatus(old, transform(old.entries));
         },
@@ -259,15 +259,15 @@ export default function WorkspaceChangesPanel({
   }, []);
 
   /**
-   * On failure only: invalidate both queries so the cache reflects true server
-   * state. Never called on the success path — the backend snapshot event
-   * (applyGitSummary → queryClient.setQueryData) reconciles the cache
-   * without triggering a stale refetch that could snap back the optimistic view.
+   * On failure only: ask the backend for a fresh snapshot so the cache reverts
+   * to true server state, replacing any lingering optimistic data.
+   * Never called on the success path — the backend snapshot event
+   * (applyGitSnapshot → queryClient.setQueryData) reconciles the cache
+   * without any additional work.
    */
   const reconcileScmAfterFailedAction = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: scmStatusQueryKey(workspaceId) });
-    await queryClient.invalidateQueries({ queryKey: scmSummaryQueryKey(workspaceId) });
-  }, [queryClient, workspaceId]);
+    await gitRefresh(workspaceId);
+  }, [workspaceId]);
 
   // ---------------------------------------------------------------------------
   // Selection helpers

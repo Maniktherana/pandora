@@ -1,23 +1,24 @@
-import { useQuery } from "@tanstack/react-query";
-import type { QueryClient } from "@tanstack/react-query";
+import { useQuery, skipToken } from "@tanstack/react-query";
 import { gitCheckRuns } from "./git-api";
-import { gitInit, gitRefresh } from "./git-service";
 import { flattenGitSnapshot, buildGitDecorationIndex } from "./git-utils";
 import type { ScmSnapshot, ScmEntry } from "@/lib/shared/types";
+import { EMPTY_DECORATION_INDEX } from "./git-types";
 import type { GitDecorationIndex } from "./git-types";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const GIT_CHECK_RUNS_INTERVAL_MS = 15_000;
 const GIT_STALE_TIME_MS = 5_000;
 const GIT_GC_TIME_MS = 300_000;
-/** How long a query waits for the backend's first scm_snapshot before timing out. */
-const SCM_FETCH_TIMEOUT_MS = 10_000;
 
 type GitQueryOptions = {
   enabled?: boolean;
 };
 
 // ---------------------------------------------------------------------------
-// Existing: CI check-runs query (unchanged)
+// CI check-runs query — has a real queryFn because it polls GitHub, not SCM
 // ---------------------------------------------------------------------------
 
 export function useCheckRunsQuery(worktreePath: string, options?: GitQueryOptions) {
@@ -29,73 +30,6 @@ export function useCheckRunsQuery(worktreePath: string, options?: GitQueryOption
     refetchIntervalInBackground: false,
     staleTime: GIT_STALE_TIME_MS,
     gcTime: GIT_GC_TIME_MS,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Snapshot waiter registry
-//
-// Query functions call gitInit() then park a resolver here.
-// git-events.ts calls resolveScmSnapshotWaiters() when a scm_snapshot event
-// arrives, waking every waiting query for that workspace at once.
-// This keeps query fetchers fully decoupled from Zustand.
-// ---------------------------------------------------------------------------
-
-const pendingSnapshotWaiters = new Map<string, Set<(snapshot: ScmSnapshot) => void>>();
-
-/**
- * Called by git-events.ts on every incoming scm_snapshot event.
- * Resolves all query promises that are waiting for their first snapshot.
- */
-export function resolveScmSnapshotWaiters(scopeId: string, snapshot: ScmSnapshot): void {
-  const waiters = pendingSnapshotWaiters.get(scopeId);
-  if (!waiters) return;
-  pendingSnapshotWaiters.delete(scopeId);
-  for (const resolve of waiters) {
-    resolve(snapshot);
-  }
-}
-
-/**
- * Core queryFn primitive: ensures the backend subscription is started then
- * waits for the first snapshot event. Subsequent updates arrive via
- * queryClient.setQueryData in git-events.ts.
- *
- * If the subscription was already active (gitInit returned false), a new
- * scm_snapshot event is not guaranteed to arrive — so we call gitRefresh to
- * ask the backend to re-emit the current state. This handles refetch after
- * stale time, query invalidation, and failure recovery correctly.
- */
-function waitForScmSnapshot(workspaceId: string): Promise<ScmSnapshot> {
-  const newSubscription = gitInit(workspaceId);
-
-  if (!newSubscription) {
-    // Already subscribed; request a fresh snapshot so the waiter resolves
-    // promptly instead of sitting for up to SCM_FETCH_TIMEOUT_MS.
-    gitRefresh(workspaceId).catch((err: unknown) => {
-      console.warn(`[git] refresh failed for ${workspaceId}:`, err);
-    });
-  }
-
-  return new Promise<ScmSnapshot>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      cleanup();
-      reject(new Error(`SCM snapshot timeout for workspace ${workspaceId}`));
-    }, SCM_FETCH_TIMEOUT_MS);
-
-    const onSnapshot = (snapshot: ScmSnapshot) => {
-      cleanup();
-      resolve(snapshot);
-    };
-
-    const cleanup = () => {
-      window.clearTimeout(timer);
-      pendingSnapshotWaiters.get(workspaceId)?.delete(onSnapshot);
-    };
-
-    const set = pendingSnapshotWaiters.get(workspaceId) ?? new Set();
-    set.add(onSnapshot);
-    pendingSnapshotWaiters.set(workspaceId, set);
   });
 }
 
@@ -142,32 +76,28 @@ export function deriveScmSummary(snapshot: ScmSnapshot): ScmSummaryData {
 }
 
 /**
- * React Query hook for SCM summary data.
- * Disabled when workspaceId is null/empty (e.g. non-ready workspaces).
- * Rows render immediately with undefined data; data appears once the first
- * snapshot resolves — no blocking loader in workspace rows.
+ * Passive cache hook for SCM summary data.
+ *
+ * Subscribes to the React Query cache entry so the component re-renders when
+ * git-events.ts pushes a fresh snapshot via setQueryData. Returns cached data
+ * when present, undefined on cache miss.
+ *
+ * Contract:
+ * - queryFn is skipToken — never fetches, never starts backend work.
+ * - Data is written exclusively by applyGitSnapshot in git-events.ts.
+ * - Safe to call for null/undefined workspaceId; returns undefined.
  */
-export function useScmSummaryQuery(
+export function useScmSummaryCached(
   workspaceId: string | null | undefined,
-  options?: GitQueryOptions,
-) {
+): ScmSummaryData | undefined {
   const id = workspaceId ?? "";
-  return useQuery<ScmSummaryData>({
+  const { data } = useQuery<ScmSummaryData>({
     queryKey: scmSummaryQueryKey(id),
-    queryFn: () => waitForScmSnapshot(id).then(deriveScmSummary),
-    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
-    staleTime: GIT_STALE_TIME_MS,
+    queryFn: skipToken,
+    staleTime: Infinity,
     gcTime: GIT_GC_TIME_MS,
   });
-}
-
-/** Imperatively prefetch SCM summary for a workspace at app launch. */
-export function prefetchScmSummary(qc: QueryClient, workspaceId: string): Promise<void> {
-  return qc.prefetchQuery({
-    queryKey: scmSummaryQueryKey(workspaceId),
-    queryFn: () => waitForScmSnapshot(workspaceId).then(deriveScmSummary),
-    staleTime: GIT_STALE_TIME_MS,
-  });
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,28 +172,50 @@ export function applyOptimisticEntriesToStatus(
 }
 
 /**
- * React Query hook for full SCM status.
- * Disabled when workspaceId is null/empty.
+ * Passive cache hook for full SCM status.
+ *
+ * Subscribes to the React Query cache entry so the component re-renders when
+ * git-events.ts pushes a fresh snapshot via setQueryData. Returns cached data
+ * when present, undefined on cache miss.
+ *
+ * Contract:
+ * - queryFn is skipToken — never fetches, never starts backend work.
+ * - Data is written exclusively by applyGitSnapshot in git-events.ts.
+ * - Safe to call for null/undefined workspaceId; returns undefined.
  */
-export function useScmStatusQuery(
+export function useScmStatusCached(
   workspaceId: string | null | undefined,
-  options?: GitQueryOptions,
-) {
+): ScmStatusData | undefined {
   const id = workspaceId ?? "";
-  return useQuery<ScmStatusData>({
+  const { data } = useQuery<ScmStatusData>({
     queryKey: scmStatusQueryKey(id),
-    queryFn: () => waitForScmSnapshot(id).then(deriveScmStatus),
-    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
-    staleTime: GIT_STALE_TIME_MS,
+    queryFn: skipToken,
+    staleTime: Infinity,
     gcTime: GIT_GC_TIME_MS,
   });
+  return data;
 }
 
-/** Imperatively prefetch full SCM status for a workspace. */
-export function prefetchScmStatus(qc: QueryClient, workspaceId: string): Promise<void> {
-  return qc.prefetchQuery({
+// ---------------------------------------------------------------------------
+// Cached Git Decorations — read-only cache subscriber for FileTree badges
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the git decoration index from the existing React Query cache for
+ * this workspace. Returns EMPTY_DECORATION_INDEX when no snapshot has been
+ * cached yet.
+ *
+ * Contract:
+ * - Uses skipToken so queryFn is never invoked.
+ * - Never starts any backend work.
+ * - Subscribes to the scm-status cache entry so the file tree re-renders
+ *   reactively when decorations update, without owning the fetch lifecycle.
+ */
+export function useCachedGitDecorations(workspaceId: string): GitDecorationIndex {
+  const { data } = useQuery<ScmStatusData>({
     queryKey: scmStatusQueryKey(workspaceId),
-    queryFn: () => waitForScmSnapshot(workspaceId).then(deriveScmStatus),
-    staleTime: GIT_STALE_TIME_MS,
+    queryFn: skipToken,
+    staleTime: Infinity,
   });
+  return data?.decorationIndex ?? EMPTY_DECORATION_INDEX;
 }

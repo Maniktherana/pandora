@@ -1,46 +1,75 @@
-import type { ScmSnapshot } from "@/lib/shared/types";
+import type { ScmSnapshot, ScmEntry } from "@/lib/shared/types";
 import { queryClient } from "@/lib/query-client";
 import {
-  resolveScmSnapshotWaiters,
   scmSummaryQueryKey,
   scmStatusQueryKey,
   deriveScmSummary,
   deriveScmStatus,
+  type ScmStatusData,
+  type ScmSummaryData,
 } from "./git-queries";
 
-/**
- * Primary handler for incoming scm_snapshot events.
- *
- * 1. Resolves any query-function promises that are waiting for a first
- *    snapshot (waiter registry in git-queries.ts).
- * 2. Pushes fresh data directly into the React Query cache so all
- *    subscribers (workspace rows, SCM panel, review viewer) re-render
- *    immediately without a background refetch.
- */
+function scmEntriesEqual(a: ScmEntry[], b: ScmEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const ae = a[i];
+    const be = b[i];
+    if (
+      ae.path !== be.path ||
+      ae.stagedKind !== be.stagedKind ||
+      ae.worktreeKind !== be.worktreeKind ||
+      ae.untracked !== be.untracked ||
+      ae.origPath !== be.origPath ||
+      ae.lineStats.added !== be.lineStats.added ||
+      ae.lineStats.removed !== be.lineStats.removed
+    ) return false;
+  }
+  return true;
+}
+
 export function applyGitSnapshot(scopeId: string, snapshot: ScmSnapshot): void {
-  // Wake pending query fetchers for this workspace.
-  resolveScmSnapshotWaiters(scopeId, snapshot);
+  queryClient.setQueryData(scmSummaryQueryKey(scopeId), (prev: ScmSummaryData | undefined) => {
+    const next = deriveScmSummary(snapshot);
+    if (
+      prev &&
+      prev.branch === next.branch &&
+      prev.upstream === next.upstream &&
+      prev.ahead === next.ahead &&
+      prev.behind === next.behind &&
+      prev.targetBranch === next.targetBranch &&
+      prev.filesChanged === next.filesChanged &&
+      prev.lineStats.added === next.lineStats.added &&
+      prev.lineStats.removed === next.lineStats.removed
+    ) return prev;
+    return next;
+  });
 
-  // Push authoritative data into the React Query cache.
-  queryClient.setQueryData(scmSummaryQueryKey(scopeId), deriveScmSummary(snapshot));
-  queryClient.setQueryData(scmStatusQueryKey(scopeId), deriveScmStatus(snapshot));
+  queryClient.setQueryData(scmStatusQueryKey(scopeId), (prev: ScmStatusData | undefined) => {
+    const next = deriveScmStatus(snapshot);
+    if (!prev) return next;
+    const stagedSame = scmEntriesEqual(prev.stagedEntries, next.stagedEntries);
+    const unstagedSame = scmEntriesEqual(prev.unstagedEntries, next.unstagedEntries);
+    const entriesSame = scmEntriesEqual(prev.entries, next.entries);
+    if (
+      stagedSame && unstagedSame && entriesSame &&
+      prev.branch === next.branch &&
+      prev.upstream === next.upstream &&
+      prev.ahead === next.ahead &&
+      prev.behind === next.behind &&
+      prev.targetBranch === next.targetBranch &&
+      prev.lineStats.added === next.lineStats.added &&
+      prev.lineStats.removed === next.lineStats.removed
+    ) return prev;
+    return {
+      ...next,
+      entries: entriesSame ? prev.entries : next.entries,
+      stagedEntries: stagedSame ? prev.stagedEntries : next.stagedEntries,
+      unstagedEntries: unstagedSame ? prev.unstagedEntries : next.unstagedEntries,
+      decorationIndex: entriesSame ? prev.decorationIndex : next.decorationIndex,
+    };
+  });
 }
 
-/**
- * Called alongside applyGitSnapshot from the IPC event router.
- * The React Query cache update is handled entirely by applyGitSnapshot;
- * this is kept for router compatibility but performs no additional work.
- */
-export function applyGitSummary(_scopeId: string, _snapshot: ScmSnapshot): void {
-  // No-op: applyGitSnapshot above owns the cache and waiter resolution.
-}
-
-/** Signals that the backend is recomputing git status (no data change yet). */
-export function applyGitRefreshing(_scopeId: string): void {
-  // No-op for now; could update a per-workspace refreshing flag in future.
-}
-
-/** Records a backend git error; the affected query will remain stale. */
 export function applyGitError(_scopeId: string, message: string): void {
   console.error(`[git] backend error: ${message}`);
 }
