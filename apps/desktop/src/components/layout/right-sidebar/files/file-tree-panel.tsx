@@ -283,7 +283,8 @@ export function FileTreePanel({
     ctx?.context.close({ restoreFocus: false });
   }, [ctxState]);
 
-  if (bootStatus === "idle" || bootStatus === "loading") {
+  const hasRegistryData = getInitialPaths(stableRefs.current.workspaceId).length > 0;
+  if ((bootStatus === "idle" || bootStatus === "loading") && !hasRegistryData) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4">
         <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />

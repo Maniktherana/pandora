@@ -8,6 +8,7 @@ import {
   type ScmStatusData,
   type ScmSummaryData,
 } from "./git-queries";
+import { setScmEntries } from "@/services/file-tree/file-tree-decoration-coordinator";
 
 function scmEntriesEqual(a: ScmEntry[], b: ScmEntry[]): boolean {
   if (a.length !== b.length) return false;
@@ -68,6 +69,9 @@ export function applyGitSnapshot(scopeId: string, snapshot: ScmSnapshot): void {
       decorationIndex: entriesSame ? prev.decorationIndex : next.decorationIndex,
     };
   });
+
+  const entries = queryClient.getQueryData<ScmStatusData>(scmStatusQueryKey(scopeId))?.entries;
+  if (entries) setScmEntries(scopeId, entries);
 }
 
 export function applyGitError(_scopeId: string, message: string): void {

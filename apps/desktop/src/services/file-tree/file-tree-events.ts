@@ -32,6 +32,7 @@ export function applyFileTreeRuntimeEvent(event: IpcQueueEvent): void {
       applySnapshot(event.scopeId, event.snapshot.directories);
       break;
     case "file_tree_directory_changed":
+      useFileTreeStore.getState().setBooted(event.scopeId);
       applyDirectoryChanged(event.scopeId, event.path, event.entries);
       break;
     case "file_tree_file_read": {
