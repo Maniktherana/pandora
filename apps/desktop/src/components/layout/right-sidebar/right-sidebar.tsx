@@ -2,7 +2,6 @@ import { memo, useCallback, useRef } from "react";
 import WorkspaceChangesPanel from "@/components/layout/right-sidebar/scm/workspace-changes-panel";
 import { useLayoutStore } from "@/services/workspace/layout-store";
 import { findLeaf } from "@/components/layout/workspace/layout-tree";
-import { useScmStatusCached } from "@/services/git/git-queries";
 import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import type { LeftPanelMode } from "./files/files.types";
 import { useEditorActions } from "@/hooks/use-editor-actions";
@@ -24,7 +23,6 @@ export default memo(function RightSidebar({
   mode: LeftPanelMode;
 }) {
   const { openFile } = useEditorActions();
-  const statusData = useScmStatusCached(workspaceId);
   const { data: availableEditors } = useAvailableEditors();
   const treeRef = useRef<FileTreePanelHandle>(null);
 
@@ -75,7 +73,6 @@ export default memo(function RightSidebar({
             workspaceId={workspaceId}
             workspaceRoot={workspaceRoot}
             activePath={activePath}
-            scmEntries={statusData?.entries}
             availableEditors={availableEditors ?? []}
             onFileOpen={handleFileOpen}
           />

@@ -15,7 +15,6 @@ import type {
   ContextMenuOpenContext as PierreContextMenuOpenContext,
   FileTreeRenameEvent,
   FileTreeDropResult,
-  GitStatusEntry,
   FileTree as FileTreeModel,
 } from "@pierre/trees";
 import {
@@ -34,37 +33,42 @@ import {
   registerModel,
   unregisterModel,
   getInitialPaths,
-  getInitialIgnored,
   getDirectories,
   extractPaths,
 } from "@/services/file-tree/file-tree-model-registry";
-import type { ScmEntry } from "@/lib/shared/types";
-import { statusTone } from "@/services/git/git-utils";
-import type { TreeGitTone } from "@/services/git/git-types";
+import {
+  registerDecorationModel,
+  unregisterDecorationModel,
+  getInitialMergedStatus,
+} from "@/services/file-tree/file-tree-decoration-coordinator";
 import { joinAbsolutePath } from "@/lib/shared/utils";
 import DotGridLoader from "@/components/dot-grid-loader";
 
-function toneToGitStatus(tone: TreeGitTone): GitStatusEntry["status"] | null {
-  switch (tone) {
-    case "added": return "added";
-    case "modified": return "modified";
-    case "deleted": return "deleted";
-    case "renamed": return "renamed";
-    case "ignored": return "ignored";
-    default: return null;
-  }
-}
-
-function scmToGitStatus(entries: readonly ScmEntry[]): GitStatusEntry[] {
-  const result: GitStatusEntry[] = [];
-  for (const entry of entries) {
-    const tone = statusTone(entry);
-    const status = toneToGitStatus(tone);
-    if (status) result.push({ path: entry.path, status });
-    else if (entry.untracked) result.push({ path: entry.path, status: "untracked" });
-  }
-  return result;
-}
+/** Map @pierre/trees CSS variable overrides to the app theme so file tree
+ *  chrome and git-status colors stay in sync with the rest of the UI. */
+const fileTreeThemeStyle: CSSProperties = {
+  "--trees-bg-override": "var(--theme-bg)",
+  "--trees-fg-override": "var(--theme-text-subtle)",
+  "--trees-fg-muted-override": "var(--theme-text-muted)",
+  "--trees-bg-muted-override": "var(--theme-panel-hover)",
+  "--trees-accent-override": "var(--theme-interactive)",
+  "--trees-border-color-override": "var(--theme-border)",
+  "--trees-font-family-override": "var(--theme-font-sans)",
+  "--trees-focus-ring-color-override": "var(--theme-interactive)",
+  "--trees-selected-bg-override": "var(--theme-panel-hover)",
+  "--trees-selected-fg-override": "var(--theme-text)",
+  "--trees-selected-focused-border-color-override": "var(--theme-border)",
+  "--trees-search-bg-override": "var(--theme-panel)",
+  "--trees-search-fg-override": "var(--theme-text)",
+  "--trees-input-bg-override": "var(--theme-panel)",
+  "--trees-scrollbar-thumb-override": "var(--theme-scrollbar)",
+  "--trees-status-added-override": "var(--theme-scm-added)",
+  "--trees-status-modified-override": "var(--theme-scm-modified)",
+  "--trees-status-deleted-override": "var(--theme-scm-deleted)",
+  "--trees-status-renamed-override": "var(--theme-scm-renamed)",
+  "--trees-status-untracked-override": "var(--theme-scm-added)",
+  "--trees-status-ignored-override": "var(--theme-text-faint)",
+} as CSSProperties;
 
 function getParentPath(path: string): string {
   const normalized = path.endsWith("/") ? path.slice(0, -1) : path;
@@ -126,7 +130,6 @@ export type FileTreePanelProps = {
   workspaceId: string;
   workspaceRoot: string;
   activePath: string | null;
-  scmEntries: readonly ScmEntry[] | undefined;
   availableEditors: { id: string; displayName: string; category: string }[];
   onFileOpen: (workspaceId: string, workspaceRoot: string, path: string) => void;
 };
@@ -136,7 +139,6 @@ export function FileTreePanel({
   workspaceId,
   workspaceRoot,
   activePath,
-  scmEntries,
   availableEditors,
   onFileOpen,
 }: FileTreePanelProps) {
@@ -150,7 +152,7 @@ export function FileTreePanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialPaths = useMemo(() => getInitialPaths(workspaceId), []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialIgnored = useMemo(() => getInitialIgnored(workspaceId), []);
+  const initialMergedStatus = useMemo(() => getInitialMergedStatus(workspaceId), []);
 
   const handleRename = useCallback((event: FileTreeRenameEvent) => {
     const { workspaceId: wid, workspaceRoot: wroot, onFileOpen: openFn } = stableRefs.current;
@@ -204,18 +206,17 @@ export function FileTreePanel({
     },
     renaming: { onRename: handleRename },
     dragAndDrop: { onDropComplete: handleDrop },
-    gitStatus: initialIgnored,
+    gitStatus: initialMergedStatus,
   });
 
   useEffect(() => {
     registerModel(workspaceId, model);
-    return () => unregisterModel(workspaceId);
+    registerDecorationModel(workspaceId, model);
+    return () => {
+      unregisterModel(workspaceId);
+      unregisterDecorationModel(workspaceId);
+    };
   }, [workspaceId, model]);
-
-  useEffect(() => {
-    if (!scmEntries) return;
-    model.setGitStatus([...getInitialIgnored(stableRefs.current.workspaceId), ...scmToGitStatus(scmEntries)]);
-  }, [scmEntries, model]);
 
   useEffect(() => {
     if (activePath) model.focusNearestPath(activePath);
@@ -300,6 +301,7 @@ export function FileTreePanel({
         model={model}
         data-file-tree-sidebar="true"
         className="h-full"
+        style={fileTreeThemeStyle}
         renderContextMenu={renderMenu}
       />
       {ctxItem && ctxContext && (

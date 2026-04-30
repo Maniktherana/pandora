@@ -1,5 +1,6 @@
 import type { FileTree, FileTreeBatchOperation, GitStatusEntry } from "@pierre/trees";
 import type { FileTreeEntry } from "@/lib/shared/types";
+import { setIgnoredEntries } from "./file-tree-decoration-coordinator";
 
 const models = new Map<string, FileTree>();
 const dirs = new Map<string, Record<string, FileTreeEntry[]>>();
@@ -12,7 +13,7 @@ export function registerModel(scopeId: string, model: FileTree): void {
     const paths = extractPaths(d);
     pathCache.set(scopeId, new Set(paths));
     model.resetPaths(paths);
-    model.setGitStatus(extractIgnored(d));
+    setIgnoredEntries(scopeId, extractIgnored(d));
   }
 }
 
@@ -36,7 +37,7 @@ export function applySnapshot(
     pathCache.set(scopeId, new Set(nextPaths));
     model.resetPaths(nextPaths);
   }
-  model.setGitStatus(extractIgnored(directories));
+  setIgnoredEntries(scopeId, extractIgnored(directories));
 }
 
 export function applyDirectoryChanged(
@@ -51,7 +52,7 @@ export function applyDirectoryChanged(
   if (!model) return;
   const nextPaths = extractPaths(dirs.get(scopeId)!);
   applyDiff(scopeId, model, nextPaths);
-  model.setGitStatus(extractIgnored(dirs.get(scopeId)!));
+  setIgnoredEntries(scopeId, extractIgnored(dirs.get(scopeId)!));
 }
 
 function applyDiff(scopeId: string, model: FileTree, nextPaths: string[]): void {
