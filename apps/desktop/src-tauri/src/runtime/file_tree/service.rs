@@ -629,7 +629,7 @@ fn list_directory_tree_blocking(root: &Path) -> BTreeMap<String, Vec<FileTreeEnt
         };
         for fs_entry in read.filter_map(|e| e.ok()) {
             let name = fs_entry.file_name().to_string_lossy().into_owned();
-            if name == ".git" { continue; }
+            if name == ".git" || name == ".DS_Store" { continue; }
             let child_rel = if dir_rel.is_empty() {
                 name.clone()
             } else {
@@ -718,7 +718,7 @@ fn list_directory_blocking(root: &Path, relative: &str) -> Result<Vec<FileTreeEn
         .filter_map(|e| e.ok())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name == ".git" {
+            if name == ".git" || name == ".DS_Store" {
                 return None;
             }
             let kind = entry.file_type().ok()?;
