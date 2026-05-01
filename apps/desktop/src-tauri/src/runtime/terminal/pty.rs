@@ -32,7 +32,9 @@
 //! production Rust terminal (Wezterm, Zed, Warp) does.
 
 use bytes::Bytes;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+#[cfg(not(unix))]
+use portable_pty::Child;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -57,6 +59,7 @@ pub struct Pty {
     /// Cached writer for the master fd — avoids calling `take_writer()` on
     /// every keystroke, which would dup the fd each time.
     writer: Mutex<Box<dyn std::io::Write + Send>>,
+    #[cfg(not(unix))]
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     /// Cached PID for SIGSTOP/SIGCONT/SIGTERM. portable-pty doesn't keep
     /// returning it after `wait()`, so we capture it at spawn time.
@@ -142,7 +145,11 @@ impl Pty {
             })
             .map_err(|e| format!("spawn reader thread: {e}"))?;
 
+        #[cfg(not(unix))]
         let child_arc = Arc::new(Mutex::new(child));
+        #[cfg(unix)]
+        let mut waiter_child = child;
+        #[cfg(not(unix))]
         let waiter_child = Arc::clone(&child_arc);
         let (exit_tx, exit_rx) = oneshot::channel::<PtyExit>();
 
@@ -151,6 +158,9 @@ impl Pty {
         std::thread::Builder::new()
             .name("pandora-pty-waiter".into())
             .spawn(move || {
+                #[cfg(unix)]
+                let exit = { waiter_child.wait() };
+                #[cfg(not(unix))]
                 let exit = {
                     let mut child = waiter_child.lock().unwrap();
                     child.wait()
@@ -171,6 +181,7 @@ impl Pty {
             Pty {
                 master: Arc::new(Mutex::new(pair.master)),
                 writer: Mutex::new(writer),
+                #[cfg(not(unix))]
                 child: child_arc,
                 pid,
             },
@@ -235,8 +246,15 @@ impl Pty {
     /// Best-effort kill (SIGKILL on the immediate child). Idempotent — safe
     /// to call after the child has already exited.
     pub fn kill(&self) -> Result<(), String> {
-        let mut child = self.child.lock().unwrap();
-        child.kill().map_err(|e| format!("child kill: {e}"))
+        #[cfg(unix)]
+        {
+            self.signal_child(nix::sys::signal::Signal::SIGKILL)
+        }
+        #[cfg(not(unix))]
+        {
+            let mut child = self.child.lock().unwrap();
+            child.kill().map_err(|e| format!("child kill: {e}"))
+        }
     }
 }
 

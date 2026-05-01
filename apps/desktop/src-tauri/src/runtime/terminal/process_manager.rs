@@ -563,8 +563,11 @@ impl ProcessManager {
     /// Tear down an open session instance permanently (vs `stop_session`,
     /// which leaves the instance around for restart).
     pub async fn close_session(&self, session_id: &str) {
-        let mut inner = self.inner.lock().await;
-        if let Some(mut session) = inner.sessions.remove(session_id) {
+        let session = {
+            let mut inner = self.inner.lock().await;
+            inner.sessions.remove(session_id)
+        };
+        if let Some(mut session) = session {
             self.detach_locked(&mut session);
         }
     }

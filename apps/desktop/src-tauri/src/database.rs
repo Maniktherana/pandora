@@ -962,61 +962,6 @@ impl AppDatabase {
         Ok(())
     }
 
-    // ---------------------------------------------------------------------
-    // Seed data — creates the dormant "Terminal" slot+session for a fresh
-    // runtime that has no slot definitions yet.
-    // ---------------------------------------------------------------------
-
-    /// Create a dormant "Terminal" slot+session for a fresh runtime that has
-    /// no slot definitions yet. Idempotent — if any slot already exists for
-    /// this runtime_id, this is a no-op.
-    pub fn ensure_seed_data(&self, runtime_id: &str, default_cwd: &str) -> Result<(), String> {
-        let slot_count: i64 = {
-            let conn = self.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT COUNT(*) FROM slot_definitions WHERE runtime_id = ?1",
-                params![runtime_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0)
-        };
-        if slot_count > 0 {
-            return Ok(());
-        }
-
-        let slot_id = uuid::Uuid::new_v4().to_string();
-        let session_id = uuid::Uuid::new_v4().to_string();
-
-        let slot = SlotDefinition {
-            id: slot_id.clone(),
-            kind: SlotKind::TerminalSlot,
-            name: "Terminal".to_string(),
-            autostart: false,
-            presentation_mode: PresentationMode::Single,
-            primary_session_def_id: Some(session_id.clone()),
-            session_def_ids: vec![],
-            persisted: true,
-            sort_order: 0,
-        };
-        self.create_slot_definition(runtime_id, &slot)?;
-
-        let session = SessionDefinition {
-            id: session_id,
-            slot_id,
-            kind: SessionKind::Terminal,
-            name: "Terminal".to_string(),
-            command: "exec ${SHELL:-/bin/zsh} -i".to_string(),
-            cwd: Some(default_cwd.to_string()),
-            port: None,
-            env_overrides: std::collections::BTreeMap::new(),
-            restart_policy: RestartPolicy::Manual,
-            pause_supported: true,
-            resume_supported: true,
-        };
-        self.create_session_definition(runtime_id, &session)?;
-
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,56 +1151,6 @@ mod tests {
             "terminal_slot autostart should be cleared on open"
         );
         assert!(proc.autostart, "process_slot autostart should be preserved");
-
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn seeds_dormant_terminal_when_runtime_is_empty() {
-        let home = temp_pandora_home("seed");
-        let db = AppDatabase::open(&home).expect("open db");
-        let runtime = "test-runtime-3";
-
-        db.ensure_seed_data(runtime, "/tmp/pandora-project")
-            .expect("seed");
-
-        let slots = db.list_slot_definitions(runtime);
-        assert_eq!(slots.len(), 1);
-        let slot = &slots[0];
-        assert_eq!(slot.kind, SlotKind::TerminalSlot);
-        assert_eq!(slot.name, "Terminal");
-        assert!(!slot.autostart);
-        assert_eq!(slot.session_def_ids.len(), 1);
-
-        let sessions = db.list_session_definitions(runtime);
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].cwd.as_deref(), Some("/tmp/pandora-project"));
-        assert_eq!(sessions[0].command, "exec ${SHELL:-/bin/zsh} -i");
-        assert_eq!(sessions[0].kind, SessionKind::Terminal);
-
-        db.ensure_seed_data(runtime, "/tmp/pandora-project")
-            .expect("seed (idempotent)");
-        assert_eq!(db.list_slot_definitions(runtime).len(), 1);
-
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn removing_last_slot_allows_reseed() {
-        let home = temp_pandora_home("rearm");
-        let db = AppDatabase::open(&home).expect("open db");
-        let runtime = "test-runtime-4";
-
-        let slot = sample_slot("only-slot");
-        db.create_slot_definition(runtime, &slot)
-            .expect("create slot");
-
-        db.remove_slot_definition(runtime, &slot.id)
-            .expect("remove slot");
-
-        // After removing the last slot, ensure_seed_data should re-create one.
-        db.ensure_seed_data(runtime, "/tmp").expect("re-seed");
-        assert_eq!(db.list_slot_definitions(runtime).len(), 1);
 
         let _ = std::fs::remove_dir_all(&home);
     }

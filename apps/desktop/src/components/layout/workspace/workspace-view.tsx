@@ -137,14 +137,6 @@ function PaneView({
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
 
-  const slotsMap = useMemo(() => {
-    const map: Record<string, { id: string; sessionIDs: string[] }> = {};
-    for (const slot of scope?.slots ?? []) {
-      map[slot.id] = slot;
-    }
-    return map;
-  }, [scope?.slots]);
-
   const sessionsMap = useMemo(() => {
     const map: Record<string, SessionState> = {};
     for (const session of scope?.sessions ?? []) {
@@ -157,17 +149,11 @@ function PaneView({
     .map((t, i) => (t.kind === "terminal" ? { slotId: t.slotId, idx: i } : null))
     .filter((x): x is { slotId: string; idx: number } => x !== null);
 
-  const terminalSlotHasRenderableSession = (slotId: string) => {
-    const slot = slotsMap[slotId];
-    const sessionForSlot =
-      Object.values(sessionsMap).find((s) => s.slotID === slotId && s.status === "running") ??
-      (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
-    const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
-    return sessionId != null;
-  };
+  const terminalSlotHasLiveSession = (slotId: string) =>
+    Object.values(sessionsMap).some((s) => s.slotID === slotId);
 
   const anyTerminalRenderable = terminalSlots.some(({ slotId }) =>
-    terminalSlotHasRenderableSession(slotId),
+    terminalSlotHasLiveSession(slotId),
   );
 
   const onlyEditors =
@@ -280,12 +266,10 @@ function PaneView({
               </div>
             );
           }
-          const slot = slotsMap[tab.slotId];
-          const sessionForSlot =
-            Object.values(sessionsMap).find(
-              (s) => s.slotID === tab.slotId && s.status === "running",
-            ) ?? (slot?.sessionIDs[0] ? sessionsMap[slot.sessionIDs[0]] : undefined);
-          const sessionId = sessionForSlot?.id ?? slot?.sessionIDs[0] ?? null;
+          const sessionForSlot = Object.values(sessionsMap).find(
+            (s) => s.slotID === tab.slotId && s.status === "running",
+          ) ?? Object.values(sessionsMap).find((s) => s.slotID === tab.slotId);
+          const sessionId = sessionForSlot?.id ?? null;
           if (!sessionId) return null;
           if (!isActiveTab && !connectedSlotIds.has(tab.slotId)) return null;
           return (

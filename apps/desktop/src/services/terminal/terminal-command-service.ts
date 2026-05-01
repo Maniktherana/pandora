@@ -5,7 +5,11 @@ import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-
 import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
 import { seedProjectTerminal, seedWorkspaceTerminal } from "@/lib/terminal/terminal-seed";
 import { TerminalCommandError } from "@/services/service-errors";
-import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import {
+  setProjectTerminalPanelVisible,
+  showProjectTerminal,
+  showWorkspaceTerminalTab,
+} from "@/services/terminal/terminal-layout-binding";
 import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
 import { useLayoutStore } from "@/services/workspace/layout-store";
 
@@ -41,31 +45,20 @@ async function createProjectTerminal(scopeId: string, index?: number): Promise<v
   } catch (cause) {
     throw new TerminalCommandError({ cause, scopeId });
   }
-  desktopWorkspaceService.addProjectTerminalGroup(scopeId, seeded.slotID, index);
-  desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
+  showProjectTerminal(scopeId, seeded.slotID, index);
+  setProjectTerminalPanelVisible(scopeId, true);
 }
 
 async function closeTerminalSlot(scopeId: string, slotId: string): Promise<void> {
-  const scope = useTerminalScopeStore.getState().byScopeId[scopeId];
-  const slot = scope?.slots.find((s) => s.id === slotId);
-  const sessionIds = new Set<string>(slot?.sessionIDs ?? []);
-  for (const session of scope?.sessions ?? []) {
-    if (session.slotID === slotId) sessionIds.add(session.id);
+  const client = getIpcClient();
+  if (!client) {
+    console.warn("IPC client not available while closing terminal slot", { scopeId, slotId });
+    return;
   }
-
-  const client = requireIpcClient(scopeId);
   try {
     await client.send(scopeId, { type: "remove_slot", slotID: slotId });
   } catch (cause) {
-    throw new TerminalCommandError({ cause, scopeId });
-  }
-  for (const sessionId of sessionIds) {
-    await terminalSurfaceService.removeSurface(sessionId).catch((error) => {
-      console.warn("Failed to remove terminal surface after slot close:", error);
-    });
-  }
-  if (isProjectRuntimeKey(scopeId)) {
-    desktopWorkspaceService.closeProjectTerminal(scopeId, slotId);
+    console.warn("Failed to remove terminal slot in backend", { scopeId, slotId, cause });
   }
 }
 
@@ -89,8 +82,7 @@ export const terminalCommandService = {
     } catch (cause) {
       throw new TerminalCommandError({ cause, scopeId });
     }
-    const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
-    session.commands.addTerminalTab(seeded.slotID);
+    showWorkspaceTerminalTab(scopeId, seeded.slotID);
   },
 
   createWorkspaceTerminal: async (scopeId: string): Promise<void> => {
@@ -101,8 +93,7 @@ export const terminalCommandService = {
     } catch (cause) {
       throw new TerminalCommandError({ cause, scopeId });
     }
-    const session = desktopWorkspaceService.getWorkspaceSession(scopeId);
-    session.commands.addTerminalTab(seeded.slotID);
+    showWorkspaceTerminalTab(scopeId, seeded.slotID);
   },
 
   createProjectTerminal,
@@ -116,7 +107,7 @@ export const terminalCommandService = {
       throw new TerminalCommandError({ cause, scopeId });
     }
     desktopWorkspaceService.splitProjectTerminalGroup(scopeId, groupId, seeded.slotID);
-    desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
+    setProjectTerminalPanelVisible(scopeId, true);
   },
 
   closeTerminalSlot,
@@ -211,7 +202,7 @@ export const terminalCommandService = {
     if (!selectedProjectId || selectedWorkspace?.status !== "ready") return;
 
     const scopeId = projectRuntimeKey(selectedProjectId);
-    desktopWorkspaceService.setProjectTerminalPanelVisible(scopeId, true);
+    setProjectTerminalPanelVisible(scopeId, true);
 
     const scope = useTerminalScopeStore.getState().byScopeId[scopeId];
     if ((scope?.terminalPanel?.groups.length ?? 0) > 0) return;

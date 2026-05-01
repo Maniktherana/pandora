@@ -14,8 +14,9 @@ import type { TerminalAgentStatus } from "@/lib/shared/types";
 import type { IpcQueueEvent } from "@/services/ipc/ipc-event-queue";
 import { reconcileProjectTerminalPanelState } from "@/services/terminal/project-terminal-panel-model";
 import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { removeWorkspaceTerminalTab } from "@/services/terminal/terminal-layout-binding";
+import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
 import { useLayoutStore } from "@/services/workspace/layout-store";
-import { removeTerminalSlotFromWorkspaceLayout } from "@/services/workspace/workspace-layout-model";
 
 export interface TerminalEventHandlerContext {
   getSelectedWorkspaceId: () => string | null;
@@ -68,7 +69,17 @@ export function applyTerminalRuntimeEvent(
 ): void {
   switch (event.type) {
     case "slot_snapshot": {
+      const scopeBeforeSlotSnapshot = useTerminalScopeStore.getState().byScopeId[event.scopeId];
+      const liveSlotIds = new Set(event.slots.map((slot) => slot.id));
+      const deadSlotIds = (scopeBeforeSlotSnapshot?.slots ?? [])
+        .filter((s) => !liveSlotIds.has(s.id))
+        .map((s) => s.id);
+      const deadSessionIds = (scopeBeforeSlotSnapshot?.sessions ?? [])
+        .filter((s) => deadSlotIds.includes(s.slotID))
+        .map((s) => s.id);
+
       useTerminalScopeStore.getState().replaceSlots(event.scopeId, event.slots);
+
       if (isProjectRuntimeKey(event.scopeId)) {
         const scope = useTerminalScopeStore.getState().byScopeId[event.scopeId];
         const panel = reconcileProjectTerminalPanelState(
@@ -79,16 +90,22 @@ export function applyTerminalRuntimeEvent(
       } else {
         const layout = useLayoutStore.getState().byWorkspaceId[event.scopeId];
         if (layout?.root) {
-          const liveSlotIds = new Set(event.slots.map((slot) => slot.id));
-          const deadSlotIds = getAllTerminalSlotIds(layout.root).filter(
+          const layoutDeadSlotIds = getAllTerminalSlotIds(layout.root).filter(
             (id) => !liveSlotIds.has(id),
           );
-          for (const deadSlotId of deadSlotIds) {
-            removeTerminalSlotFromWorkspaceLayout(event.scopeId, deadSlotId);
+          for (const deadSlotId of layoutDeadSlotIds) {
+            removeWorkspaceTerminalTab(event.scopeId, deadSlotId);
           }
         }
         ensureLayoutSlotsForNewTerminals(event.scopeId);
       }
+
+      for (const sessionId of deadSessionIds) {
+        terminalSurfaceService.removeSurface(sessionId).catch((err) =>
+          console.error("Failed to destroy surface for removed slot session:", err),
+        );
+      }
+
       ctx.onSlotAdded(event.scopeId);
       ctx.onScopeUpdated?.(event.scopeId);
       break;
@@ -125,19 +142,48 @@ export function applyTerminalRuntimeEvent(
 
     case "slot_removed": {
       const scopeStateBeforeRemove = useTerminalScopeStore.getState().byScopeId[event.scopeId];
+      const removedSessionIds = (scopeStateBeforeRemove?.sessions ?? [])
+        .filter((s) => s.slotID === event.slotID)
+        .map((s) => s.id);
       const slotsAfterRemove = (scopeStateBeforeRemove?.slots ?? []).filter(
         (s) => s.id !== event.slotID,
       );
       useTerminalScopeStore.getState().replaceSlots(event.scopeId, slotsAfterRemove);
-      if (!isProjectRuntimeKey(event.scopeId)) {
-        removeTerminalSlotFromWorkspaceLayout(event.scopeId, event.slotID);
+
+      if (isProjectRuntimeKey(event.scopeId)) {
+        const scope = useTerminalScopeStore.getState().byScopeId[event.scopeId];
+        if (scope?.terminalPanel) {
+          useTerminalScopeStore
+            .getState()
+            .setTerminalPanel(
+              event.scopeId,
+              removeTerminalFromPanel(scope.terminalPanel, event.slotID),
+            );
+        }
+      } else {
+        removeWorkspaceTerminalTab(event.scopeId, event.slotID);
       }
+
+      for (const sessionId of removedSessionIds) {
+        terminalSurfaceService.removeSurface(sessionId).catch((err) =>
+          console.error("Failed to destroy surface for removed slot:", err),
+        );
+      }
+
       ctx.onScopeUpdated?.(event.scopeId);
       break;
     }
 
     case "session_snapshot": {
+      const scopeBeforeSessionSnapshot =
+        useTerminalScopeStore.getState().byScopeId[event.scopeId];
+      const liveSessionIds = new Set(event.sessions.map((s) => s.id));
+      const deadSessionIds = (scopeBeforeSessionSnapshot?.sessions ?? [])
+        .filter((s) => !liveSessionIds.has(s.id))
+        .map((s) => s.id);
+
       useTerminalScopeStore.getState().replaceSessions(event.scopeId, event.sessions);
+
       const scope = useTerminalScopeStore.getState().byScopeId[event.scopeId];
       if (!scope) break;
       const layout = useLayoutStore.getState().byWorkspaceId[event.scopeId];
@@ -157,6 +203,13 @@ export function applyTerminalRuntimeEvent(
         });
       }
       useTerminalScopeStore.getState().setAgentStatuses(event.scopeId, statusMap);
+
+      for (const sessionId of deadSessionIds) {
+        terminalSurfaceService.removeSurface(sessionId).catch((err) =>
+          console.error("Failed to destroy surface for disappeared session:", err),
+        );
+      }
+
       ctx.onScopeUpdated?.(event.scopeId);
       break;
     }
@@ -190,6 +243,9 @@ export function applyTerminalRuntimeEvent(
         (s) => s.id !== event.sessionID,
       );
       useTerminalScopeStore.getState().replaceSessions(event.scopeId, sessionsAfterClose);
+      terminalSurfaceService.removeSurface(event.sessionID).catch((err) =>
+        console.error("Failed to destroy surface for closed session:", err),
+      );
       ctx.onScopeUpdated?.(event.scopeId);
       break;
     }
@@ -224,24 +280,29 @@ export function applyTerminalRuntimeEvent(
       scopeStore.updateSession(event.scopeId, event.session);
       scopeStore.setAgentStatuses(event.scopeId, statusMap);
 
-      const crashedTerminalSlotId =
-        isProjectRuntimeKey(event.scopeId) &&
+      const isTerminalDead =
         event.session.kind === "terminal" &&
-        event.session.status === "crashed"
-          ? event.session.slotID
-          : null;
+        (event.session.status === "crashed" || event.session.status === "stopped");
 
-      if (crashedTerminalSlotId) {
-        const after = useTerminalScopeStore.getState().byScopeId[event.scopeId];
-        if (after?.terminalPanel) {
-          useTerminalScopeStore
-            .getState()
-            .setTerminalPanel(
-              event.scopeId,
-              removeTerminalFromPanel(after.terminalPanel, crashedTerminalSlotId),
-            );
+      if (isTerminalDead) {
+        if (isProjectRuntimeKey(event.scopeId)) {
+          const after = useTerminalScopeStore.getState().byScopeId[event.scopeId];
+          if (after?.terminalPanel) {
+            useTerminalScopeStore
+              .getState()
+              .setTerminalPanel(
+                event.scopeId,
+                removeTerminalFromPanel(after.terminalPanel, event.session.slotID),
+              );
+          }
+        } else {
+          removeWorkspaceTerminalTab(event.scopeId, event.session.slotID);
         }
+        terminalSurfaceService.removeSurface(event.session.id).catch((err) =>
+          console.error("Failed to destroy surface for dead terminal session:", err),
+        );
       }
+
       ctx.onScopeUpdated?.(event.scopeId);
       break;
     }

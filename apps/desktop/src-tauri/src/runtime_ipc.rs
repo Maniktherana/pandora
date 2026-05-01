@@ -447,8 +447,7 @@ async fn dispatch(
                 .await;
         }
         IpcCommand::RequestSnapshot => {
-            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
-            scope.process_manager.emit_snapshots().await;
+            ensure_terminal_with_snapshot(registries, &db, &app, scope_id).await?;
         }
         IpcCommand::AgentCliSignal { signal } => {
             let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
@@ -674,11 +673,23 @@ async fn ensure_terminal(
         .await
         .map_err(|err| format!("open terminal scope failed for {scope_id}: {err}"))?;
 
-    scope.process_manager.emit_snapshots().await;
     if was_new {
         scope.process_manager.autostart_slots().await;
         scope.process_manager.open_dormant_terminal_sessions().await;
     }
+    // Snapshot emission is caller-owned so mutating commands do not leak the
+    // pre-mutation view, while RequestSnapshot can still emit explicitly.
+    Ok(scope)
+}
+
+async fn ensure_terminal_with_snapshot(
+    registries: &DomainRegistries,
+    db: &Arc<AppDatabase>,
+    app: &AppHandle,
+    scope_id: &str,
+) -> Result<crate::runtime::terminal::registry::TerminalScope, String> {
+    let scope = ensure_terminal(registries, db, app, scope_id).await?;
+    scope.process_manager.emit_snapshots().await;
     Ok(scope)
 }
 

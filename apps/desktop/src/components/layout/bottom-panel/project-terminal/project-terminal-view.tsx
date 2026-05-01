@@ -264,11 +264,7 @@ export default function ProjectTerminalView({ scopeId }: ProjectTerminalViewProp
                       scopeId={scopeId}
                       groupId={group.id}
                       slot={slotMap.get(group.children[0])}
-                      sessionId={
-                        sessionMap.get(group.children[0])?.id ??
-                        slotMap.get(group.children[0])?.sessionIDs[0] ??
-                        null
-                      }
+                      sessionId={sessionMap.get(group.children[0])?.id ?? null}
                       visible={groupVisible}
                       active={groupVisible && panel.activeSlotId === group.children[0]}
                     />
@@ -285,11 +281,7 @@ export default function ProjectTerminalView({ scopeId }: ProjectTerminalViewProp
                             scopeId={scopeId}
                             groupId={group.id}
                             slot={slotMap.get(slotId)}
-                            sessionId={
-                              sessionMap.get(slotId)?.id ??
-                              slotMap.get(slotId)?.sessionIDs[0] ??
-                              null
-                            }
+                            sessionId={sessionMap.get(slotId)?.id ?? null}
                             visible={groupVisible}
                             active={groupVisible && panel.activeSlotId === slotId}
                           />
