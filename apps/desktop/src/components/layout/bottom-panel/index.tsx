@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useSelectedProject, useSelectedWorkspace, useSelectedWorkspaceId } from "@/hooks/use-navigation";
@@ -18,6 +18,8 @@ type BottomPanelProps = {
 
 export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: BottomPanelProps) {
   const [tab, setTab] = useState<BottomTab>("terminal");
+  const previousProjectKeyRef = useRef("");
+  const hadTerminalGroupsRef = useRef(false);
   const project = useSelectedProject();
   const selectedWs = useSelectedWorkspace();
   const selectedWorkspaceID = useSelectedWorkspaceId();
@@ -48,6 +50,21 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
     if (!projectKey || !activeGroup) return;
     projectTerminalCommands.splitProjectTerminalGroup(projectKey, activeGroup.id);
   }, [projectKey, projectTerminalCommands]);
+
+  useEffect(() => {
+    const previousProjectKey = previousProjectKeyRef.current;
+    const hadTerminalGroups = hadTerminalGroupsRef.current;
+    previousProjectKeyRef.current = projectKey;
+    hadTerminalGroupsRef.current = hasTerminalGroups;
+    if (
+      tab === "terminal" &&
+      previousProjectKey === projectKey &&
+      hadTerminalGroups &&
+      !hasTerminalGroups
+    ) {
+      onCollapse();
+    }
+  }, [hasTerminalGroups, onCollapse, projectKey, tab]);
 
   if (!project || selectedWs?.status !== "ready") {
     return <div className="h-full min-h-[120px] bg-[var(--theme-bg)]" />;

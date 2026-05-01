@@ -163,11 +163,14 @@ export function TabDragOverlay({
         if (!drag.scopeId || !drag.slotId || !terminalPanel) return;
         if (tgt.kind === "bottom-terminal-pane" && tgt.scopeId === drag.scopeId) {
           if (tgt.zone === "center") {
-            projectTerminalCommands.selectProjectTerminalGroup(
-              tgt.scopeId,
-              drag.groupId!,
-              drag.slotId,
-            );
+            if (drag.groupId !== tgt.groupId) {
+              projectTerminalCommands.moveProjectTerminalToGroup(
+                tgt.scopeId,
+                drag.slotId,
+                tgt.groupId,
+              );
+            }
+            projectTerminalCommands.selectProjectTerminalGroup(tgt.scopeId, tgt.groupId, drag.slotId);
             return;
           }
           const targetGroup = terminalPanel.groups.find((group) => group.id === tgt.groupId);

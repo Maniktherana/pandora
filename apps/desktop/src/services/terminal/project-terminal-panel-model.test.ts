@@ -65,4 +65,16 @@ describe("project terminal panel reconciliation", () => {
       visible: true,
     });
   });
+
+  test("hides the panel when the last terminal disappears", () => {
+    const panel = makePanel([{ id: "group-a", children: ["terminal-a"] }], 0, "terminal-a");
+    const result = reconcileProjectTerminalPanelState(panel, []);
+
+    expect(result).toEqual({
+      groups: [],
+      activeGroupIndex: 0,
+      activeSlotId: null,
+      visible: false,
+    });
+  });
 });

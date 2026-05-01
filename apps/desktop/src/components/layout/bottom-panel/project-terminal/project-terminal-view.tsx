@@ -19,7 +19,6 @@ import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import type { SlotState } from "@/lib/shared/types";
 import { cn } from "@/lib/shared/utils";
 import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
-import DotGridLoader from "@/components/dot-grid-loader";
 import ProjectTerminalSidebar from "./project-terminal-sidebar";
 import type { ProjectTerminalAnchorInfo } from "../project-terminal.types";
 import { createSlotMap, createSessionMap } from "../project-terminal.utils";
@@ -121,7 +120,7 @@ function TerminalPane({
   return (
     <div
       data-bottom-terminal-pane-id={slot?.id ?? ""}
-      data-bottom-terminal-runtime-id={scopeId}
+      data-bottom-terminal-scope-id={scopeId}
       data-bottom-terminal-group-id={groupId}
       className={cn("relative h-full min-h-0 overflow-hidden rounded-sm bg-neutral-950", {
         "ring-1 ring-neutral-700/60": active,
@@ -204,6 +203,7 @@ export default function ProjectTerminalView({ scopeId }: ProjectTerminalViewProp
   const connectedSlotIds = useLazyTerminalSlotConnections(scopeId, visibleSlotIds, liveSlotIds);
   const slotMap = useMemo(() => createSlotMap(slots), [slots]);
   const sessionMap = useMemo(() => createSessionMap(sessions), [sessions]);
+  const isEmpty = !panel || panel.groups.length === 0;
 
   const registerTerminalAnchor = useCallback(
     (sessionId: string, info: ProjectTerminalAnchorInfo | null) => {
@@ -230,69 +230,56 @@ export default function ProjectTerminalView({ scopeId }: ProjectTerminalViewProp
     [],
   );
 
+  if (isEmpty) {
+    return null;
+  }
+
   return (
     <NativeTerminalRegContext.Provider value={registerTerminalAnchor}>
       <div className="flex h-full min-h-0 flex-row">
         <div className="relative min-h-0 min-w-0 flex-1">
-          {!panel || panel.groups.length === 0 ? (
-            <div className="flex h-full items-center justify-center px-4 text-center text-[var(--theme-text-subtle)]">
-              <div className="flex flex-col items-center">
-                <DotGridLoader
-                  variant="default"
-                  gridSize={5}
-                  sizeClassName="h-8 w-8"
-                  className="opacity-90"
-                />
+          {panel.groups.map((group, groupIndex) => {
+            const groupVisible = panel.visible && groupIndex === panel.activeGroupIndex;
+            return (
+              <div
+                key={group.id}
+                className="absolute inset-0"
+                style={{
+                  visibility: groupVisible ? "visible" : "hidden",
+                  pointerEvents: groupVisible ? "auto" : "none",
+                }}
+                aria-hidden={!groupVisible}
+              >
+                {group.children.length === 1 ? (
+                  <TerminalPane
+                    connectedSlotIds={connectedSlotIds}
+                    scopeId={scopeId}
+                    groupId={group.id}
+                    slot={slotMap.get(group.children[0])}
+                    sessionId={sessionMap.get(group.children[0])?.id ?? null}
+                    visible={groupVisible}
+                    active={groupVisible && panel.activeSlotId === group.children[0]}
+                  />
+                ) : (
+                  <ResizableTerminalGroup>
+                    {group.children.map((slotId) => (
+                      <ResizablePanel key={slotId} defaultSize={100 / group.children.length} minSize={12}>
+                        <TerminalPane
+                          connectedSlotIds={connectedSlotIds}
+                          scopeId={scopeId}
+                          groupId={group.id}
+                          slot={slotMap.get(slotId)}
+                          sessionId={sessionMap.get(slotId)?.id ?? null}
+                          visible={groupVisible}
+                          active={groupVisible && panel.activeSlotId === slotId}
+                        />
+                      </ResizablePanel>
+                    ))}
+                  </ResizableTerminalGroup>
+                )}
               </div>
-            </div>
-          ) : (
-            panel.groups.map((group, groupIndex) => {
-              const groupVisible = panel.visible && groupIndex === panel.activeGroupIndex;
-              return (
-                <div
-                  key={group.id}
-                  className="absolute inset-0"
-                  style={{
-                    visibility: groupVisible ? "visible" : "hidden",
-                    pointerEvents: groupVisible ? "auto" : "none",
-                  }}
-                  aria-hidden={!groupVisible}
-                >
-                  {group.children.length === 1 ? (
-                    <TerminalPane
-                      connectedSlotIds={connectedSlotIds}
-                      scopeId={scopeId}
-                      groupId={group.id}
-                      slot={slotMap.get(group.children[0])}
-                      sessionId={sessionMap.get(group.children[0])?.id ?? null}
-                      visible={groupVisible}
-                      active={groupVisible && panel.activeSlotId === group.children[0]}
-                    />
-                  ) : (
-                    <ResizableTerminalGroup>
-                      {group.children.map((slotId) => (
-                        <ResizablePanel
-                          key={slotId}
-                          defaultSize={100 / group.children.length}
-                          minSize={12}
-                        >
-                          <TerminalPane
-                            connectedSlotIds={connectedSlotIds}
-                            scopeId={scopeId}
-                            groupId={group.id}
-                            slot={slotMap.get(slotId)}
-                            sessionId={sessionMap.get(slotId)?.id ?? null}
-                            visible={groupVisible}
-                            active={groupVisible && panel.activeSlotId === slotId}
-                          />
-                        </ResizablePanel>
-                      ))}
-                    </ResizableTerminalGroup>
-                  )}
-                </div>
-              );
-            })
-          )}
+            );
+          })}
           <HoistedNativeTerminals scopeId={scopeId} anchors={anchors} />
         </div>
         <ProjectTerminalSidebar scopeId={scopeId} />
