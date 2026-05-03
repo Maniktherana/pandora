@@ -15,7 +15,6 @@ use crate::models::{
     PresentationMode, RestartPolicy, SessionDefinition, SessionKind, SlotDefinition, SlotKind,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // Status enums.
@@ -199,12 +198,12 @@ pub struct FileTreeEntry {
     pub is_ignored: bool,
 }
 
-/// `directories` keys the workspace root by `""`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeSnapshot {
     pub root_path: String,
-    pub directories: BTreeMap<String, Vec<FileTreeEntry>>,
+    pub paths: Vec<String>,
+    pub directory_paths: Vec<String>,
     pub expanded_paths: Vec<String>,
 }
 

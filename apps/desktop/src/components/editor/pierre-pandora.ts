@@ -19,7 +19,7 @@ const codeSurface = defaultTheme.codeEditor.surface;
 let pierreThemeRegistered = false;
 
 const pierreWorkerFactory = () => new Worker(PierreWorkerUrl, { type: "module" });
-const pierreWorkerPoolOptions = { workerFactory: pierreWorkerFactory, poolSize: 4 };
+const pierreWorkerPoolOptions = { workerFactory: pierreWorkerFactory, poolSize: 1 };
 const pierreHighlighterOptions = { theme: PANDORA_PIERRE_THEME };
 
 function registerPandoraPierreTheme() {

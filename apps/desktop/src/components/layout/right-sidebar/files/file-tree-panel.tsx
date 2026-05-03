@@ -9,7 +9,7 @@ import {
   type Ref,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useFileTree, FileTree } from "@pierre/trees/react";
+import { FileTree } from "@pierre/trees/react";
 import type {
   ContextMenuItem as PierreContextMenuItem,
   ContextMenuOpenContext as PierreContextMenuOpenContext,
@@ -30,17 +30,18 @@ import {
 import { getIpcClient } from "@/lib/services/ipc/lifecycle";
 import { useFileTreeStore } from "@/lib/services/file-tree/store";
 import {
-  registerModel,
-  unregisterModel,
+  clearFileTreeModelRuntime,
   getInitialPaths,
-  getDirectories,
-  extractPaths,
+  getCachedDirectoryPaths,
+  getOrCreateFileTreeModel,
+  hasCachedFileTree,
+  setFileTreeModelRuntime,
+  type FileTreeModelRuntime,
 } from "@/lib/services/file-tree/model-registry";
 import { persistFileTreeExpandedPaths } from "@/lib/services/preferences/file-tree";
 import {
   registerDecorationModel,
   unregisterDecorationModel,
-  getInitialMergedStatus,
 } from "@/lib/services/file-tree/decorations";
 import { joinAbsolutePath } from "@/lib/shared/utils";
 import DotGridLoader from "@/components/dot-grid-loader";
@@ -157,11 +158,6 @@ export function FileTreePanel({
 
   const pendingCreateRef = useRef<string | null>(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialPaths = useMemo(() => getInitialPaths(workspaceId), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialMergedStatus = useMemo(() => getInitialMergedStatus(workspaceId), []);
-
   const handleRename = useCallback((event: FileTreeRenameEvent) => {
     const { workspaceId: wid, workspaceRoot: wroot, onFileOpen: openFn } = stableRefs.current;
     const ipc = getIpcClient();
@@ -195,59 +191,78 @@ export function FileTreePanel({
     }
   }, []);
 
-  const { model } = useFileTree({
-    paths: initialPaths,
-    search: true,
-    icons: "complete",
-    density: "compact",
-    flattenEmptyDirectories: true,
-    initialExpansion: "closed",
-    ...(activePath ? { initialSelectedPaths: [activePath] } : {}),
-    onSelectionChange: (selected) => {
-      const path = selected[0];
-      if (!path) return;
-      const handle = model.getItem(path);
-      if (handle && !handle.isDirectory()) {
-        const s = stableRefs.current;
-        s.onFileOpen(s.workspaceId, s.workspaceRoot, path);
-      }
-    },
-    renaming: { onRename: handleRename },
-    dragAndDrop: { onDropComplete: handleDrop },
-    gitStatus: initialMergedStatus,
-  });
+  const model = useMemo(
+    () =>
+      getOrCreateFileTreeModel(
+        workspaceId,
+        {
+          search: true,
+          icons: "complete",
+          density: "compact",
+          flattenEmptyDirectories: true,
+          initialExpansion: "closed",
+        },
+        activePath,
+      ),
+    [activePath, workspaceId],
+  );
 
   useEffect(() => {
-    registerModel(workspaceId, model);
+    const runtime: FileTreeModelRuntime = {
+      onSelectionChange: (selected) => {
+        const path = selected[0];
+        if (!path) return;
+        const handle = model.getItem(path);
+        if (handle && !handle.isDirectory()) {
+          const s = stableRefs.current;
+          s.onFileOpen(s.workspaceId, s.workspaceRoot, path);
+        }
+      },
+      onRename: handleRename,
+      onDropComplete: handleDrop,
+    };
+    setFileTreeModelRuntime(workspaceId, runtime);
+    return () => clearFileTreeModelRuntime(workspaceId, runtime);
+  }, [handleDrop, handleRename, model, workspaceId]);
+
+  useEffect(() => {
     registerDecorationModel(workspaceId, model);
     return () => {
-      unregisterModel(workspaceId);
       unregisterDecorationModel(workspaceId);
     };
   }, [workspaceId, model]);
 
   useEffect(() => {
-    const getExpandedPaths = () => {
-      const dirs = getDirectories(workspaceId);
-      if (!dirs) return [];
-      return extractPaths(dirs)
+    const getExpandedPaths = () =>
+      getCachedDirectoryPaths(workspaceId)
         .filter((path) => {
-          if (!path.endsWith("/")) return false;
           const item = model.getItem(path);
           if (!isDirectoryItem(item)) return false;
           return item.isExpanded();
         })
         .sort();
-    };
 
-    let lastSerialized = JSON.stringify(getExpandedPaths());
-    return model.subscribe(() => {
+    let lastSerialized: string | null = null;
+    let collectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const collect = () => {
+      collectTimer = null;
       const expandedPaths = getExpandedPaths();
       const nextSerialized = JSON.stringify(expandedPaths);
       if (nextSerialized === lastSerialized) return;
       lastSerialized = nextSerialized;
       persistFileTreeExpandedPaths(workspaceId, expandedPaths).catch(console.error);
+    };
+
+    const unsubscribe = model.subscribe(() => {
+      if (collectTimer !== null) return;
+      collectTimer = setTimeout(collect, 100);
     });
+
+    return () => {
+      unsubscribe();
+      if (collectTimer !== null) clearTimeout(collectTimer);
+    };
   }, [workspaceId, model]);
 
   useEffect(() => {
@@ -279,9 +294,8 @@ export function FileTreePanel({
   }, [model, addEntry]);
 
   const doCollapseAll = useCallback(() => {
-    const dirs = getDirectories(stableRefs.current.workspaceId);
-    if (!dirs) return;
-    model.resetPaths(extractPaths(dirs), { initialExpandedPaths: [] });
+    const paths = getInitialPaths(stableRefs.current.workspaceId);
+    model.resetPaths(paths, { initialExpandedPaths: [] });
   }, [model]);
 
   useImperativeHandle(ref, () => ({
@@ -315,10 +329,13 @@ export function FileTreePanel({
     ctx?.context.close({ restoreFocus: false });
   }, [ctxState]);
 
-  const hasRegistryData = getInitialPaths(stableRefs.current.workspaceId).length > 0;
-  if ((bootStatus === "idle" || bootStatus === "loading") && !hasRegistryData) {
+  const hasRegistryData = hasCachedFileTree(stableRefs.current.workspaceId);
+  if (!hasRegistryData) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center px-4">
+      <div
+        className="flex h-full min-h-0 items-center justify-center px-4"
+        data-file-tree-boot-status={bootStatus}
+      >
         <DotGridLoader variant="default" gridSize={5} sizeClassName="h-8 w-8" className="opacity-90" />
       </div>
     );

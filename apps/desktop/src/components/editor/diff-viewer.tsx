@@ -26,6 +26,25 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
+const DIFF_ACTIVATION_DELAY_MS = 120;
+const LARGE_DIFF_CONTENT_BYTES = 120_000;
+
+function scheduleDiffActivation(callback: () => void): () => void {
+  if (typeof window === "undefined") {
+    callback();
+    return () => {};
+  }
+
+  let timeoutId: number | null = null;
+  const frameId = window.requestAnimationFrame(() => {
+    timeoutId = window.setTimeout(callback, DIFF_ACTIVATION_DELAY_MS);
+  });
+
+  return () => {
+    window.cancelAnimationFrame(frameId);
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  };
+}
 
 function loadSideBySide(): boolean {
   if (typeof window === "undefined") return true;
@@ -81,15 +100,25 @@ export default memo(function DiffViewer({
   const staged = source === "staged";
   const [sideBySide, setSideBySide] = useState(loadSideBySide);
   const [storedWrapLines, setStoredWrapLines] = useState(loadWrapLines);
+  const [activeReady, setActiveReady] = useState(false);
 
-  // "Enabled once ever active" — fetches as soon as the tab is first activated,
-  // then stays enabled so cached content is visible instantly on switch-back.
-  // Avoids fetching for tabs mounted-but-never-viewed while still preventing
-  // a blank-flash when switching back to a previously-loaded diff.
-  const [everActive, setEverActive] = useState(isActive);
   useEffect(() => {
-    if (isActive && !everActive) setEverActive(true);
-  }, [isActive, everActive]);
+    if (!isActive) {
+      setActiveReady(false);
+      return;
+    }
+
+    setActiveReady(false);
+    return scheduleDiffActivation(() => setActiveReady(true));
+  }, [isActive, relativePath, source, targetBranch, workspaceRoot]);
+
+  // Enabled after the active tab has had a chance to paint.  Diff parsing and
+  // Pierre DOM hydration are expensive enough that they cannot participate in
+  // workspace-switch commit/layout effects.
+  const [everActive, setEverActive] = useState(false);
+  useEffect(() => {
+    if (activeReady && !everActive) setEverActive(true);
+  }, [activeReady, everActive]);
 
   const setSideBySidePersist = useCallback((next: boolean) => {
     setSideBySide(next);
@@ -113,7 +142,7 @@ export default memo(function DiffViewer({
     queryKey: diffContentsQueryKey(workspaceRoot, relativePath, source, targetBranch),
     queryFn: () =>
       fetchDiffContents(workspaceRoot, relativePath, source, targetBranch, readWorkingCopy),
-    enabled: everActive,
+    enabled: everActive && activeReady,
     staleTime: DIFF_CONTENTS_STALE_TIME_MS,
     gcTime: DIFF_CONTENTS_GC_TIME_MS,
   });
@@ -154,17 +183,17 @@ export default memo(function DiffViewer({
         original,
         modified,
       }),
-    enabled: hasDiff,
+    enabled: activeReady && hasDiff,
     staleTime: Infinity,
     gcTime: DIFF_CONTENTS_GC_TIME_MS,
   });
 
-  const loading = contentLoading || (hasDiff && parseQuery.status === "pending");
+  const loading = !activeReady || contentLoading || (hasDiff && parseQuery.status === "pending");
   const error = contentError;
-  const noDiff = !contentLoading && !contentError && original === modified;
+  const noDiff = activeReady && !contentLoading && !contentError && original === modified;
   const diffStyle: PierreDiffStyle = controlledDiffStyle ?? (sideBySide ? "split" : "unified");
   const wrapLines = controlledWrapLines ?? storedWrapLines;
-  const isLarge = Math.max(original.length, modified.length) > 500_000;
+  const isLarge = Math.max(original.length, modified.length) > LARGE_DIFF_CONTENT_BYTES;
 
   const diffMetadata: FileDiffMetadata | null = parseQuery.data?.diffMetadata ?? null;
   const parseError = parseQuery.data?.parseError ?? (parseQuery.error ? String(parseQuery.error) : null);
@@ -305,7 +334,7 @@ export default memo(function DiffViewer({
             No changes to show for this file.
           </div>
         )}
-        {!displayError && !loading && diffMetadata && (
+        {!displayError && activeReady && !loading && diffMetadata && (
           <PierreFileDiff
             fileDiff={diffMetadata}
             options={options}

@@ -1,5 +1,5 @@
 import { useFileTreeStore } from "./store";
-import { applySnapshot, applyDirectoryChanged } from "./model-registry";
+import { scheduleSnapshot, scheduleDirectoryChanged } from "./model-registry";
 import { pendingFileTreeReads, pendingFileTreeWrites } from "./pending-requests";
 import type { IpcQueueEvent } from "@/lib/services/ipc/events";
 
@@ -28,12 +28,10 @@ export function isFileTreeEvent(
 export function applyFileTreeRuntimeEvent(event: IpcQueueEvent): void {
   switch (event.type) {
     case "file_tree_snapshot":
-      useFileTreeStore.getState().setBooted(event.scopeId);
-      applySnapshot(event.scopeId, event.snapshot.directories);
+      scheduleSnapshot(event.scopeId, event.snapshot);
       break;
     case "file_tree_directory_changed":
-      useFileTreeStore.getState().setBooted(event.scopeId);
-      applyDirectoryChanged(event.scopeId, event.path, event.entries);
+      scheduleDirectoryChanged(event.scopeId, event.path, event.entries);
       break;
     case "file_tree_file_read": {
       const resolver = pendingFileTreeReads.get(event.requestID);

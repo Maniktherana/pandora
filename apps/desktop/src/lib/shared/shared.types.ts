@@ -86,7 +86,8 @@ export interface FileTreeEntry {
 
 export interface FileTreeSnapshot {
   rootPath: string;
-  directories: Record<string, FileTreeEntry[]>;
+  paths: string[];
+  directoryPaths: string[];
   expandedPaths: string[];
 }
 
@@ -348,5 +349,4 @@ export interface AppState {
   selectedProjectId: string | null;
   selectedWorkspaceId: string | null;
 }
-
 
