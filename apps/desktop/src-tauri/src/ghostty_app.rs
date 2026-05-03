@@ -11,6 +11,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
+unsafe extern "C" {
+    fn pandora_terminal_view_update_scrollbar_for_surface(
+        surface: ghostty_surface_t,
+        total: u64,
+        offset: u64,
+        length: u64,
+    );
+}
+
 /// Process-global ghostty app handle. Must only be accessed from the main thread.
 static GHOSTTY_APP: OnceLock<GhosttyAppState> = OnceLock::new();
 static TAURI_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -165,12 +174,25 @@ unsafe extern "C" fn runtime_wakeup_cb(userdata: *mut c_void) {
 }
 
 /// Called when ghostty wants to perform a runtime action (new_window, new_tab, etc.).
-/// We return false for all actions since we don't handle ghostty-initiated actions.
+/// We handle surface-local UI state that Ghostty expects the host runtime to own.
 unsafe extern "C" fn runtime_action_cb(
     _app: ghostty_app_t,
-    _target: ghostty_target_s,
-    _action: ghostty_action_s,
+    target: ghostty_target_s,
+    action: ghostty_action_s,
 ) -> bool {
+    if target.tag == ghostty_target_tag_e::GHOSTTY_TARGET_SURFACE
+        && action.tag == ghostty_action_tag_e::GHOSTTY_ACTION_SCROLLBAR
+    {
+        let surface = target.target.surface;
+        let scrollbar = action.action.scrollbar;
+        pandora_terminal_view_update_scrollbar_for_surface(
+            surface,
+            scrollbar.total,
+            scrollbar.offset,
+            scrollbar.len,
+        );
+        return true;
+    }
     false
 }
 

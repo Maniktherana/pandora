@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <dispatch/dispatch.h>
 #import "ghostty.h"
 
 typedef struct {
@@ -59,15 +60,40 @@ static BOOL PandoraMatchesCommandKey(NSEvent *event, unsigned short keyCode, uni
     return firstChar == fallbackChar || firstChar == (fallbackChar - 32);
 }
 
-/// Embedded Ghostty host-managed surface is more sensitive than standalone Ghostty’s AppKit path;
-/// trackpad deltas are scaled down heavily so scrollback matches the real app.
-static const double kPandoraScrollScalePrecise = 0.13;
-static const double kPandoraScrollScaleDiscrete = 0.40;
+static const double kPandoraScrollbarMinimumKnobProportion = 0.03;
+static const double kPandoraScrollbarWidth = 12.0;
+static const double kPandoraScrollbarThumbWidth = 5.0;
+static const double kPandoraScrollbarMinimumThumbHeight = 18.0;
+static const double kPandoraScrollbarRightInset = 10.0;
+static const double kPandoraScrollbarVerticalInset = 2.0;
 
-static void PandoraScaledScrollDeltas(NSEvent *event, double *outDx, double *outDy) {
-    double scale = [event hasPreciseScrollingDeltas] ? kPandoraScrollScalePrecise : kPandoraScrollScaleDiscrete;
-    *outDx = event.scrollingDeltaX * scale;
-    *outDy = event.scrollingDeltaY * scale;
+static ghostty_input_mouse_momentum_e PandoraMomentumFromPhase(NSEventPhase phase) {
+    switch (phase) {
+    case NSEventPhaseBegan:
+        return GHOSTTY_MOUSE_MOMENTUM_BEGAN;
+    case NSEventPhaseStationary:
+        return GHOSTTY_MOUSE_MOMENTUM_STATIONARY;
+    case NSEventPhaseChanged:
+        return GHOSTTY_MOUSE_MOMENTUM_CHANGED;
+    case NSEventPhaseEnded:
+        return GHOSTTY_MOUSE_MOMENTUM_ENDED;
+    case NSEventPhaseCancelled:
+        return GHOSTTY_MOUSE_MOMENTUM_CANCELLED;
+    case NSEventPhaseMayBegin:
+        return GHOSTTY_MOUSE_MOMENTUM_MAY_BEGIN;
+    case NSEventPhaseNone:
+    default:
+        return GHOSTTY_MOUSE_MOMENTUM_NONE;
+    }
+}
+
+static ghostty_input_scroll_mods_t PandoraScrollModsFromEvent(NSEvent *event) {
+    ghostty_input_scroll_mods_t mods = 0;
+    if (event.hasPreciseScrollingDeltas) {
+        mods |= 1;
+    }
+    mods |= ((ghostty_input_scroll_mods_t)PandoraMomentumFromPhase(event.momentumPhase)) << 1;
+    return mods;
 }
 
 static BOOL PandoraRectsOverlap(NSRect a, NSRect b) {
@@ -100,9 +126,17 @@ static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects
     return merged;
 }
 
+@class PandoraTerminalScrollbarView;
+
 @interface PandoraTerminalNativeView : NSView
 @property(nonatomic, assign) ghostty_surface_t surface;
 @property(nonatomic, copy, nullable) NSString *sessionID;
+@property(nonatomic, strong) PandoraTerminalScrollbarView *pandoraScroller;
+@property(nonatomic, assign) uint64_t pandoraScrollbarTotal;
+@property(nonatomic, assign) uint64_t pandoraScrollbarOffset;
+@property(nonatomic, assign) uint64_t pandoraScrollbarLength;
+@property(nonatomic, assign) BOOL pandoraScrollbarTracking;
+@property(nonatomic, assign) uint64_t pandoraScrollbarTrackingOffset;
 @property(nonatomic, strong, nullable) NSTimer *selectionAutoscrollTimer;
 @property(nonatomic, assign) double selectionAutoscrollDeltaY;
 @property(nonatomic, assign) ghostty_input_mods_e selectionAutoscrollMods;
@@ -112,12 +146,327 @@ static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects
 @property(nonatomic, copy, nullable) NSArray<NSValue *> *pandoraWebOverlayOcclusionRects;
 @property(nonatomic, strong, nullable) CAShapeLayer *pandoraWebOverlayMaskLayer;
 @property(nonatomic, weak, nullable) NSView *pandoraForwardedMouseTarget;
+- (BOOL)pandoraScrollbarIsScrollable;
+- (uint64_t)pandoraScrollbarActiveOffset;
+- (uint64_t)pandoraScrollbarPageRows;
+- (NSRect)pandoraScrollbarThumbRectForBounds:(NSRect)bounds;
+- (uint64_t)pandoraScrollbarOffsetForThumbOriginY:(CGFloat)thumbY bounds:(NSRect)bounds;
+- (void)pandoraBeginScrollbarTracking;
+- (void)pandoraEndScrollbarTracking;
+- (void)pandoraSetScrollbarPredictedOffset:(uint64_t)offset;
 @end
+
+@interface PandoraTerminalScrollbarView : NSView
+@property(nonatomic, weak, nullable) PandoraTerminalNativeView *pandoraOwner;
+@property(nonatomic, assign) BOOL pandoraHovering;
+@property(nonatomic, assign) BOOL pandoraDragging;
+@property(nonatomic, assign) CGFloat pandoraDragThumbOffsetY;
+@property(nonatomic, strong, nullable) NSTrackingArea *pandoraTrackingArea;
+@end
+
+@implementation PandoraTerminalScrollbarView
+
+- (void)updateTrackingAreas {
+    if (self.pandoraTrackingArea != nil) {
+        [self removeTrackingArea:self.pandoraTrackingArea];
+        self.pandoraTrackingArea = nil;
+    }
+    NSTrackingAreaOptions options = NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect;
+    self.pandoraTrackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
+                                                            options:options
+                                                              owner:self
+                                                           userInfo:nil];
+    [self addTrackingArea:self.pandoraTrackingArea];
+    [super updateTrackingAreas];
+}
+
+- (BOOL)isOpaque {
+    return NO;
+}
+
+- (void)mouseEntered:(NSEvent *)event {
+    (void)event;
+    self.pandoraHovering = YES;
+    self.needsDisplay = YES;
+}
+
+- (void)mouseExited:(NSEvent *)event {
+    (void)event;
+    self.pandoraHovering = NO;
+    self.needsDisplay = YES;
+}
+
+- (BOOL)pandoraUsingDarkAppearance {
+    NSString *match = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[
+        NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua,
+    ]];
+    return [match isEqualToString:NSAppearanceNameDarkAqua];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    PandoraTerminalNativeView *owner = self.pandoraOwner;
+    if (owner == nil || ![owner pandoraScrollbarIsScrollable]) {
+        return;
+    }
+
+    BOOL dark = [self pandoraUsingDarkAppearance];
+    CGFloat centerX = NSMidX(self.bounds);
+    NSRect track = NSMakeRect(
+        floor(centerX - (kPandoraScrollbarThumbWidth / 2.0)),
+        NSMinY(self.bounds),
+        kPandoraScrollbarThumbWidth,
+        NSHeight(self.bounds)
+    );
+    NSRect thumb = [owner pandoraScrollbarThumbRectForBounds:self.bounds];
+
+    CGFloat trackAlpha = self.pandoraHovering || self.pandoraDragging ? 0.12 : 0.05;
+    CGFloat thumbAlpha = self.pandoraDragging ? 0.78 : (self.pandoraHovering ? 0.62 : 0.44);
+    NSColor *trackColor = dark
+        ? [NSColor colorWithWhite:1.0 alpha:trackAlpha]
+        : [NSColor colorWithWhite:0.0 alpha:trackAlpha];
+    NSColor *thumbColor = dark
+        ? [NSColor colorWithWhite:0.88 alpha:thumbAlpha]
+        : [NSColor colorWithWhite:0.16 alpha:thumbAlpha];
+
+    [trackColor setFill];
+    NSRectFillUsingOperation(track, NSCompositingOperationSourceOver);
+    [thumbColor setFill];
+    NSRectFillUsingOperation(NSIntegralRect(thumb), NSCompositingOperationSourceOver);
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    PandoraTerminalNativeView *owner = self.pandoraOwner;
+    if (owner == nil || ![owner pandoraScrollbarIsScrollable]) {
+        return;
+    }
+
+    [self.pandoraOwner pandoraBeginScrollbarTracking];
+    self.pandoraDragging = YES;
+    self.needsDisplay = YES;
+
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    NSRect thumb = [owner pandoraScrollbarThumbRectForBounds:self.bounds];
+    if (!NSPointInRect(point, thumb)) {
+        uint64_t base = [owner pandoraScrollbarActiveOffset];
+        uint64_t page = [owner pandoraScrollbarPageRows];
+        if (point.y > NSMaxY(thumb)) {
+            [owner pandoraSetScrollbarPredictedOffset:(base > page ? base - page : 0)];
+        } else {
+            uint64_t maxOffset = owner.pandoraScrollbarTotal - owner.pandoraScrollbarLength;
+            [owner pandoraSetScrollbarPredictedOffset:MIN(maxOffset, base + page)];
+        }
+        self.pandoraDragging = NO;
+        self.needsDisplay = YES;
+        [owner pandoraEndScrollbarTracking];
+        return;
+    }
+
+    self.pandoraDragThumbOffsetY = point.y - NSMinY(thumb);
+    while (true) {
+        NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
+        if (next.type == NSEventTypeLeftMouseUp) {
+            break;
+        }
+        if (next.type != NSEventTypeLeftMouseDragged) {
+            continue;
+        }
+
+        NSPoint dragPoint = [self convertPoint:next.locationInWindow fromView:nil];
+        CGFloat thumbY = dragPoint.y - self.pandoraDragThumbOffsetY;
+        uint64_t targetOffset = [owner pandoraScrollbarOffsetForThumbOriginY:thumbY bounds:self.bounds];
+        [owner pandoraSetScrollbarPredictedOffset:targetOffset];
+    }
+
+    self.pandoraDragging = NO;
+    self.needsDisplay = YES;
+    [self.pandoraOwner pandoraEndScrollbarTracking];
+}
+
+@end
+
+static NSMapTable<NSValue *, PandoraTerminalNativeView *> *PandoraSurfaceViewMap(void) {
+    static NSMapTable<NSValue *, PandoraTerminalNativeView *> *map;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = [NSMapTable strongToWeakObjectsMapTable];
+    });
+    return map;
+}
+
+static void PandoraRegisterSurfaceView(ghostty_surface_t surface, PandoraTerminalNativeView *view) {
+    if (surface == NULL || view == nil) {
+        return;
+    }
+    NSMapTable<NSValue *, PandoraTerminalNativeView *> *map = PandoraSurfaceViewMap();
+    @synchronized(map) {
+        [map setObject:view forKey:[NSValue valueWithPointer:surface]];
+    }
+}
+
+static void PandoraUnregisterSurfaceView(ghostty_surface_t surface) {
+    if (surface == NULL) {
+        return;
+    }
+    NSMapTable<NSValue *, PandoraTerminalNativeView *> *map = PandoraSurfaceViewMap();
+    @synchronized(map) {
+        [map removeObjectForKey:[NSValue valueWithPointer:surface]];
+    }
+}
+
+static PandoraTerminalNativeView *PandoraViewForSurface(ghostty_surface_t surface) {
+    if (surface == NULL) {
+        return nil;
+    }
+    NSMapTable<NSValue *, PandoraTerminalNativeView *> *map = PandoraSurfaceViewMap();
+    @synchronized(map) {
+        return [map objectForKey:[NSValue valueWithPointer:surface]];
+    }
+}
 
 @implementation PandoraTerminalNativeView
 
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self == nil) {
+        return nil;
+    }
+
+    _pandoraScroller = [[PandoraTerminalScrollbarView alloc] initWithFrame:NSZeroRect];
+    _pandoraScroller.pandoraOwner = self;
+    _pandoraScroller.hidden = YES;
+    [self addSubview:_pandoraScroller];
+    [self pandoraLayoutScrollbar];
+
+    return self;
+}
+
 - (void)dealloc {
+    PandoraUnregisterSurfaceView(self.surface);
     [self pandoraStopSelectionAutoscroll];
+}
+
+- (void)pandoraLayoutScrollbar {
+    if (self.pandoraScroller == nil) {
+        return;
+    }
+    NSRect bounds = self.bounds;
+    CGFloat x = NSMaxX(bounds) - kPandoraScrollbarWidth - kPandoraScrollbarRightInset;
+    CGFloat y = NSMinY(bounds) + kPandoraScrollbarVerticalInset;
+    CGFloat height = fmax(0.0, NSHeight(bounds) - (kPandoraScrollbarVerticalInset * 2.0));
+    self.pandoraScroller.frame = NSMakeRect(x, y, kPandoraScrollbarWidth, height);
+    self.pandoraScroller.needsDisplay = YES;
+}
+
+- (BOOL)pandoraScrollbarIsScrollable {
+    return self.pandoraScrollbarTotal > self.pandoraScrollbarLength && self.pandoraScrollbarLength > 0;
+}
+
+- (uint64_t)pandoraScrollbarActiveOffset {
+    return self.pandoraScrollbarTracking ? self.pandoraScrollbarTrackingOffset : self.pandoraScrollbarOffset;
+}
+
+- (uint64_t)pandoraScrollbarPageRows {
+    return MAX(1, self.pandoraScrollbarLength);
+}
+
+- (NSRect)pandoraScrollbarThumbRectForBounds:(NSRect)bounds {
+    if (![self pandoraScrollbarIsScrollable]) {
+        return NSZeroRect;
+    }
+
+    uint64_t maxOffset = self.pandoraScrollbarTotal - self.pandoraScrollbarLength;
+    uint64_t offset = MIN([self pandoraScrollbarActiveOffset], maxOffset);
+    double value = maxOffset == 0 ? 1.0 : (double)offset / (double)maxOffset;
+    double knob = (double)self.pandoraScrollbarLength / (double)self.pandoraScrollbarTotal;
+    knob = fmin(1.0, fmax(kPandoraScrollbarMinimumKnobProportion, knob));
+
+    CGFloat trackHeight = NSHeight(bounds);
+    CGFloat thumbHeight = fmin(trackHeight, fmax(kPandoraScrollbarMinimumThumbHeight, trackHeight * knob));
+    CGFloat travel = fmax(0.0, trackHeight - thumbHeight);
+    CGFloat thumbY = NSMaxY(bounds) - thumbHeight - (travel * value);
+    CGFloat thumbX = floor(NSMidX(bounds) - (kPandoraScrollbarThumbWidth / 2.0));
+    return NSMakeRect(thumbX, thumbY, kPandoraScrollbarThumbWidth, thumbHeight);
+}
+
+- (uint64_t)pandoraScrollbarOffsetForThumbOriginY:(CGFloat)thumbY bounds:(NSRect)bounds {
+    if (![self pandoraScrollbarIsScrollable]) {
+        return 0;
+    }
+
+    NSRect thumb = [self pandoraScrollbarThumbRectForBounds:bounds];
+    CGFloat trackHeight = NSHeight(bounds);
+    CGFloat travel = fmax(0.0, trackHeight - NSHeight(thumb));
+    if (travel <= 0.0) {
+        return 0;
+    }
+
+    CGFloat clampedY = fmin(NSMaxY(bounds) - NSHeight(thumb), fmax(NSMinY(bounds), thumbY));
+    CGFloat value = (NSMaxY(bounds) - NSHeight(thumb) - clampedY) / travel;
+    value = fmin(1.0, fmax(0.0, value));
+    uint64_t maxOffset = self.pandoraScrollbarTotal - self.pandoraScrollbarLength;
+    return (uint64_t)llround(value * (double)maxOffset);
+}
+
+- (void)pandoraBeginScrollbarTracking {
+    self.pandoraScrollbarTracking = YES;
+    self.pandoraScrollbarTrackingOffset = self.pandoraScrollbarOffset;
+}
+
+- (void)pandoraEndScrollbarTracking {
+    self.pandoraScrollbarTracking = NO;
+    self.pandoraScrollbarTrackingOffset = self.pandoraScrollbarOffset;
+}
+
+- (void)pandoraScrollByRows:(double)rows {
+    if (self.surface == NULL || fabs(rows) < 0.5) {
+        return;
+    }
+    ghostty_surface_mouse_scroll(self.surface, 0, rows, 0);
+}
+
+- (void)pandoraSetScrollbarPredictedOffset:(uint64_t)offset {
+    if (self.pandoraScrollbarTotal <= self.pandoraScrollbarLength) {
+        return;
+    }
+
+    uint64_t maxOffset = self.pandoraScrollbarTotal - self.pandoraScrollbarLength;
+    if (offset > maxOffset) {
+        offset = maxOffset;
+    }
+
+    uint64_t base = self.pandoraScrollbarTracking ? self.pandoraScrollbarTrackingOffset : self.pandoraScrollbarOffset;
+    int64_t delta = (int64_t)offset - (int64_t)base;
+    if (delta == 0) {
+        return;
+    }
+
+    [self pandoraScrollByRows:(double)delta];
+    self.pandoraScrollbarTracking = YES;
+    self.pandoraScrollbarTrackingOffset = offset;
+    self.pandoraScroller.needsDisplay = YES;
+}
+
+- (void)pandoraUpdateScrollbarTotal:(uint64_t)total offset:(uint64_t)offset length:(uint64_t)length {
+    self.pandoraScrollbarTotal = total;
+    self.pandoraScrollbarOffset = offset;
+    self.pandoraScrollbarLength = length;
+
+    BOOL visible = total > length && length > 0;
+    self.pandoraScroller.hidden = !visible;
+    if (!visible) {
+        self.pandoraScrollbarTracking = NO;
+        return;
+    }
+
+    uint64_t maxOffset = total - length;
+    if (offset > maxOffset) {
+        offset = maxOffset;
+        self.pandoraScrollbarOffset = offset;
+    }
+    [self pandoraLayoutScrollbar];
+    self.pandoraScroller.needsDisplay = YES;
 }
 
 /// Ghostty needs an explicit pixel grid + content scale (host-managed path). Pure native terminals
@@ -154,6 +503,7 @@ static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects
 
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
+    [self pandoraLayoutScrollbar];
     [self pandoraApplyWebOverlayOcclusionMask];
 }
 
@@ -382,7 +732,7 @@ static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects
         self.selectionAutoscrollPoint.y,
         self.selectionAutoscrollMods
     );
-    ghostty_surface_mouse_scroll(self.surface, 0, self.selectionAutoscrollDeltaY, self.selectionAutoscrollMods);
+    ghostty_surface_mouse_scroll(self.surface, 0, self.selectionAutoscrollDeltaY, 0);
 }
 
 - (void)pandoraUpdateSelectionAutoscrollForPoint:(NSPoint)point mods:(ghostty_input_mods_e)mods {
@@ -690,9 +1040,13 @@ static NSArray<NSValue *> *PandoraMergedOcclusionRects(NSArray<NSValue *> *rects
     if (self.surface == NULL) {
         return;
     }
-    double dx, dy;
-    PandoraScaledScrollDeltas(event, &dx, &dy);
-    ghostty_surface_mouse_scroll(self.surface, dx, dy, 0);
+    double dx = event.scrollingDeltaX;
+    double dy = event.scrollingDeltaY;
+    if (event.hasPreciseScrollingDeltas) {
+        dx *= 2.0;
+        dy *= 2.0;
+    }
+    ghostty_surface_mouse_scroll(self.surface, dx, dy, PandoraScrollModsFromEvent(event));
 }
 
 @end
@@ -705,8 +1059,37 @@ void *pandora_terminal_view_new(double x, double y, double width, double height)
 
 void pandora_terminal_view_set_surface(void *view_ptr, ghostty_surface_t surface) {
     PandoraTerminalNativeView *view = (__bridge PandoraTerminalNativeView *) view_ptr;
+    if (view.surface != NULL && view.surface != surface) {
+        PandoraUnregisterSurfaceView(view.surface);
+    }
     view.surface = surface;
+    if (surface != NULL) {
+        PandoraRegisterSurfaceView(surface, view);
+    } else {
+        [view pandoraUpdateScrollbarTotal:0 offset:0 length:0];
+    }
     [view pandoraSyncBackingToSurface];
+}
+
+void pandora_terminal_view_update_scrollbar_for_surface(
+    ghostty_surface_t surface,
+    uint64_t total,
+    uint64_t offset,
+    uint64_t length
+) {
+    void (^updateBlock)(void) = ^{
+        PandoraTerminalNativeView *view = PandoraViewForSurface(surface);
+        if (view == nil) {
+            return;
+        }
+        [view pandoraUpdateScrollbarTotal:total offset:offset length:length];
+    };
+
+    if (NSThread.isMainThread) {
+        updateBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), updateBlock);
+    }
 }
 
 void pandora_terminal_view_set_session_id(void *view_ptr, const char *session_id) {
