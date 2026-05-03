@@ -20,7 +20,7 @@ import {
   PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
-import type { DiffSource } from "@/lib/shared/types";
+import type { DiffSource } from "@/lib/shared/shared.types";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,7 @@ import {
 import {
   parsedDiffQueryKey,
   parseDiffInWorker,
-} from "@/services/diff/diff-worker-client";
+} from "@/lib/services/diff/worker-client";
 import { buildRowModel, reviewStatsKey, type ReviewRowData } from "@/components/editor/review-row-model";
 import DiffViewer, { type DiffViewerStats } from "@/components/editor/diff-viewer";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
@@ -44,8 +44,8 @@ import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status
 import type {
   GitLineStats,
   TreeGitDecoration,
-} from "@/services/git/git-types";
-import type { ScmEntry } from "@/lib/shared/types";
+} from "@/lib/services/git/git.types";
+import type { ScmEntry } from "@/lib/shared/shared.types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,21 +54,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/shared/utils";
-import { useReviewNavigationStore } from "@/services/editor/review-navigation-store";
-import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
+import { useReviewNavigationStore } from "@/lib/services/editor/review-navigation";
+import { editorReadWorkingCopyText } from "@/lib/services/editor/commands";
 import {
   formatTargetBranch,
   resolveWorkspaceTargetBranch,
 } from "@/components/layout/right-sidebar/scm/target-branch";
-import { useScmStatusCached, scmStatusQueryKey } from "@/services/git/git-queries";
-import { useBranchContext } from "@/services/git/git-store";
+import { useScmStatusCached, scmStatusQueryKey } from "@/lib/services/git/queries";
+import { useBranchContext } from "@/lib/services/git/store";
 import {
   gitRefresh,
   gitStage,
   gitUnstage,
   gitDiscardTracked,
   gitDiscardUntracked,
-} from "@/services/git/git-service";
+} from "@/lib/services/git/commands";
 
 const STORAGE_SIDE = "pandora.diff.renderSideBySide";
 const STORAGE_WRAP = "pandora.diff.wrapLines";
@@ -124,10 +124,6 @@ function persistWrapLines(wrapLines: boolean) {
   } catch {
     /* ignore */
   }
-}
-
-function hasStaged(entry: ScmEntry): boolean {
-  return entry.stagedKind != null && entry.stagedKind !== "";
 }
 
 function hasUnstaged(entry: ScmEntry): boolean {

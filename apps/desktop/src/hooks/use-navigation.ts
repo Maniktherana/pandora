@@ -1,6 +1,5 @@
-import { useNavigationStore } from "@/services/workspace/navigation-store";
-import { useCatalogStore } from "@/services/workspace/catalog-store";
-import type { NavigationArea } from "@/services/workspace/desktop-view-projections";
+import { useNavigationStore, type NavigationArea } from "@/lib/services/navigation/store";
+import { useCatalogStore } from "@/lib/services/catalog/store";
 
 export function useProjects() {
   return useCatalogStore((s) => s.projects);

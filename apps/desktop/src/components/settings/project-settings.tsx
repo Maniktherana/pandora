@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Input } from "@/components/ui/input";
-import type { ProjectRecord, ProjectSettings as ProjectSettingsType } from "@/lib/shared/types";
+import type { ProjectRecord, ProjectSettings as ProjectSettingsType } from "@/lib/shared/shared.types";
 import ScriptEditorSection from "./script-editor-section";
 
 interface ProjectSettingsProps {

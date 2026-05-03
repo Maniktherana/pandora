@@ -27,20 +27,21 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getIpcClient } from "@/services/ipc/ipc-lifecycle";
-import { useFileTreeStore } from "@/services/file-tree/file-tree-store";
+import { getIpcClient } from "@/lib/services/ipc/lifecycle";
+import { useFileTreeStore } from "@/lib/services/file-tree/store";
 import {
   registerModel,
   unregisterModel,
   getInitialPaths,
   getDirectories,
   extractPaths,
-} from "@/services/file-tree/file-tree-model-registry";
+} from "@/lib/services/file-tree/model-registry";
+import { persistFileTreeExpandedPaths } from "@/lib/services/preferences/file-tree";
 import {
   registerDecorationModel,
   unregisterDecorationModel,
   getInitialMergedStatus,
-} from "@/services/file-tree/file-tree-decoration-coordinator";
+} from "@/lib/services/file-tree/decorations";
 import { joinAbsolutePath } from "@/lib/shared/utils";
 import DotGridLoader from "@/components/dot-grid-loader";
 
@@ -99,6 +100,13 @@ function getUniquePath(model: FileTreeModel, basePath: string): string {
     }
   }
   return candidate;
+}
+
+type FileTreeItem = NonNullable<ReturnType<FileTreeModel["getItem"]>>;
+type FileTreeDirectoryItem = Extract<FileTreeItem, { isDirectory(): true }>;
+
+function isDirectoryItem(item: FileTreeItem | null): item is FileTreeDirectoryItem {
+  return item?.isDirectory() === true;
 }
 
 function strip(p: string): string {
@@ -216,6 +224,30 @@ export function FileTreePanel({
       unregisterModel(workspaceId);
       unregisterDecorationModel(workspaceId);
     };
+  }, [workspaceId, model]);
+
+  useEffect(() => {
+    const getExpandedPaths = () => {
+      const dirs = getDirectories(workspaceId);
+      if (!dirs) return [];
+      return extractPaths(dirs)
+        .filter((path) => {
+          if (!path.endsWith("/")) return false;
+          const item = model.getItem(path);
+          if (!isDirectoryItem(item)) return false;
+          return item.isExpanded();
+        })
+        .sort();
+    };
+
+    let lastSerialized = JSON.stringify(getExpandedPaths());
+    return model.subscribe(() => {
+      const expandedPaths = getExpandedPaths();
+      const nextSerialized = JSON.stringify(expandedPaths);
+      if (nextSerialized === lastSerialized) return;
+      lastSerialized = nextSerialized;
+      persistFileTreeExpandedPaths(workspaceId, expandedPaths).catch(console.error);
+    });
   }, [workspaceId, model]);
 
   useEffect(() => {

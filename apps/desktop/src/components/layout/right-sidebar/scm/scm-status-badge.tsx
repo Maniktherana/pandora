@@ -1,6 +1,6 @@
 import { clsx } from "clsx";
-import type { TreeGitTone } from "@/services/git/git-types";
-import { gitToneTextClass } from "@/services/git/git-utils";
+import type { TreeGitTone } from "@/lib/services/git/git.types";
+import { gitToneTextClass } from "@/lib/services/git/utils";
 
 type ScmStatusBadgeProps = {
   text: string;

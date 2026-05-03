@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   terminalSurfaceService,
   type SurfaceRect,
-} from "@/services/terminal/terminal-surface-service";
+} from "@/lib/services/terminal/surface";
 
 const DEFAULT_OCCLUSION_PADDING = 7;
 const OCCLUSION_EXIT_HOLD_MS = 80;

@@ -11,7 +11,7 @@ import {
 import WorkspaceTabBar from "@/components/layout/workspace/workspace-tab-bar";
 import DiffViewer from "@/components/editor/diff-viewer";
 import ReviewViewer from "@/components/editor/review-viewer";
-import { editorReadWorkingCopyText } from "@/services/editor/editor-service";
+import { editorReadWorkingCopyText } from "@/lib/services/editor/commands";
 import PaneEditor from "@/components/editor/pane-editor";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import TerminalResizeHandle from "@/components/terminal/terminal-resize-handle";
@@ -24,15 +24,15 @@ import {
   useSelectedProject,
   useSelectedWorkspaceId,
 } from "@/hooks/use-navigation";
-import { useUiPreferences } from "@/hooks/use-ui-preferences";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useAppShellPreferences } from "@/hooks/use-app-shell-preferences";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useLayoutStore } from "@/services/workspace/layout-store";
-import { tabKey } from "@/components/layout/workspace/layout-tree";
-import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
-import type { SessionState, SlotState } from "@/lib/shared/types";
+import { useLayoutStore } from "@/lib/services/layout/store";
+import { tabKey } from "@/lib/shared/utils";
+import { getVisibleWorkspaceTerminalSlotIds } from "@/lib/shared/terminal/lazy-connections";
+import type { SessionState, SlotState } from "@/lib/shared/shared.types";
 import { RotateCcw, Trash2 } from "lucide-react";
 import DotGridLoader from "@/components/dot-grid-loader";
 import WelcomeScreen from "@/components/layout/workspace/welcome-screen";
@@ -51,7 +51,7 @@ type PaneTerminalAnchorSlotProps = {
 };
 
 type PaneViewProps = {
-  leaf: import("@/lib/shared/types").LayoutLeaf;
+  leaf: import("@/lib/shared/shared.types").LayoutLeaf;
   isFocused: boolean;
   connectedSlotIds: ReadonlySet<string>;
   workspaceId: string;
@@ -318,7 +318,7 @@ function PaneView({
 const MemoPaneView = memo(PaneView);
 
 type LayoutRendererProps = {
-  node: import("@/lib/shared/types").LayoutNode;
+  node: import("@/lib/shared/shared.types").LayoutNode;
   connectedSlotIds: ReadonlySet<string>;
   focusedPaneID: string | null;
   workspaceId: string;
@@ -418,7 +418,7 @@ const MemoHoistedNativeTerminals = memo(HoistedNativeTerminals);
 type WorkspaceRuntimeViewProps = {
   workspaceId: string;
   workspaceRoot: string;
-  layout: import("@/services/workspace/layout-store").WorkspaceLayoutState;
+  layout: import("@/lib/services/layout/store").WorkspaceLayoutState;
   layoutTargetOnFocus?: string | null;
   isVisible?: boolean;
 };
@@ -506,7 +506,7 @@ export function WorkspaceRuntimeView({
 function EmptyWorkspaceState() {
   const workspace = useSelectedWorkspace();
   const project = useSelectedProject();
-  const booting = useUiPreferences((p) => !p.sidebarHydrated || !p.fileTreeHydrated);
+  const booting = useAppShellPreferences((p) => !p.leftSidebarHydrated || !p.rightSidebarHydrated);
   const workspaceCommands = useWorkspaceActions();
   const handleRetryWorkspace = useCallback(() => {
     if (!workspace) return;

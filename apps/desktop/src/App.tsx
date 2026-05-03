@@ -16,7 +16,7 @@ import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import useKeyboardShortcuts from "@/hooks/use-keyboard-shortcuts";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { useUiPreferencesActions, useUiPreferences } from "@/hooks/use-ui-preferences";
+import { useAppShellPreferencesActions, useAppShellPreferences } from "@/hooks/use-app-shell-preferences";
 import {
   useSelectedWorkspace,
   useSelectedWorkspaceId,
@@ -29,11 +29,11 @@ import {
   getFontFamily,
   getMonoFont,
   getTerminalFont,
-} from "@/services/settings/settings-store";
+} from "@/lib/services/preferences/settings";
 import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
-import { applyTheme, defaultTheme, themes } from "@/lib/theme";
+import { applyTheme, defaultTheme, themes } from "@/lib/shared/theme";
 import { loader } from "@monaco-editor/react";
-import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/lib/services/terminal/surface";
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -129,13 +129,13 @@ export default function App() {
   const selectedWsStatus = selectedWs?.status ?? null;
   const selectedWsId = useSelectedWorkspaceId();
   const selectedProject = useSelectedProject();
-  const sidebarVisible = useUiPreferences((p) => p.sidebarVisible);
-  const sidebarHydrated = useUiPreferences((p) => p.sidebarHydrated);
-  const fileTreeHydrated = useUiPreferences((p) => p.fileTreeHydrated);
-  const fileTreeOpen = useUiPreferences((p) => p.fileTreeOpen);
-  const booting = !sidebarHydrated || !fileTreeHydrated;
+  const leftSidebarVisible = useAppShellPreferences((p) => p.leftSidebarVisible);
+  const leftSidebarHydrated = useAppShellPreferences((p) => p.leftSidebarHydrated);
+  const rightSidebarHydrated = useAppShellPreferences((p) => p.rightSidebarHydrated);
+  const rightSidebarOpen = useAppShellPreferences((p) => p.rightSidebarOpen);
+  const booting = !leftSidebarHydrated || !rightSidebarHydrated;
   const terminalCommands = useTerminalActions();
-  const uiPreferencesCommands = useUiPreferencesActions();
+  const appShellPreferencesCommands = useAppShellPreferencesActions();
   const workspaceCommands = useWorkspaceActions();
 
   const handleNewTerminalShortcut = useCallback(() => {
@@ -152,12 +152,12 @@ export default function App() {
   }, [bottomPanelOpen, terminalCommands]);
 
   const handleShowSidebar = useCallback(() => {
-    uiPreferencesCommands.setSidebarVisible(true);
-  }, [uiPreferencesCommands]);
+    appShellPreferencesCommands.setLeftSidebarVisible(true);
+  }, [appShellPreferencesCommands]);
 
   const handleToggleSidebar = useCallback(() => {
-    uiPreferencesCommands.setSidebarVisible(!sidebarVisible);
-  }, [sidebarVisible, uiPreferencesCommands]);
+    appShellPreferencesCommands.setLeftSidebarVisible(!leftSidebarVisible);
+  }, [leftSidebarVisible, appShellPreferencesCommands]);
 
   const handleOpenSettings = useCallback(() => {
     workspaceCommands.setLayoutTargetScopeId(null);
@@ -182,11 +182,11 @@ export default function App() {
   const handleSelectRightSidebarMode = useCallback(
     (mode: LeftPanelMode) => {
       if (selectedWs?.status !== "ready") return;
-      const shouldOpen = !fileTreeOpen || rightSidebarMode !== mode;
+      const shouldOpen = !rightSidebarOpen || rightSidebarMode !== mode;
       setRightSidebarMode(mode);
-      uiPreferencesCommands.setFileTreeOpen(shouldOpen);
+      appShellPreferencesCommands.setRightSidebarOpen(shouldOpen);
     },
-    [fileTreeOpen, rightSidebarMode, selectedWs, uiPreferencesCommands],
+    [rightSidebarOpen, rightSidebarMode, selectedWs, appShellPreferencesCommands],
   );
 
   useKeyboardShortcuts({
@@ -198,17 +198,17 @@ export default function App() {
   });
 
   useEffect(() => {
-    uiPreferencesCommands.syncSelectedWorkspace(
+    appShellPreferencesCommands.syncSelectedWorkspace(
       selectedWs?.status === "ready" ? selectedWs.id : null,
       selectedWs?.status === "ready",
     );
-  }, [selectedWs?.id, selectedWs?.status, uiPreferencesCommands]);
+  }, [selectedWs?.id, selectedWs?.status, appShellPreferencesCommands]);
 
   const hasReadyWorkspace = selectedWsStatus === "ready";
   const bottomPanelVisible = bottomPanelOpen && hasReadyWorkspace;
   const bottomPanelDefaultSize = bottomPanelVisible ? 28 : 0;
   const workspaceViewDefaultSize = 100 - bottomPanelDefaultSize;
-  const fileTreePanelVisible = fileTreeOpen && hasReadyWorkspace;
+  const rightSidebarVisible = rightSidebarOpen && hasReadyWorkspace;
 
   useLayoutEffect(() => {
     const p = bottomPanelRef.current;
@@ -238,11 +238,11 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      {sidebarVisible && !settingsOpen && (
+      {leftSidebarVisible && !settingsOpen && (
         <div className="relative h-full shrink-0 bg-transparent" style={{ width: sidebarWidth }}>
           <LeftSidebar
             booting={booting}
-            onCollapse={() => uiPreferencesCommands.setSidebarVisible(false)}
+            onCollapse={() => appShellPreferencesCommands.setLeftSidebarVisible(false)}
             onOpenSettings={handleOpenSettings}
           />
           <div
@@ -320,10 +320,10 @@ export default function App() {
           <>
             <AppHeader
               booting={booting}
-              sidebarVisible={sidebarVisible}
+              sidebarVisible={leftSidebarVisible}
               selectedWorkspace={selectedWs}
               bottomPanelOpen={bottomPanelOpen}
-              fileTreeOpen={fileTreeOpen}
+              rightSidebarOpen={rightSidebarOpen}
               rightSidebarMode={rightSidebarMode}
               onToggleSidebar={handleShowSidebar}
               onToggleBottomPanel={toggleBottomPanel}
@@ -394,7 +394,7 @@ export default function App() {
                   {selectedWs && (
                     <div
                       className="relative h-full shrink-0"
-                      style={{ width: rightSidebarWidth, ...(!fileTreePanelVisible && { display: "none" }) }}
+                      style={{ width: rightSidebarWidth, ...(!rightSidebarVisible && { display: "none" }) }}
                       onPointerDownCapture={() => workspaceCommands.setLayoutTargetScopeId(null)}
                     >
                       <div

@@ -7,8 +7,8 @@ import {
   type FontOption,
   type MonoFontOption,
   type TerminalFontOption,
-} from "@/services/settings/settings-store";
-import { applyTheme, themes } from "@/lib/theme";
+} from "@/lib/services/preferences/settings";
+import { applyTheme, themes } from "@/lib/shared/theme";
 import { cn } from "@/lib/shared/utils";
 import {
   Select,

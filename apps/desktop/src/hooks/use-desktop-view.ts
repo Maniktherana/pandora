@@ -1,6 +1,12 @@
-import type { WorkspaceView } from "@/services/workspace/desktop-view-projections";
-import { useNavigationStore } from "@/services/workspace/navigation-store";
-import { useCatalogStore } from "@/services/workspace/catalog-store";
+import { useNavigationStore } from "@/lib/services/navigation/store";
+import { useCatalogStore } from "@/lib/services/catalog/store";
+import type { WorkspaceRecord } from "@/lib/shared/shared.types";
+
+export interface WorkspaceView {
+  readonly workspaceId: string;
+  readonly workspace: WorkspaceRecord | null;
+  readonly isSelected: boolean;
+}
 
 export function useWorkspaceView<T = WorkspaceView>(
   workspaceId: string,

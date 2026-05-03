@@ -7,7 +7,7 @@ import { OpenCode } from "@/components/icons/opencode";
 import { PiAgent } from "@/components/icons/pi";
 import { Cursor } from "@/components/icons/cursor";
 import { AmpCode } from "@/components/icons/amp-code";
-import type { TerminalDisplayState } from "@/lib/shared/types";
+import type { TerminalDisplayState } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
 
 type IconMatcher = {

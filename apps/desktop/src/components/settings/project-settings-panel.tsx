@@ -4,7 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import type { ProjectRecord } from "@/lib/shared/types";
+import type { ProjectRecord } from "@/lib/shared/shared.types";
 import ProjectSettings from "./project-settings";
 
 interface ProjectSettingsPanelProps {

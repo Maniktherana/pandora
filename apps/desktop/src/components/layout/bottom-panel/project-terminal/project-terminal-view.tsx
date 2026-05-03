@@ -16,13 +16,13 @@ import { useLayoutTargetScopeId } from "@/hooks/use-navigation";
 import { useNativeTerminalOverlay } from "@/hooks/use-native-terminal-overlay";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import type { SlotState } from "@/lib/shared/types";
+import type { SlotState } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
-import { getVisibleProjectTerminalSlotIds } from "@/lib/terminal/lazy-terminal-connections";
+import { getVisibleProjectTerminalSlotIds } from "@/lib/shared/terminal/lazy-connections";
 import ProjectTerminalSidebar from "./project-terminal-sidebar";
 import type { ProjectTerminalAnchorInfo } from "../project-terminal.types";
 import { createSlotMap, createSessionMap } from "../project-terminal.utils";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 
 type ProjectTerminalViewProps = {
   scopeId: string;

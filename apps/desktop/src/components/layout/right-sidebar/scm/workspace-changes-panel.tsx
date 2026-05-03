@@ -17,25 +17,25 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useWorkspaceView } from "@/hooks/use-desktop-view";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
-import { useLayoutStore } from "@/services/workspace/layout-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
+import { useLayoutStore } from "@/lib/services/layout/store";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useBranchContext } from "@/services/git/git-store";
+import { useBranchContext } from "@/lib/services/git/store";
 import {
   useScmStatusCached,
   scmStatusQueryKey,
   applyOptimisticEntriesToStatus,
   type ScmStatusData,
-} from "@/services/git/git-queries";
+} from "@/lib/services/git/queries";
 import {
   optimisticallyStageEntries,
   optimisticallyUnstageEntries,
   optimisticallyStageAllEntries,
   optimisticallyUnstageAllEntries,
-} from "@/services/git/git-utils";
+} from "@/lib/services/git/utils";
 import {
   gitRefresh,
   gitStage,
@@ -50,24 +50,24 @@ import {
   gitPull,
   gitSetTargetBranch,
   gitLoadBranchContext,
-} from "@/services/git/git-service";
-import type { GitSelectionModifiers } from "@/services/git/git-types";
-import type { ScmEntry } from "@/lib/shared/types";
+} from "@/lib/services/git/commands";
+import type { GitSelectionModifiers } from "@/lib/services/git/git.types";
+import type { ScmEntry } from "@/lib/shared/shared.types";
 import {
   composePrInstruction,
   findAgentTerminal,
   gatherPrContext,
 } from "@/components/layout/right-sidebar/scm/pr.utils";
-import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
+import { projectTerminalKey } from "@/lib/services/terminal/project-key";
+import { getAllLeaves } from "@/lib/shared/utils";
 import { StagedChangesSection } from "./staged-changes-section";
 import { UnstagedChangesSection } from "./unstaged-changes-section";
 import { CommitDropdown } from "./commit-dropdown";
 import { ChecksPanel } from "./checks-panel";
-import { GIT_SECTION_STICKY_Z_INDEX_BASE } from "@/services/git/git-types";
+import { GIT_SECTION_STICKY_Z_INDEX_BASE } from "@/lib/services/git/git.types";
 import DotGridLoader from "@/components/dot-grid-loader";
-import type { DiffSource } from "@/lib/shared/types";
-import { requestReviewNavigation } from "@/services/editor/review-navigation-store";
+import type { DiffSource } from "@/lib/shared/shared.types";
+import { requestReviewNavigation } from "@/lib/services/editor/review-navigation";
 import { formatTargetBranch, resolveWorkspaceTargetBranch } from "./target-branch";
 
 type WorkspaceChangesPanelProps = {
@@ -105,7 +105,7 @@ export default function WorkspaceChangesPanel({
   const [inflightPaths, setInflightPaths] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // React Query cache — written by applyGitSnapshot in git-events.ts.
+  // React Query cache, written by applyGitSnapshot in git events.
   const statusData = useScmStatusCached(workspaceId);
   const queryClient = useQueryClient();
 
@@ -123,7 +123,7 @@ export default function WorkspaceChangesPanel({
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
-  const projectRuntimeId = workspace ? projectRuntimeKey(workspace.projectId) : null;
+  const projectTerminalId = workspace ? projectTerminalKey(workspace.projectId) : null;
 
   // Stable visible-path arrays for range-select; recomputed only when the list changes.
   const stagedVisiblePaths = useMemo(
@@ -542,16 +542,16 @@ export default function WorkspaceChangesPanel({
       }
       const wsScope = useTerminalScopeStore.getState().byScopeId[workspaceId] ?? null;
       const wsLayout = useLayoutStore.getState().byWorkspaceId[workspaceId] ?? null;
-      const projScope = projectRuntimeId
-        ? (useTerminalScopeStore.getState().byScopeId[projectRuntimeId] ?? null)
+      const projScope = projectTerminalId
+        ? (useTerminalScopeStore.getState().byScopeId[projectTerminalId] ?? null)
         : null;
-      const projLayout = projectRuntimeId
-        ? (useLayoutStore.getState().byWorkspaceId[projectRuntimeId] ?? null)
+      const projLayout = projectTerminalId
+        ? (useLayoutStore.getState().byWorkspaceId[projectTerminalId] ?? null)
         : null;
       const target = findAgentTerminal(
         { scopeId: workspaceId, scope: wsScope, layout: wsLayout },
-        projectRuntimeId
-          ? { scopeId: projectRuntimeId, scope: projScope, layout: projLayout }
+        projectTerminalId
+          ? { scopeId: projectTerminalId, scope: projScope, layout: projLayout }
           : null,
       );
       if (!target) {
@@ -583,7 +583,7 @@ export default function WorkspaceChangesPanel({
     entries.length,
     activeTargetBranch,
     layoutCommands,
-    projectRuntimeId,
+    projectTerminalId,
     terminalCommands,
     workspaceCommands,
     workspaceId,

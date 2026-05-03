@@ -1,7 +1,15 @@
 import { useMemo } from "react";
 import { tryCloseEditorTab } from "@/components/editor/close-dirty-editor";
-import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import { editorEnsureFileLoaded } from "@/services/editor/editor-service";
+import { editorEnsureFileLoaded } from "@/lib/services/editor/commands";
+import { getWorkspaceSession } from "@/lib/services/layout/session";
+import {
+  mutateWorkspaceLayout,
+  updateWorkspaceLayout,
+} from "@/lib/services/workspace/startup";
+
+function getLayoutSession(workspaceId: string) {
+  return getWorkspaceSession(workspaceId, updateWorkspaceLayout, mutateWorkspaceLayout);
+}
 
 export function useEditorActions() {
   return useMemo(
@@ -9,8 +17,7 @@ export function useEditorActions() {
       async openFile(workspaceId: string, workspaceRoot: string, relativePath: string) {
         const ok = await editorEnsureFileLoaded(workspaceId, workspaceRoot, relativePath);
         if (!ok) return;
-        const session = desktopWorkspaceService.getWorkspaceSession(workspaceId);
-        session.commands.addEditorTab(relativePath);
+        getLayoutSession(workspaceId).commands.addEditorTab(relativePath);
       },
 
       async closeEditorTab(params: {
@@ -24,8 +31,7 @@ export function useEditorActions() {
         await tryCloseEditorTab({
           ...params,
           closeTab: (paneID, tabIndex) => {
-            const session = desktopWorkspaceService.getWorkspaceSession(params.workspaceId);
-            session.commands.closeTab(paneID, tabIndex);
+            getLayoutSession(params.workspaceId).commands.closeTab(paneID, tabIndex);
           },
         });
       },

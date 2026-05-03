@@ -4,23 +4,23 @@ import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import TerminalIdentityIcon from "@/components/terminal/terminal-identity-icon";
 import { useEditorActions } from "@/hooks/use-editor-actions";
-import { useEditorStore } from "@/services/editor/editor-store";
+import { useEditorStore } from "@/lib/services/editor/store";
 import type {
   PaneTab,
   SessionState,
   SlotState,
   TerminalAgentStatus,
   TerminalDisplayState,
-} from "@/lib/shared/types";
+} from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
-import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
+import { terminalDisplayForSlot } from "@/lib/shared/terminal/identity";
 import {
   decorationForGitEntry,
   gitToneTextClass,
   statusTone,
-} from "@/services/git/git-utils";
+} from "@/lib/services/git/utils";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
-import type { ScmEntry } from "@/lib/shared/types";
+import type { ScmEntry } from "@/lib/shared/shared.types";
 
 type WorkspaceTabProps = {
   tab: PaneTab;

@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useWorkspaces } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn } from "@/lib/shared/utils";
-import type { ProjectRecord } from "@/lib/shared/types";
+import type { ProjectRecord } from "@/lib/shared/shared.types";
 import { MemoWorkspaceRow } from "./workspace-row";
 import { NewWorkspaceSplitButton } from "./new-workspace-split-button";
 

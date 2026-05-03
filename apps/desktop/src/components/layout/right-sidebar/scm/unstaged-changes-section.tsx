@@ -10,14 +10,14 @@ import {
   decorationForGitEntry,
   gitToneTextClass,
   statusTone,
-} from "@/services/git/git-utils";
+} from "@/lib/services/git/utils";
 import { ScmStatusBadge } from "./scm-status-badge";
 import {
   GIT_SECTION_STICKY_ROW_HEIGHT_PX,
   type DiscardEntryFn,
   type SelectGitEntryFn,
-} from "@/services/git/git-types";
-import type { ScmEntry } from "@/lib/shared/types";
+} from "@/lib/services/git/git.types";
+import type { ScmEntry } from "@/lib/shared/shared.types";
 
 type UnstagedChangesSectionProps = {
   unstagedList: ScmEntry[];

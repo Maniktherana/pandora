@@ -1,4 +1,4 @@
-import type { HeaderBranchContext } from "@/lib/shared/types";
+import type { HeaderBranchContext } from "@/lib/shared/shared.types";
 
 export function formatTargetBranch(branch: string | null): string {
   if (!branch) return "origin/...";

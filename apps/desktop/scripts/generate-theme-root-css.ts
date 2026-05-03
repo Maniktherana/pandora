@@ -5,8 +5,8 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDocumentStaticThemeCss } from "../src/lib/theme/theme.ts";
-import { defaultTheme } from "../src/lib/theme/themes/index.ts";
+import { getDocumentStaticThemeCss } from "../src/lib/shared/theme/theme.ts";
+import { defaultTheme } from "../src/lib/shared/theme/themes/index.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outPath = join(__dirname, "../src/theme-root.generated.css");

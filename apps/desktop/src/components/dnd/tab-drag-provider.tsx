@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/lib/services/terminal/surface";
 import { TabDragOverlay } from "./tab-drag-overlay";
 import type { DragState } from "./tab-drag.types";
 

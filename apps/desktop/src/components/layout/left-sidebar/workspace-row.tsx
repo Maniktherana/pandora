@@ -29,14 +29,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/preview-card";
-import { useSelectedWorkspaceId, useNavigationArea } from "@/hooks/use-navigation";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { cn, formatCompactNumber, formatRelativeTime } from "@/lib/shared/utils";
-import type { WorkspaceRecord } from "@/lib/shared/types";
-import { useScmSummaryCached } from "@/services/git/git-queries";
-import { useWorkspaceAgentStatus } from "@/services/terminal/terminal-scope-store";
+import type { WorkspaceRecord } from "@/lib/shared/shared.types";
+import { useScmSummaryCached } from "@/lib/services/git/queries";
+import { useWorkspaceAgentStatus } from "@/lib/services/terminal/store";
 import DotGridLoader from "@/components/dot-grid-loader";
-import { isTerminalAgentAttentionStatus } from "@/lib/terminal/agent-activity";
+import { isTerminalAgentAttentionStatus } from "@/lib/shared/terminal/agent-activity";
+import { useNavigationStore } from "@/lib/services/navigation/store";
 
 function isRowActionTarget(target: EventTarget | null) {
   return target instanceof Element && target.closest("[data-workspace-row-action='true']") != null;
@@ -47,8 +47,6 @@ type WorkspaceRowProps = {
 };
 
 function WorkspaceRow({ workspace }: WorkspaceRowProps) {
-  const selectedWorkspaceID = useSelectedWorkspaceId();
-  const navigationArea = useNavigationArea();
   const workspaceCommands = useWorkspaceActions();
   const [renameValue, setRenameValue] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -56,13 +54,15 @@ function WorkspaceRow({ workspace }: WorkspaceRowProps) {
   const [pendingAction, setPendingAction] = useState<"deleting" | null>(null);
   const agentStatus = useWorkspaceAgentStatus(workspace.id);
   // Read Git summary from React Query cache — written by applyGitSnapshot in
-  // git-events.ts whenever the backend emits a scm_snapshot event.
+  // git events whenever the backend emits a scm_snapshot event.
   const gitSummary = useScmSummaryCached(
     workspace.status === "ready" ? workspace.id : null,
   );
 
-  const isSelected = workspace.id === selectedWorkspaceID;
-  const isActive = navigationArea === "sidebar" && isSelected;
+  const isSelected = useNavigationStore((s) => s.selectedWorkspaceID === workspace.id);
+  const isActive = useNavigationStore(
+    (s) => s.navigationArea === "sidebar" && s.selectedWorkspaceID === workspace.id,
+  );
   const isFailed = workspace.status === "failed";
   const isArchived = workspace.status === "archived";
   const isPending = pendingAction !== null;

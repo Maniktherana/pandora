@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   areStringSetsEqual,
   mergeConnectedTerminalSlotIds,
-} from "@/lib/terminal/lazy-terminal-connections";
+} from "@/lib/shared/terminal/lazy-connections";
 
 export function useLazyTerminalSlotConnections(
   scopeId: string,

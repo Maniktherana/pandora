@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService } from "@/lib/services/terminal/surface";
 
 export interface TerminalSurfaceProps {
   sessionID: string;

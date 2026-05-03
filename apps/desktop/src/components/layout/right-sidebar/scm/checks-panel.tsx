@@ -1,7 +1,7 @@
 import { Circle, CheckCircle2, XCircle, Clock } from "lucide-react";
-import { useCheckRunsQuery } from "@/services/git/git-queries";
+import { useCheckRunsQuery } from "@/lib/services/git/queries";
 import DotGridLoader from "@/components/dot-grid-loader";
-import type { CheckRun } from "@/services/git/git-types";
+import type { CheckRun } from "@/lib/services/git/git.types";
 
 type ChecksPanelProps = {
   worktreePath: string;

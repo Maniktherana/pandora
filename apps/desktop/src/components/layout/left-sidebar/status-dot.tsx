@@ -1,5 +1,5 @@
 import { cn } from "@/lib/shared/utils";
-import type { WorkspaceStatus } from "@/lib/shared/types";
+import type { WorkspaceStatus } from "@/lib/shared/shared.types";
 
 type StatusDotProps = {
   status: WorkspaceStatus;

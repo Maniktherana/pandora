@@ -1,0 +1,84 @@
+import type { LayoutAxis, LayoutNode, LayoutSplit, PaneTab } from "@/lib/shared/shared.types";
+
+function migratePaneTab(t: unknown): PaneTab | null {
+  if (!t || typeof t !== "object") return null;
+  const o = t as Record<string, unknown>;
+  const k = o.kind ?? o.type;
+  if (k === "terminal") {
+    const slotId = String(o.slotId ?? o.slotID ?? "");
+    return slotId ? { kind: "terminal", slotId } : null;
+  }
+  if (k === "editor") {
+    const path = String(o.path ?? "");
+    return path ? { kind: "editor", path } : null;
+  }
+  if (k === "diff") {
+    const path = String(o.path ?? "");
+    const src = o.source === "staged" ? "staged" : "working";
+    return path ? { kind: "diff", path, source: src } : null;
+  }
+  if (k === "review") {
+    return { kind: "review" };
+  }
+  return null;
+}
+
+export function migrateLayoutNode(node: unknown): LayoutNode | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  if (n.type === "split" && Array.isArray(n.children)) {
+    const children = n.children
+      .map((c) => migrateLayoutNode(c))
+      .filter((c): c is LayoutNode => c !== null);
+    if (children.length === 0) return null;
+    const axis = (n.axis === "vertical" ? "vertical" : "horizontal") as LayoutAxis;
+    const ratios = Array.isArray(n.ratios)
+      ? (n.ratios as unknown[]).map((x) => Number(x))
+      : children.map(() => 1 / children.length);
+    return {
+      type: "split",
+      id: String(n.id ?? ""),
+      axis,
+      children,
+      ratios: ratios.length === children.length ? ratios : children.map(() => 1 / children.length),
+    } as LayoutSplit;
+  }
+  if (n.type === "leaf") {
+    const id = String(n.id ?? "");
+    const selectedIndex = Number(n.selectedIndex ?? 0);
+    let tabs: PaneTab[];
+    if (Array.isArray(n.tabs)) {
+      tabs = (n.tabs as unknown[]).map(migratePaneTab).filter((t): t is PaneTab => t !== null);
+    } else if (Array.isArray(n.slotIDs)) {
+      tabs = (n.slotIDs as string[]).map((slotId) => ({ kind: "terminal", slotId }));
+    } else {
+      tabs = [];
+    }
+    if (!id) return null;
+    return {
+      type: "leaf",
+      id,
+      tabs,
+      selectedIndex: tabs.length === 0 ? 0 : Math.min(Math.max(0, selectedIndex), tabs.length - 1),
+    };
+  }
+  return null;
+}
+
+export function migratePersistedLayout(raw: unknown): {
+  root: LayoutNode;
+  focusedPaneID: string | null;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const root = migrateLayoutNode(o.root);
+  if (!root) return null;
+  if (root.type === "leaf" && root.tabs.length === 0) {
+    return null;
+  }
+  const fp = o.focusedPaneID;
+  return {
+    root,
+    focusedPaneID: typeof fp === "string" ? fp : null,
+  };
+}

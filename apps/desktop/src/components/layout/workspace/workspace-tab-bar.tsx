@@ -1,13 +1,13 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { tabKey } from "@/components/layout/workspace/layout-tree";
-import type { PaneTab, ScmEntry, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import { tabKey } from "@/lib/shared/utils";
+import type { PaneTab, ScmEntry, SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
-import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import { useScmStatusCached } from "@/services/git/git-queries";
+import { terminalDisplayForSlot } from "@/lib/shared/terminal/identity";
+import { useScmStatusCached } from "@/lib/services/git/queries";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { WorkspaceTab } from "@/components/layout/workspace/workspace-tab";
 

@@ -22,8 +22,6 @@ function ensureSpriteInjected() {
 
 export function FileTypeIcon({
   path,
-  kind,
-  expanded = false,
   className,
 }: {
   path: string;

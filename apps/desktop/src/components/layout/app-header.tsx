@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { WorkspaceRecord } from "@/lib/shared/types";
+import type { WorkspaceRecord } from "@/lib/shared/shared.types";
 import type { LeftPanelMode } from "@/components/layout/right-sidebar/files/files.types";
 import { cn } from "@/lib/shared/utils";
 import OpenInDropdown from "@/components/layout/app-header-open-in";
@@ -24,7 +24,7 @@ interface AppHeaderProps {
   sidebarVisible: boolean;
   selectedWorkspace: WorkspaceRecord | null;
   bottomPanelOpen: boolean;
-  fileTreeOpen: boolean;
+  rightSidebarOpen: boolean;
   rightSidebarMode: LeftPanelMode;
   onToggleSidebar: () => void;
   onToggleBottomPanel: () => void;
@@ -36,7 +36,7 @@ export default memo(function AppHeader({
   sidebarVisible,
   selectedWorkspace,
   bottomPanelOpen,
-  fileTreeOpen,
+  rightSidebarOpen,
   rightSidebarMode,
   onToggleSidebar,
   onToggleBottomPanel,
@@ -114,7 +114,7 @@ export default memo(function AppHeader({
             <HugeiconsIcon icon={LayoutAlignBottomIcon} strokeWidth={1.25} className="size-5" />
           </Button>
           <ToggleGroup
-            value={fileTreeOpen ? [rightSidebarMode] : []}
+            value={rightSidebarOpen ? [rightSidebarMode] : []}
             onValueChange={(values) => {
               const value = values[0];
               if (value === "files" || value === "changes") {

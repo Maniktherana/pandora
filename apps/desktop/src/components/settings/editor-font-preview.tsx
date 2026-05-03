@@ -118,7 +118,6 @@ int main() {
 };
 
 const LANG_KEYS = Object.keys(SAMPLES);
-const LINES_PER_SNIPPET = 16;
 
 interface EditorFontPreviewProps {
   fontFamily: string;

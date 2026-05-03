@@ -8,7 +8,7 @@ import {
 } from "@/hooks/use-navigation";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useSettingsStore } from "@/services/settings/settings-store";
+import { useSettingsStore } from "@/lib/services/preferences/settings";
 
 interface UseKeyboardShortcutsParams {
   onNewTerminal: () => void;

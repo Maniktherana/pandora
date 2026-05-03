@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 import TerminalSurface from "@/components/terminal/terminal-surface";
 import DotGridLoader from "@/components/dot-grid-loader";
 import {
@@ -10,13 +10,13 @@ import {
   SETTINGS_PREVIEW_SLOT_ID_PREFIX,
   SETTINGS_PREVIEW_RUNTIME_ID,
   isSettingsPreviewSlot,
-} from "@/lib/terminal/settings-preview";
+} from "@/lib/shared/terminal/settings-preview";
 import type {
   RuntimeCommand,
   RuntimeEventEnvelope,
   SessionState,
   SlotState,
-} from "@/lib/shared/types";
+} from "@/lib/shared/shared.types";
 
 const SETTINGS_PREVIEW_HEIGHT_CLASS = "h-[320px]";
 const EMPTY_SLOTS: readonly SlotState[] = [];
@@ -65,7 +65,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
     const cleanup: { sessionUnlisten: UnlistenFn | null } = { sessionUnlisten: null };
 
     try {
-      const waitForSession = new Promise<string>(async (resolve, reject) => {
+      const waitForSession = new Promise<string>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("session timeout")), 8000);
 
         const finish = (session: SessionState | null | undefined) => {
@@ -75,7 +75,7 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
           resolve(session.id);
         };
 
-        cleanup.sessionUnlisten = await listen<RuntimeEventEnvelope>("runtime-event", (event) => {
+        listen<RuntimeEventEnvelope>("runtime-event", (event) => {
           try {
             const payload = event.payload;
             if (payload.runtimeId !== scopeId) return;
@@ -93,7 +93,11 @@ function ensureSettingsPreviewTerminal(workspacePath: string) {
               );
             }
           } catch {}
-        });
+        })
+          .then((unlisten) => {
+            cleanup.sessionUnlisten = unlisten;
+          })
+          .catch(reject);
       });
 
       const shellPath =

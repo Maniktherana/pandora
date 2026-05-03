@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { PortDataRow } from "./port-data-row";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 import { useWorkspaces } from "@/hooks/use-navigation";
-import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import type { WorkspaceRecord } from "@/lib/shared/types";
+import { isProjectTerminalKey } from "@/lib/services/terminal/project-key";
+import type { WorkspaceRecord } from "@/lib/shared/shared.types";
 
 interface PortRow {
   port: number;
@@ -23,7 +23,7 @@ function buildPortRows(
     if (!scope.detectedPorts.length) continue;
 
     let source: string;
-    if (isProjectRuntimeKey(scopeId)) {
+    if (isProjectTerminalKey(scopeId)) {
       source = "Project";
     } else {
       source = wsNameById.get(scopeId) ?? scopeId.slice(0, 8);

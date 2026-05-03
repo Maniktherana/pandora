@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import { startIpcEventRouting, stopIpcEventRouting } from "@/services/ipc/ipc-lifecycle";
-import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
-import { uiPreferencesService } from "@/services/preferences/ui-preferences-service";
-import { terminalSurfaceService } from "@/services/terminal/terminal-surface-service";
+import { startIpcEventRouting, stopIpcEventRouting } from "@/lib/services/ipc/lifecycle";
+import { workspaceActions } from "@/lib/services/workspace/actions";
+import { appShellPreferences } from "@/lib/services/preferences/app-shell";
+import { terminalSurfaceService } from "@/lib/services/terminal/surface";
 
 export function useBootstrapDesktop() {
   const didBootstrap = useRef(false);
@@ -14,24 +14,24 @@ export function useBootstrapDesktop() {
     const init = async () => {
       await startIpcEventRouting();
 
-      desktopWorkspaceService.init({
+      workspaceActions.init({
         removeWorkspaceSurfaces: (workspaceId) =>
           terminalSurfaceService.removeWorkspaceSurfaces(workspaceId).catch(() => {}),
       });
 
-      await desktopWorkspaceService.loadDesktopState().catch(console.error);
+      await workspaceActions.loadDesktopState().catch(console.error);
 
-      // Git subscriptions are started by workspace-startup-service.ts when each
+      // Git subscriptions are started by workspace startup when each
       // workspace becomes ready. Snapshots arrive via IPC events and are pushed
-      // into the React Query cache by applyGitSnapshot in git-events.ts.
+      // into the React Query cache by applyGitSnapshot in git events.
 
-      await uiPreferencesService.hydrate().catch(console.error);
+      await appShellPreferences.hydrate().catch(console.error);
     };
     void init();
 
     const teardown = () => {
       void terminalSurfaceService.removeAllSurfaces().catch(console.error);
-      desktopWorkspaceService.dispose();
+      workspaceActions.dispose();
       stopIpcEventRouting();
     };
 

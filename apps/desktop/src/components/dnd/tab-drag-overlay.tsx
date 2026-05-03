@@ -3,14 +3,14 @@ import { createPortal } from "react-dom";
 import { useSelectedWorkspaceId } from "@/hooks/use-navigation";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
-import { useNavigationStore } from "@/services/workspace/navigation-store";
-import { useLayoutStore } from "@/services/workspace/layout-store";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
-import { editorEnsureFileLoaded } from "@/services/editor/editor-service";
-import { findLeaf } from "@/components/layout/workspace/layout-migrate";
-import { tabsEqual } from "@/components/layout/workspace/layout-tree";
-import { isProjectRuntimeKey } from "@/lib/runtime/runtime-keys";
-import type { LayoutAxis } from "@/lib/shared/types";
+import { useNavigationStore } from "@/lib/services/navigation/store";
+import { useLayoutStore } from "@/lib/services/layout/store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
+import { editorEnsureFileLoaded } from "@/lib/services/editor/commands";
+import { findLeaf } from "@/lib/shared/utils";
+import { tabsEqual } from "@/lib/shared/utils";
+import { isProjectTerminalKey } from "@/lib/services/terminal/project-key";
+import type { LayoutAxis } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
 import {
   hitTestBottomTerminalPanes,
@@ -291,7 +291,7 @@ export function TabDragOverlay({
         };
         let axis: LayoutAxis = axisMap[zone];
         let position: "before" | "after" = posMap[zone];
-        if (rid && isProjectRuntimeKey(rid) && (zone === "top" || zone === "bottom")) {
+        if (rid && isProjectTerminalKey(rid) && (zone === "top" || zone === "bottom")) {
           axis = "horizontal";
           position = zone === "top" ? "before" : "after";
         }
@@ -355,7 +355,7 @@ export function TabDragOverlay({
           };
           let axis: LayoutAxis = axisMap[zone];
           let position: "before" | "after" = posMap[zone];
-          if (rid && isProjectRuntimeKey(rid) && (zone === "top" || zone === "bottom")) {
+          if (rid && isProjectTerminalKey(rid) && (zone === "top" || zone === "bottom")) {
             axis = "horizontal";
             position = zone === "top" ? "before" : "after";
           }

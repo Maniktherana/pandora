@@ -1,4 +1,4 @@
-import type { WorkspaceKind } from "@/lib/shared/types";
+import type { WorkspaceKind } from "@/lib/shared/shared.types";
 
 export const WORKSPACE_KIND_LABEL: Record<WorkspaceKind, string> = {
   worktree: "Worktree",

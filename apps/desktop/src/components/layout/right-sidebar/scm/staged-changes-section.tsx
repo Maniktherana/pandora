@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ChevronRight } from "lucide-react";
 import { MinusSignIcon } from "@hugeicons/core-free-icons";
@@ -10,13 +10,13 @@ import {
   decorationForGitEntry,
   gitToneTextClass,
   statusTone,
-} from "@/services/git/git-utils";
+} from "@/lib/services/git/utils";
 import { ScmStatusBadge } from "./scm-status-badge";
 import {
   GIT_SECTION_STICKY_ROW_HEIGHT_PX,
   type SelectGitEntryFn,
-} from "@/services/git/git-types";
-import type { ScmEntry } from "@/lib/shared/types";
+} from "@/lib/services/git/git.types";
+import type { ScmEntry } from "@/lib/shared/shared.types";
 
 type StagedChangesSectionProps = {
   stagedList: ScmEntry[];

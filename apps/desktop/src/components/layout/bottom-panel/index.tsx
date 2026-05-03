@@ -1,15 +1,15 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import ProjectTerminalView from "./project-terminal/project-terminal-view";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { useSelectedProject, useSelectedWorkspace, useSelectedWorkspaceId } from "@/hooks/use-navigation";
+import { useSelectedProject, useSelectedWorkspace } from "@/hooks/use-navigation";
 import { useProjectTerminalActions, useTerminalActions } from "@/hooks/use-terminal-actions";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { projectRuntimeKey } from "@/lib/runtime/runtime-keys";
+import { projectTerminalKey } from "@/lib/services/terminal/project-key";
 import { PortsTabContent } from "./ports/ports-tab-content";
 import { ScriptTabContent } from "./scripts/script-tab-content";
 import { BottomPanelHeader } from "./bottom-panel-header";
 import type { BottomTab } from "./bottom-panel.utils";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 
 type BottomPanelProps = {
   onCollapse: () => void;
@@ -22,8 +22,7 @@ export default memo(function BottomPanel({ onCollapse, onOpenProjectSettings }: 
   const hadTerminalGroupsRef = useRef(false);
   const project = useSelectedProject();
   const selectedWs = useSelectedWorkspace();
-  const selectedWorkspaceID = useSelectedWorkspaceId();
-  const projectKey = project ? projectRuntimeKey(project.id) : "";
+  const projectKey = project ? projectTerminalKey(project.id) : "";
   const projectTerminalCommands = useProjectTerminalActions();
   const terminalCommands = useTerminalActions();
   const workspaceCommands = useWorkspaceActions();

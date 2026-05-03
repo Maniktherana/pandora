@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectSettings } from "@/lib/shared/types";
+import type { ProjectSettings } from "@/lib/shared/shared.types";
 import { ScriptEmptyState } from "./script-empty-state";
 
 type ScriptTabContentProps = {

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTabDrag } from "@/components/dnd/tab-drag-provider";
 import { useProjectTerminalActions } from "@/hooks/use-terminal-actions";
-import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
+import { terminalDisplayForSlot } from "@/lib/shared/terminal/identity";
 import DotGridLoader from "@/components/dot-grid-loader";
 import type { SidebarRow } from "../project-terminal.types";
 import {
@@ -11,7 +11,7 @@ import {
   PROJECT_TERMINAL_DRAG_THRESHOLD,
 } from "../project-terminal.utils";
 import { ProjectTab } from "./project-tab";
-import { useTerminalScopeStore } from "@/services/terminal/terminal-scope-store";
+import { useTerminalScopeStore } from "@/lib/services/terminal/store";
 
 type ProjectTerminalSidebarProps = {
   scopeId: string;

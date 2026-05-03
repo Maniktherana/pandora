@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
-import { useEditorStore } from "@/services/editor/editor-store";
-import { editorEnsureFileLoaded, editorSaveFile } from "@/services/editor/editor-service";
+import { useEditorStore } from "@/lib/services/editor/store";
+import { editorEnsureFileLoaded, editorSaveFile } from "@/lib/services/editor/commands";
 import { languageFromRelativePath } from "@/components/editor/editor-language";
 import {
   MONACO_THEME_ID,
@@ -12,7 +12,7 @@ import {
   PANDORA_EDITOR_FONT_FAMILY,
   PANDORA_EDITOR_FONT_SIZE,
 } from "@/components/editor/monaco-pandora";
-import { useSettingsStore, getMonoFont } from "@/services/settings/settings-store";
+import { useSettingsStore, getMonoFont } from "@/lib/services/preferences/settings";
 
 const LARGE_FILE_BYTES = 500_000;
 const HUGE_FILE_BYTES = 2_000_000;

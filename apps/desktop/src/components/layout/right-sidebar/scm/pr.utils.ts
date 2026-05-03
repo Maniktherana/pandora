@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PrContext, LayoutNode, TerminalPanelState } from "@/lib/shared/types";
-import { findLeaf } from "@/components/layout/workspace/layout-tree";
-import { getAllLeaves } from "@/components/layout/workspace/layout-tree";
-import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
+import type { PrContext, LayoutNode, TerminalPanelState } from "@/lib/shared/shared.types";
+import { findLeaf } from "@/lib/shared/utils";
+import { getAllLeaves } from "@/lib/shared/utils";
+import { terminalDisplayForSlot } from "@/lib/shared/terminal/identity";
 import type { AgentTerminalTarget } from "./pr.types";
-import type { TerminalScopeState } from "@/services/terminal/terminal-scope-store";
-import type { WorkspaceLayoutState } from "@/services/workspace/layout-store";
+import type { TerminalScopeState } from "@/lib/services/terminal/store";
+import type { WorkspaceLayoutState } from "@/lib/services/layout/store";
 
 const AGENT_LABEL_PATTERN =
   /\b(?:claude(?:[- ]code)?|codex|opencode|pi[- ]agent|gemini(?:[- ]cli)?|cursor[- ]agent|(?:github[- ])?copilot|ampcode|amp[- ]code)\b/i;

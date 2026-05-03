@@ -1,6 +1,6 @@
 import { message } from "@tauri-apps/plugin-dialog";
-import { useEditorStore } from "@/services/editor/editor-store";
-import { editorSaveFile } from "@/services/editor/editor-service";
+import { useEditorStore } from "@/lib/services/editor/store";
+import { editorSaveFile } from "@/lib/services/editor/commands";
 import { getMonacoModelContent } from "@/components/editor/monaco-pandora";
 
 const LABEL_SAVE = "Save";

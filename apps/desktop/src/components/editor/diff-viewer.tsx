@@ -5,8 +5,8 @@ import type { FileDiffMetadata, FileDiffOptions, VirtualFileMetrics } from "@pie
 import {
   parsedDiffQueryKey,
   parseDiffInWorker,
-} from "@/services/diff/diff-worker-client";
-import type { DiffSource } from "@/lib/shared/types";
+} from "@/lib/services/diff/worker-client";
+import type { DiffSource } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
 import {
   createPierreDiffOptions,
@@ -19,7 +19,7 @@ import {
   diffContentsQueryKey,
   fetchDiffContents,
 } from "@/components/editor/diff-data";
-import { defaultTheme } from "@/lib/theme";
+import { defaultTheme } from "@/lib/shared/theme";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";

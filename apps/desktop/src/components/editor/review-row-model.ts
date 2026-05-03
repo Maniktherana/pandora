@@ -1,6 +1,6 @@
-import type { ScmEntry, DiffSource } from "@/lib/shared/types";
-import type { GitLineStats, TreeGitDecoration } from "@/services/git/git-types";
-import { decorationForGitEntry } from "@/services/git/git-utils";
+import type { ScmEntry, DiffSource } from "@/lib/shared/shared.types";
+import type { GitLineStats, TreeGitDecoration } from "@/lib/services/git/git.types";
+import { decorationForGitEntry } from "@/lib/services/git/utils";
 
 export type ReviewRowData = {
   entry: ScmEntry;

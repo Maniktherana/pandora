@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { terminalSurfaceService, type NativeTerminalOverlayMode } from "@/services/terminal/terminal-surface-service";
+import { terminalSurfaceService, type NativeTerminalOverlayMode } from "@/lib/services/terminal/surface";
 
 export function useNativeTerminalOverlay(mode: NativeTerminalOverlayMode | null) {
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { terminalCommandService } from "@/services/terminal/terminal-command-service";
-import { desktopWorkspaceService } from "@/services/workspace/desktop-workspace-service";
+import { terminalCommandService } from "@/lib/services/terminal/commands";
+import { projectTerminalActions } from "@/lib/services/terminal/project";
 
 export function useTerminalActions() {
   return useMemo(
@@ -44,20 +44,20 @@ export function useProjectTerminalActions() {
           .renameTerminal(workspaceId, slotId, name)
           .catch(console.error),
       selectProjectTerminalGroup: (workspaceId: string, groupId: string, slotId?: string | null) =>
-        desktopWorkspaceService.selectProjectTerminalGroup(workspaceId, groupId, slotId),
+        projectTerminalActions.selectProjectTerminalGroup(workspaceId, groupId, slotId),
       focusProjectTerminal: (workspaceId: string, slotId: string | null) =>
-        desktopWorkspaceService.focusProjectTerminal(workspaceId, slotId),
+        projectTerminalActions.focusProjectTerminal(workspaceId, slotId),
       setProjectTerminalPanelVisible: (workspaceId: string, visible: boolean) =>
-        desktopWorkspaceService.setProjectTerminalPanelVisible(workspaceId, visible),
+        projectTerminalActions.setProjectTerminalPanelVisible(workspaceId, visible),
       reorderProjectTerminalGroups: (workspaceId: string, fromIndex: number, toIndex: number) =>
-        desktopWorkspaceService.reorderProjectTerminalGroups(workspaceId, fromIndex, toIndex),
+        projectTerminalActions.reorderProjectTerminalGroups(workspaceId, fromIndex, toIndex),
       reorderProjectTerminalGroupChildren: (
         workspaceId: string,
         groupId: string,
         fromIndex: number,
         toIndex: number,
       ) =>
-        desktopWorkspaceService.reorderProjectTerminalGroupChildren(
+        projectTerminalActions.reorderProjectTerminalGroupChildren(
           workspaceId,
           groupId,
           fromIndex,
@@ -69,14 +69,14 @@ export function useProjectTerminalActions() {
         targetGroupId: string,
         index?: number,
       ) =>
-        desktopWorkspaceService.moveProjectTerminalToGroup(
+        projectTerminalActions.moveProjectTerminalToGroup(
           workspaceId,
           slotId,
           targetGroupId,
           index,
         ),
       moveProjectTerminalToNewGroup: (workspaceId: string, slotId: string, index: number) =>
-        desktopWorkspaceService.moveProjectTerminalToNewGroup(workspaceId, slotId, index),
+        projectTerminalActions.moveProjectTerminalToNewGroup(workspaceId, slotId, index),
     }),
     [],
   );

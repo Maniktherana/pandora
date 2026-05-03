@@ -1,4 +1,4 @@
-import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/shared.types";
 
 export type TerminalTreeState = "none" | "start" | "middle" | "last";
 

@@ -7,8 +7,9 @@ import {
   type FileDiffOptions,
   type VirtualFileMetrics,
 } from "@pierre/diffs";
-import { toPierreVariables } from "@/lib/theme";
-import { defaultTheme } from "@/lib/theme";
+import { toPierreVariables } from "@/lib/shared/theme";
+import { defaultTheme } from "@/lib/shared/theme";
+import { hashDiffText } from "@/lib/shared/hash";
 
 const PANDORA_PIERRE_THEME = "pandora-theme";
 const REVIEW_DIFF_LINE_HEIGHT = defaultTheme.codeEditor.typography.lineHeight;
@@ -149,17 +150,8 @@ export function createPierreFile(name: string, contents: string): FileContents {
   return {
     name,
     contents,
-    cacheKey: `${name}:${contents.length}:${hashString(contents)}`,
+    cacheKey: `${name}:${contents.length}:${hashDiffText(contents)}`,
   };
-}
-
-function hashString(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
 }
 
 export function getLargeDiffOptions(diffStyle: PierreDiffStyle): Partial<FileDiffOptions<unknown>> {

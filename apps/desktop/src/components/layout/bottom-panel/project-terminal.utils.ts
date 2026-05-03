@@ -1,5 +1,5 @@
-import { terminalDisplayForSlot } from "@/lib/terminal/terminal-identity";
-import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/types";
+import { terminalDisplayForSlot } from "@/lib/shared/terminal/identity";
+import type { SessionState, SlotState, TerminalDisplayState } from "@/lib/shared/shared.types";
 import type { SessionMap, SidebarRow, SlotMap } from "./project-terminal.types";
 
 export const PROJECT_TERMINAL_DRAG_THRESHOLD = 5;
