@@ -134,7 +134,8 @@ fn main() {
         )
         .init();
 
-    // Truncate terminal diagnostic log on fresh launch.
+    #[cfg(debug_assertions)]
+    // Truncate terminal diagnostic log on fresh dev launch.
     let _ = std::fs::write("/tmp/pandora-terminal.log", b"");
     tlog!("INIT", "pandora-tauri starting pid={}", std::process::id());
 
@@ -308,14 +309,17 @@ fn main() {
                 });
             });
 
-            let hb_handle = handle.clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                let hb = hb_handle.clone();
-                let _ = hb.run_on_main_thread(move || {
-                    tlog!("HEARTBEAT", "main thread alive");
+            #[cfg(debug_assertions)]
+            {
+                let hb_handle = handle.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let hb = hb_handle.clone();
+                    let _ = hb.run_on_main_thread(move || {
+                        tlog!("HEARTBEAT", "main thread alive");
+                    });
                 });
-            });
+            }
 
             Ok(())
         })

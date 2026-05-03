@@ -18,10 +18,12 @@
 //!
 //! Output batching
 //! ---------------
-//! Three flush triggers — 4 ms timer / 64 KB byte threshold / 256 KB
-//! ring-buffer drop policy. Implemented in the per-session reader task.
-//! Pause/resume buffers locally rather than calling into the kernel because
-//! portable-pty doesn't expose a `pause()` on the reader handle.
+//! Renderer events use three flush triggers — 4 ms timer / 64 KB byte threshold
+//! / 256 KB ring-buffer drop policy. Native terminal surfaces receive a separate
+//! immediate byte stream from the same per-session reader task so terminal
+//! rendering does not inherit webview IPC batching latency. Pause/resume buffers
+//! locally rather than calling into the kernel because portable-pty doesn't
+//! expose a `pause()` on the reader handle.
 //!
 //! Restart policy
 //! --------------
@@ -73,6 +75,10 @@ const DEFAULT_ROWS: u16 = 40;
 #[async_trait::async_trait]
 pub trait ScopeEmitter: Send + Sync {
     async fn session_state_changed(&self, state: SessionState);
+    /// Immediate terminal-renderer lane. Implementations that do not own a
+    /// terminal surface can ignore this while still receiving batched
+    /// `output_chunk` events below.
+    fn terminal_output_chunk(&self, _session_id: &str, _data: &[u8]) {}
     async fn output_chunk(&self, session_id: &str, data: Bytes);
     async fn ports_changed(&self, ports: Vec<DetectedPort>);
     /// Bulk snapshot — used on first connect and on renderer-driven
@@ -635,6 +641,7 @@ impl ProcessManager {
         self.emitter.session_state_changed(state).await;
         // ESC c — full screen reset. Clears the renderer buffer so the
         // restarted command writes to a clean canvas.
+        self.emitter.terminal_output_chunk(session_id, b"\x1bc");
         self.emitter
             .output_chunk(session_id, Bytes::from_static(b"\x1bc"))
             .await;
@@ -870,7 +877,8 @@ impl ProcessManager {
         let port_manager = self.port_manager.clone();
 
         tokio::spawn(async move {
-            let mut buffer = BytesMut::new();
+            let mut render_buffer = BytesMut::new();
+            let mut terminal_buffer = BytesMut::new();
             let mut flush_deadline: Option<tokio::time::Instant> = None;
 
             loop {
@@ -886,16 +894,14 @@ impl ProcessManager {
                     chunk = rx.recv() => {
                         let Some(chunk) = chunk else { break };
 
-                        if buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
-                            let drop = buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
-                            let drop = drop.min(buffer.len());
-                            let _ = buffer.split_to(drop);
+                        if render_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
+                            let drop = render_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
+                            let render_drop = drop.min(render_buffer.len());
+                            let _ = render_buffer.split_to(render_drop);
                         }
-                        buffer.extend_from_slice(&chunk);
+                        render_buffer.extend_from_slice(&chunk);
 
                         let now = Utc::now().to_rfc3339();
-                        port_manager.check_output_for_hint(&chunk, &session_id).await;
-
                         let paused = {
                             let mut g = inner.lock().await;
                             if let Some(s) = g.sessions.get_mut(&session_id) {
@@ -906,12 +912,34 @@ impl ProcessManager {
                             }
                         };
                         if paused {
+                            if terminal_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
+                                let drop = terminal_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
+                                let terminal_drop = drop.min(terminal_buffer.len());
+                                let _ = terminal_buffer.split_to(terminal_drop);
+                            }
+                            terminal_buffer.extend_from_slice(&chunk);
+                            port_manager.check_output_for_hint(&chunk, &session_id).await;
                             continue;
                         }
 
-                        if buffer.len() >= BATCH_MAX_BYTES {
+                        if terminal_buffer.is_empty() {
+                            emitter.terminal_output_chunk(&session_id, &chunk);
+                        } else {
+                            if terminal_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
+                                let drop = terminal_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
+                                let terminal_drop = drop.min(terminal_buffer.len());
+                                let _ = terminal_buffer.split_to(terminal_drop);
+                            }
+                            terminal_buffer.extend_from_slice(&chunk);
+                            emitter.terminal_output_chunk(&session_id, &terminal_buffer);
+                            terminal_buffer.clear();
+                        }
+
+                        port_manager.check_output_for_hint(&chunk, &session_id).await;
+
+                        if render_buffer.len() >= BATCH_MAX_BYTES {
                             flush_deadline = None;
-                            let bytes = buffer.split().freeze();
+                            let bytes = render_buffer.split().freeze();
                             emitter.output_chunk(&session_id, bytes).await;
                         } else if flush_deadline.is_none() {
                             flush_deadline = Some(tokio::time::Instant::now() + BATCH_INTERVAL);
@@ -919,7 +947,7 @@ impl ProcessManager {
                     }
                     _ = sleep_fut => {
                         flush_deadline = None;
-                        if buffer.is_empty() { continue; }
+                        if render_buffer.is_empty() { continue; }
                         let paused = {
                             let g = inner.lock().await;
                             g.sessions
@@ -928,14 +956,14 @@ impl ProcessManager {
                                 .unwrap_or(false)
                         };
                         if paused { continue; }
-                        let bytes = buffer.split().freeze();
+                        let bytes = render_buffer.split().freeze();
                         emitter.output_chunk(&session_id, bytes).await;
                     }
                 }
             }
 
             // Final flush on EOF.
-            if !buffer.is_empty() {
+            if !render_buffer.is_empty() || !terminal_buffer.is_empty() {
                 let paused = {
                     let g = inner.lock().await;
                     g.sessions
@@ -944,9 +972,14 @@ impl ProcessManager {
                         .unwrap_or(false)
                 };
                 if !paused {
-                    emitter
-                        .output_chunk(&session_id, buffer.split().freeze())
-                        .await;
+                    if !terminal_buffer.is_empty() {
+                        emitter.terminal_output_chunk(&session_id, &terminal_buffer);
+                    }
+                    if !render_buffer.is_empty() {
+                        emitter
+                            .output_chunk(&session_id, render_buffer.split().freeze())
+                            .await;
+                    }
                 }
             }
         })
@@ -1067,13 +1100,13 @@ impl ProcessManager {
             }
             session.exit_handled = true;
 
-            // Cancel any pending escalation / reader / fg poller; PTY is dead.
+            // Cancel any pending escalation. Let the reader task drain naturally:
+            // it owns the renderer batch buffer, and aborting it here can drop
+            // the final bytes from fast-exiting commands before the 4 ms flush.
             if let Some(t) = session.escalation_task.take() {
                 t.abort();
             }
-            if let Some(t) = session.reader_task.take() {
-                t.abort();
-            }
+            let _ = session.reader_task.take();
 
             session.pty = None;
             session.output_paused = false;
@@ -1383,6 +1416,7 @@ mod tests {
     #[derive(Default)]
     struct CapturedEvent {
         states: Vec<SessionState>,
+        terminal_outputs: Vec<(String, Vec<u8>)>,
         outputs: Vec<(String, Vec<u8>)>,
     }
 
@@ -1393,6 +1427,13 @@ mod tests {
     impl ScopeEmitter for TestEmitter {
         async fn session_state_changed(&self, state: SessionState) {
             self.0.lock().unwrap().states.push(state);
+        }
+        fn terminal_output_chunk(&self, session_id: &str, data: &[u8]) {
+            self.0
+                .lock()
+                .unwrap()
+                .terminal_outputs
+                .push((session_id.to_string(), data.to_vec()));
         }
         async fn output_chunk(&self, session_id: &str, data: Bytes) {
             self.0
@@ -1547,6 +1588,17 @@ mod tests {
             String::from_utf8_lossy(&outputs).contains("hi"),
             "expected 'hi' in output: {:?}",
             String::from_utf8_lossy(&outputs)
+        );
+        let terminal_outputs: Vec<u8> = captured
+            .terminal_outputs
+            .iter()
+            .filter(|(id, _)| id == &sid)
+            .flat_map(|(_, b)| b.clone())
+            .collect();
+        assert!(
+            String::from_utf8_lossy(&terminal_outputs).contains("hi"),
+            "expected 'hi' in terminal output: {:?}",
+            String::from_utf8_lossy(&terminal_outputs)
         );
     }
 

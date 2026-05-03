@@ -52,8 +52,8 @@ impl DomainRegistries {
 // ---------------------------------------------------------------------------
 
 /// Publishes domain state changes and terminal output as typed Tauri events.
-/// Output also fans out into the surface registry so native terminals receive
-/// the same bytes as renderer-side terminals.
+/// Native terminal output uses `terminal_output_chunk` so renderer IPC batching
+/// does not add latency to the terminal surface.
 struct TauriEventEmitter {
     app: AppHandle,
     scope_id: String,
@@ -84,12 +84,14 @@ impl ScopeEmitter for TauriEventEmitter {
         self.emit_event(ScopeEvent::SessionStateChanged { session: state });
     }
 
-    async fn output_chunk(&self, session_id: &str, data: Bytes) {
+    fn terminal_output_chunk(&self, session_id: &str, data: &[u8]) {
         // Native terminal surfaces expect raw bytes — feed the registry
-        // first so Ghostty doesn't fall behind the renderer event stream.
+        // directly so Ghostty doesn't inherit renderer event batching.
         self.surface_registry
-            .feed_output(&self.app, session_id, &data);
+            .feed_output(&self.app, session_id, data);
+    }
 
+    async fn output_chunk(&self, session_id: &str, data: Bytes) {
         self.emit_event(ScopeEvent::OutputChunk {
             session_id: session_id.to_string(),
             data: BASE64_STANDARD.encode(&data),

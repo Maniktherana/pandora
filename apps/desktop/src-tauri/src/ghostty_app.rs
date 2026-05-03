@@ -7,12 +7,15 @@
 use crate::ghostty_ffi::*;
 use std::ffi::{c_void, CString};
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
 /// Process-global ghostty app handle. Must only be accessed from the main thread.
 static GHOSTTY_APP: OnceLock<GhosttyAppState> = OnceLock::new();
 static TAURI_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+static GHOSTTY_TICK_COUNT: AtomicU64 = AtomicU64::new(0);
+static GHOSTTY_WAKEUP_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub struct GhosttyAppState {
     pub app: ghostty_app_t,
@@ -115,7 +118,19 @@ pub fn start_tick_timer(app_handle: tauri::AppHandle) {
         loop {
             interval.tick().await;
             let _ = app_handle.run_on_main_thread(move || unsafe {
+                let t0 = std::time::Instant::now();
                 ghostty_app_tick(app_usize as ghostty_app_t);
+                let tick_us = t0.elapsed().as_micros();
+                let tick_count = GHOSTTY_TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+                if tick_us > 2_000 || tick_count % 600 == 0 {
+                    crate::tlog!(
+                        "GHOSTTY_TICK",
+                        "count={} wakeups={} tick={}µs",
+                        tick_count,
+                        GHOSTTY_WAKEUP_COUNT.load(Ordering::Relaxed),
+                        tick_us
+                    );
+                }
             });
         }
     });
@@ -128,6 +143,15 @@ pub fn start_tick_timer(app_handle: tauri::AppHandle) {
 /// Called by ghostty when it needs the app runtime to wake up and process events.
 unsafe extern "C" fn runtime_wakeup_cb(userdata: *mut c_void) {
     if !userdata.is_null() {
+        let wakeups = GHOSTTY_WAKEUP_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if wakeups % 1_000 == 0 {
+            crate::tlog!(
+                "GHOSTTY_WAKEUP",
+                "count={} ticks={}",
+                wakeups,
+                GHOSTTY_TICK_COUNT.load(Ordering::Relaxed)
+            );
+        }
         let app = userdata as usize;
         if let Some(handle) = TAURI_APP_HANDLE.get() {
             let handle = handle.clone();

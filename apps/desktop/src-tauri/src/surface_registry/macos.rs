@@ -7,8 +7,6 @@
 use crate::ghostty_app;
 use crate::ghostty_ffi::*;
 use crate::runtime_ipc::DomainRegistries;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine as _;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
@@ -18,10 +16,11 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::ffi::CString;
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
+use tokio::sync::mpsc;
 
 unsafe extern "C" {
     fn pandora_terminal_view_new(x: f64, y: f64, width: f64, height: f64) -> *mut c_void;
@@ -69,6 +68,7 @@ struct SurfaceCallbackContext {
     workspace_id: String,
     session_id: String,
     app_handle: AppHandle,
+    input_tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
 struct RegistryInner {
@@ -87,6 +87,10 @@ struct SurfaceOutputQueue {
     queue: Mutex<VecDeque<Vec<u8>>>,
     total_bytes: AtomicUsize,
     flush_scheduled: AtomicBool,
+    last_feed_ms: AtomicU64,
+    last_flush_start_ms: AtomicU64,
+    last_flush_finish_ms: AtomicU64,
+    flush_count: AtomicUsize,
 }
 
 struct NativeSurface {
@@ -100,6 +104,10 @@ struct NativeSurface {
     focused: bool,
     overlay_exempt: bool,
 }
+
+static PTY_INPUT_CALLBACK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PTY_INPUT_CALLBACK_BYTES: AtomicUsize = AtomicUsize::new(0);
+const INPUT_COALESCE_MAX_BYTES: usize = 16 * 1024;
 
 // Safety: NativeSurface contains raw pointers that are only accessed
 // while holding the Mutex, and the ghostty surface is created/destroyed
@@ -212,6 +220,75 @@ unsafe fn ns_effective_backing_scale(window_ptr: *mut c_void) -> f64 {
 /// Same backing scale as [`SurfaceRegistry::update_surface`] (for the `native_window_scale_factor` command).
 pub fn backing_scale_for_ns_window(window_ptr: *mut c_void) -> f64 {
     unsafe { ns_effective_backing_scale(window_ptr) }
+}
+
+fn spawn_input_worker(
+    app_handle: AppHandle,
+    workspace_id: String,
+    session_id: String,
+    mut input_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut write_count = 0usize;
+        let mut byte_count = 0usize;
+        while let Some(first) = input_rx.recv().await {
+            let mut data = first;
+            let mut chunks = 1usize;
+            while data.len() < INPUT_COALESCE_MAX_BYTES {
+                match input_rx.try_recv() {
+                    Ok(next) => {
+                        chunks += 1;
+                        data.extend_from_slice(&next);
+                    }
+                    Err(mpsc::error::TryRecvError::Empty)
+                    | Err(mpsc::error::TryRecvError::Disconnected) => break,
+                }
+            }
+
+            write_count += 1;
+            byte_count += data.len();
+            if chunks > 64 || data.len() >= 4096 || write_count % 1_000 == 0 {
+                tlog!(
+                    "PTY_INPUT_WORKER",
+                    "session={} workspace={} write={} chunks={} bytes={} total_bytes={}",
+                    session_id,
+                    workspace_id,
+                    write_count,
+                    chunks,
+                    data.len(),
+                    byte_count
+                );
+            }
+
+            let registries = app_handle.state::<DomainRegistries>();
+            if let Err(err) = crate::runtime_ipc::write_to_session(
+                registries.inner(),
+                &workspace_id,
+                &session_id,
+                &data,
+            )
+            .await
+            {
+                tlog!(
+                    "PTY_INPUT_WORKER",
+                    "session={} workspace={} write failed: {}",
+                    session_id,
+                    workspace_id,
+                    err
+                );
+                eprintln!("[surface_registry] failed to route terminal input: {err}");
+            }
+        }
+
+        tlog!(
+            "PTY_INPUT_WORKER",
+            "session={} workspace={} stopped writes={} bytes={}",
+            session_id,
+            workspace_id,
+            write_count,
+            byte_count
+        );
+    });
 }
 
 fn surface_state_unchanged(
@@ -510,16 +587,22 @@ impl SurfaceRegistry {
             .unwrap_or_default()
     }
 
-    /// Schedule an immediate flush on a blocking thread.
-    fn schedule_flush(self: &Arc<Self>, surface_id: &str, output_queue: &Arc<SurfaceOutputQueue>) {
+    /// Schedule an immediate flush on a blocking thread. Returns false if a
+    /// flush is already active/scheduled for this surface.
+    fn schedule_flush(
+        self: &Arc<Self>,
+        surface_id: &str,
+        output_queue: &Arc<SurfaceOutputQueue>,
+    ) -> bool {
         if output_queue.flush_scheduled.swap(true, Ordering::AcqRel) {
-            return; // already scheduled
+            return false;
         }
         let registry = Arc::clone(self);
         let sid = surface_id.to_string();
         tauri::async_runtime::spawn_blocking(move || {
             registry.flush_surface_output(&sid);
         });
+        true
     }
 
     /// Schedule a flush after a short delay. Used when data remains after a flush so
@@ -546,23 +629,49 @@ impl SurfaceRegistry {
             let queues = self.surface_queues.lock().unwrap();
             let output_queue = match queues.get(surface_id) {
                 Some(queue) => Arc::clone(queue),
-                None => return,
+                None => {
+                    tlog!(
+                        "FLUSH",
+                        "surface={} skipped missing output queue",
+                        surface_id
+                    );
+                    return;
+                }
             };
             let inner = self.inner.lock().unwrap();
             let ghostty_surface = match inner.surfaces.get(surface_id) {
                 Some(surface) => surface.ghostty_surface,
                 None => {
                     output_queue.flush_scheduled.store(false, Ordering::Release);
+                    tlog!(
+                        "FLUSH",
+                        "surface={} skipped missing native surface",
+                        surface_id
+                    );
                     return;
                 }
             };
             (output_queue, ghostty_surface)
         };
 
+        output_queue
+            .last_flush_start_ms
+            .store(current_epoch_ms(), Ordering::Release);
+        let flush_index = output_queue.flush_count.fetch_add(1, Ordering::AcqRel) + 1;
+
         let merged = {
             let mut queue = output_queue.queue.lock().unwrap();
             if queue.is_empty() {
                 output_queue.flush_scheduled.store(false, Ordering::Release);
+                output_queue
+                    .last_flush_finish_ms
+                    .store(current_epoch_ms(), Ordering::Release);
+                tlog!(
+                    "FLUSH",
+                    "surface={} flush={} empty queue while scheduled",
+                    surface_id,
+                    flush_index
+                );
                 return;
             }
 
@@ -595,14 +704,11 @@ impl SurfaceRegistry {
             }
 
             let has_more = !queue.is_empty();
-            if !has_more {
-                output_queue.flush_scheduled.store(false, Ordering::Release);
-            }
 
             (buf, has_more)
         };
 
-        let (data, has_more) = merged;
+        let (data, had_more_after_drain) = merged;
 
         let t0 = std::time::Instant::now();
         if !data.is_empty() {
@@ -611,24 +717,38 @@ impl SurfaceRegistry {
             }
         }
         let write_us = t0.elapsed().as_micros();
+        output_queue
+            .last_flush_finish_ms
+            .store(current_epoch_ms(), Ordering::Release);
 
         // Log every flush so we can diagnose stalls
-        if write_us > 1000 || has_more {
+        if write_us > 1000 || had_more_after_drain || data.len() >= FLUSH_BATCH_BYTE_LIMIT {
             tlog!(
                 "FLUSH",
-                "surface={} bytes={} has_more={} write={}µs",
+                "surface={} flush={} bytes={} had_more_after_drain={} write={}µs",
                 surface_id,
+                flush_index,
                 data.len(),
-                has_more,
+                had_more_after_drain,
                 write_us
             );
         }
 
+        let has_more_after_write = {
+            let queue = output_queue.queue.lock().unwrap();
+            let has_more = !queue.is_empty();
+            if !has_more {
+                output_queue.flush_scheduled.store(false, Ordering::Release);
+            }
+            has_more
+        };
+
         // If more data remains, schedule the next flush after a delay.
         // flush_scheduled stays TRUE during the delay — this prevents feed_output
-        // from spawning competing tasks. The 4ms gap gives the main thread a window
-        // for input handling, ghostty_app_tick, and other surfaces' flushes.
-        if has_more {
+        // from spawning competing tasks. We only clear it after the Ghostty write
+        // finishes and the queue is observed empty, so writes for a surface remain
+        // serialized even when output arrives during an in-flight flush.
+        if has_more_after_write {
             self.schedule_flush_delayed(surface_id);
         }
     }
@@ -790,10 +910,18 @@ impl SurfaceRegistry {
             .map_err(|_| "session id contained NUL byte".to_string())?;
 
         // --- Callback context ---
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        spawn_input_worker(
+            app_handle.clone(),
+            workspace_id.clone(),
+            session_id.clone(),
+            input_rx,
+        );
         let callback_ctx = Arc::new(SurfaceCallbackContext {
             workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
             app_handle: app_handle.clone(),
+            input_tx,
         });
         let callback_ctx_raw = Arc::into_raw(callback_ctx.clone());
 
@@ -887,6 +1015,10 @@ impl SurfaceRegistry {
                     queue: Mutex::new(VecDeque::new()),
                     total_bytes: AtomicUsize::new(0),
                     flush_scheduled: AtomicBool::new(false),
+                    last_feed_ms: AtomicU64::new(0),
+                    last_flush_start_ms: AtomicU64::new(0),
+                    last_flush_finish_ms: AtomicU64::new(0),
+                    flush_count: AtomicUsize::new(0),
                 }),
             );
         }
@@ -1424,7 +1556,28 @@ impl SurfaceRegistry {
         }
 
         // Schedule immediate flush on a blocking thread
-        self.schedule_flush(&surface_id, &output_queue);
+        output_queue
+            .last_feed_ms
+            .store(current_epoch_ms(), Ordering::Release);
+        let scheduled = self.schedule_flush(&surface_id, &output_queue);
+        if !scheduled {
+            let queued_bytes = output_queue.total_bytes.load(Ordering::Acquire);
+            let queued_chunks = output_queue.queue.lock().unwrap().len();
+            if queued_bytes >= FLUSH_BATCH_BYTE_LIMIT || queued_chunks >= FLUSH_BATCH_CHUNK_LIMIT {
+                let now = current_epoch_ms();
+                let last_start = output_queue.last_flush_start_ms.load(Ordering::Acquire);
+                let last_finish = output_queue.last_flush_finish_ms.load(Ordering::Acquire);
+                tlog!(
+                    "QUEUE",
+                    "surface={} feed while flush active queue_chunks={} queue_bytes={} last_start_age={}ms last_finish_age={}ms",
+                    surface_id,
+                    queued_chunks,
+                    queued_bytes,
+                    now.saturating_sub(last_start),
+                    now.saturating_sub(last_finish)
+                );
+            }
+        }
         true
     }
 
@@ -1504,54 +1657,36 @@ unsafe extern "C" fn receive_buffer_callback(userdata: *mut c_void, buf: *const 
     let data_slice = std::slice::from_raw_parts(buf, len);
     let session_id = ctx.session_id.clone();
     let workspace_id = ctx.workspace_id.clone();
-    let app_handle = ctx.app_handle.clone();
 
-    // Log PTY input (user keystrokes / ghostty-generated input going to runtime).
-    if len <= 64 {
+    let input_count = PTY_INPUT_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let input_bytes = PTY_INPUT_CALLBACK_BYTES.fetch_add(len, Ordering::Relaxed) + len;
+    if input_count <= 20 || input_count % 1_000 == 0 || len > 256 {
         tlog!(
             "PTY_IN",
-            "session={} workspace={} bytes={} data={:?}",
+            "count={} total_bytes={} session={} workspace={} bytes={} sample={:?}",
+            input_count,
+            input_bytes,
             session_id,
             workspace_id,
             len,
-            String::from_utf8_lossy(data_slice)
+            if len <= 64 {
+                Some(String::from_utf8_lossy(data_slice))
+            } else {
+                None
+            }
         );
-    } else {
+    }
+
+    // Snapshot the bytes; the spawn closure outlives the FFI buffer.
+    if ctx.input_tx.send(data_slice.to_vec()).is_err() {
         tlog!(
             "PTY_IN",
-            "session={} workspace={} bytes={}",
+            "session={} workspace={} input worker closed; dropped {} bytes",
             session_id,
             workspace_id,
             len
         );
     }
-
-    // Existing renderer hook keeps working — broadcast the same shape it always saw.
-    let _ = app_handle.emit(
-        "native-terminal-input",
-        serde_json::json!({
-            "workspaceId": workspace_id,
-            "sessionId": ctx.session_id,
-            "data": BASE64_STANDARD.encode(data_slice),
-        })
-        .to_string(),
-    );
-
-    // Snapshot the bytes; the spawn closure outlives the FFI buffer.
-    let owned = data_slice.to_vec();
-    tauri::async_runtime::spawn(async move {
-        let registries = app_handle.state::<DomainRegistries>();
-        if let Err(err) = crate::runtime_ipc::write_to_session(
-            registries.inner(),
-            &workspace_id,
-            &session_id,
-            &owned,
-        )
-        .await
-        {
-            eprintln!("[surface_registry] failed to route terminal input: {err}");
-        }
-    });
 }
 
 /// Called by ghostty when the terminal grid size changes. Forwarded straight
