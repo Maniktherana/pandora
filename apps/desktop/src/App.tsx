@@ -30,7 +30,7 @@ import {
   getMonoFont,
   getTerminalFont,
 } from "@/lib/services/preferences/settings";
-import { registerPandoraMonacoTheme } from "@/components/editor/monaco-pandora";
+import { registerEditorTheme } from "@/components/editor/editor";
 import { applyTheme, defaultTheme, themes } from "@/lib/shared/theme";
 import { loader } from "@monaco-editor/react";
 import { terminalSurfaceService } from "@/lib/services/terminal/surface";
@@ -83,7 +83,7 @@ export default function App() {
     const workspaceTheme = themes.find((t) => t.id === selectedThemeId) ?? defaultTheme;
     applyTheme(workspaceTheme);
     void loader.init().then((monaco) => {
-      registerPandoraMonacoTheme(monaco, workspaceTheme);
+      registerEditorTheme(monaco, workspaceTheme);
     });
   }, [selectedThemeId]);
 

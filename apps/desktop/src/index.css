@@ -46,7 +46,7 @@ select,
   user-select: text;
 }
 
-/* Pierre diff body: class is set on the scroll region in `diff-viewer.tsx` (below the chrome). */
+/* Diff body: class is set on the scroll region in `diff-viewer.tsx` (below the chrome). */
 .pandora-diff-selectable,
 .pandora-diff-selectable * {
   -webkit-user-select: text;

@@ -184,7 +184,7 @@ export function applyTheme(theme: WorkspaceTheme) {
   }
 }
 
-export function toPierreVariables(tokens: CodeEditorTheme): CSSProperties {
+export function toDiffVariables(tokens: CodeEditorTheme): CSSProperties {
   return {
     "--diffs-bg": tokens.surface.base,
     "--diffs-bg-hover": tokens.surface.hover,

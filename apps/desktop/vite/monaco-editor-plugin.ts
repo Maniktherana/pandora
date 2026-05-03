@@ -103,7 +103,7 @@ export function monacoEditorPlugin({
   let cacheDir: string;
 
   return {
-    name: "pandora-monaco-editor-workers",
+    name: "monaco-editor-workers",
 
     configResolved(config) {
       resolvedConfig = config;

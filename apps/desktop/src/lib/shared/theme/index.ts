@@ -9,7 +9,7 @@ export {
   getThemeCssVariables,
   mergeScmTheme,
   toMonacoTheme,
-  toPierreVariables,
+  toDiffVariables,
 } from "./theme";
 export type {
   CodeEditorTheme,

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff as PierreFileDiff } from "@pierre/diffs/react";
+import { FileDiff } from "@pierre/diffs/react";
 import type { FileDiffMetadata, FileDiffOptions, VirtualFileMetrics } from "@pierre/diffs";
 import {
   parsedDiffQueryKey,
@@ -9,10 +9,10 @@ import {
 import type { DiffSource } from "@/lib/shared/shared.types";
 import { cn } from "@/lib/shared/utils";
 import {
-  createPierreDiffOptions,
+  createDiffOptions,
   getLargeDiffOptions,
-  getPierreSurfaceStyle,
-} from "@/components/editor/pierre-pandora";
+  getDiffSurfaceStyle,
+} from "@/components/editor/diff";
 import {
   DIFF_CONTENTS_GC_TIME_MS,
   DIFF_CONTENTS_STALE_TIME_MS,
@@ -56,7 +56,7 @@ function loadWrapLines(): boolean {
   return window.localStorage.getItem(STORAGE_WRAP) === "1";
 }
 
-type PierreDiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
+type DiffStyle = NonNullable<FileDiffOptions<unknown>["diffStyle"]>;
 
 export type DiffViewerStats = {
   additions: number;
@@ -89,7 +89,7 @@ export default memo(function DiffViewer({
   showHeader?: boolean;
   fillHeight?: boolean;
   className?: string;
-  diffStyle?: PierreDiffStyle;
+  diffStyle?: DiffStyle;
   wrapLines?: boolean;
   reloadKey?: number;
   metrics?: VirtualFileMetrics;
@@ -112,8 +112,8 @@ export default memo(function DiffViewer({
     return scheduleDiffActivation(() => setActiveReady(true));
   }, [isActive, relativePath, source, targetBranch, workspaceRoot]);
 
-  // Enabled after the active tab has had a chance to paint.  Diff parsing and
-  // Pierre DOM hydration are expensive enough that they cannot participate in
+  // Enabled after the active tab has had a chance to paint. Diff parsing and
+  // DOM hydration are expensive enough that they cannot participate in
   // workspace-switch commit/layout effects.
   const [everActive, setEverActive] = useState(false);
   useEffect(() => {
@@ -191,7 +191,7 @@ export default memo(function DiffViewer({
   const loading = !activeReady || contentLoading || (hasDiff && parseQuery.status === "pending");
   const error = contentError;
   const noDiff = activeReady && !contentLoading && !contentError && original === modified;
-  const diffStyle: PierreDiffStyle = controlledDiffStyle ?? (sideBySide ? "split" : "unified");
+  const diffStyle: DiffStyle = controlledDiffStyle ?? (sideBySide ? "split" : "unified");
   const wrapLines = controlledWrapLines ?? storedWrapLines;
   const isLarge = Math.max(original.length, modified.length) > LARGE_DIFF_CONTENT_BYTES;
 
@@ -200,7 +200,7 @@ export default memo(function DiffViewer({
   const displayError = error ?? parseError;
 
   const options = useMemo(() => {
-    const base = createPierreDiffOptions(diffStyle, wrapLines);
+    const base = createDiffOptions(diffStyle, wrapLines);
     return isLarge ? { ...base, ...getLargeDiffOptions(diffStyle) } : base;
   }, [diffStyle, isLarge, wrapLines]);
 
@@ -244,7 +244,7 @@ export default memo(function DiffViewer({
     <div
       className={cn("flex min-h-0 flex-col", fillHeight && "h-full", className)}
       style={{
-        ...getPierreSurfaceStyle(),
+        ...getDiffSurfaceStyle(),
         backgroundColor: defaultTheme.codeEditor.surface.base,
       }}
     >
@@ -335,7 +335,7 @@ export default memo(function DiffViewer({
           </div>
         )}
         {!displayError && activeReady && !loading && diffMetadata && (
-          <PierreFileDiff
+          <FileDiff
             fileDiff={diffMetadata}
             options={options}
             {...(metrics === undefined ? {} : { metrics })}

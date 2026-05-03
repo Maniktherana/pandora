@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { MONACO_THEME_ID, pandoraMonacoBeforeMount } from "@/components/editor/monaco-pandora";
+import { EDITOR_THEME_ID, editorBeforeMount } from "@/components/editor/editor";
 import { cn } from "@/lib/shared/utils";
 import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 
@@ -200,8 +200,8 @@ export default function EditorFontPreview({ fontFamily, fontSize = 13 }: EditorF
           height={editorHeight}
           language={sample.language}
           value={sample.code}
-          theme={MONACO_THEME_ID}
-          beforeMount={pandoraMonacoBeforeMount}
+          theme={EDITOR_THEME_ID}
+          beforeMount={editorBeforeMount}
           onMount={handleMount}
           options={options}
           loading={

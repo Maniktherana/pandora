@@ -38,7 +38,7 @@ import { buildRowModel, reviewStatsKey, type ReviewRowData } from "@/components/
 import DiffViewer, { type DiffViewerStats } from "@/components/editor/diff-viewer";
 import { FileTypeIcon } from "@/components/layout/right-sidebar/files/file-type-icon";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { getPierreSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/pierre-pandora";
+import { getDiffSurfaceStyle, REVIEW_DIFF_METRICS } from "@/components/editor/diff";
 import { ScmStatusBadge } from "@/components/layout/right-sidebar/scm/scm-status-badge";
 
 import type {
@@ -841,7 +841,7 @@ function ReviewViewer({ workspaceId, workspaceRoot, isActive = true }: ReviewVie
   );
 
   return (
-    <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getPierreSurfaceStyle()}>
+    <div ref={viewerRef} className="flex h-full min-h-0 flex-col" style={getDiffSurfaceStyle()}>
         <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--theme-code-surface-separator)] bg-[var(--theme-code-surface-chrome)] px-1.5 py-1">
           <DropdownMenu>
             <DropdownMenuTrigger

@@ -11,8 +11,8 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { FileTree } from "@pierre/trees/react";
 import type {
-  ContextMenuItem as PierreContextMenuItem,
-  ContextMenuOpenContext as PierreContextMenuOpenContext,
+  ContextMenuItem as FileTreeContextMenuItem,
+  ContextMenuOpenContext as FileTreeContextMenuOpenContext,
   FileTreeRenameEvent,
   FileTreeDropResult,
   FileTree as FileTreeModel,
@@ -114,7 +114,7 @@ function strip(p: string): string {
   return p.endsWith("/") ? p.slice(0, -1) : p;
 }
 
-function anchorStyle(rect: PierreContextMenuOpenContext["anchorRect"]): CSSProperties {
+function anchorStyle(rect: FileTreeContextMenuOpenContext["anchorRect"]): CSSProperties {
   return {
     position: "fixed",
     left: rect.left,
@@ -305,12 +305,12 @@ export function FileTreePanel({
   }), [doCreateFile, doCreateFolder, doCollapseAll]);
 
   const [ctxState, setCtxState] = useState<{
-    item: PierreContextMenuItem;
-    context: PierreContextMenuOpenContext;
+    item: FileTreeContextMenuItem;
+    context: FileTreeContextMenuOpenContext;
   } | null>(null);
 
   const renderMenu = useCallback(
-    (_item: PierreContextMenuItem, _ctx: PierreContextMenuOpenContext) => {
+    (_item: FileTreeContextMenuItem, _ctx: FileTreeContextMenuOpenContext) => {
       queueMicrotask(() => setCtxState({ item: _item, context: _ctx }));
       return null;
     },

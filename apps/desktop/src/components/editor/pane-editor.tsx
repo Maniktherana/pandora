@@ -6,12 +6,12 @@ import { useEditorStore } from "@/lib/services/editor/store";
 import { editorEnsureFileLoaded, editorSaveFile } from "@/lib/services/editor/commands";
 import { languageFromRelativePath } from "@/components/editor/editor-language";
 import {
-  MONACO_THEME_ID,
-  pandoraMonacoBeforeMount,
-  PANDORA_EDITOR_BG,
-  PANDORA_EDITOR_FONT_FAMILY,
-  PANDORA_EDITOR_FONT_SIZE,
-} from "@/components/editor/monaco-pandora";
+  EDITOR_THEME_ID,
+  editorBeforeMount,
+  EDITOR_BG,
+  EDITOR_FONT_FAMILY,
+  EDITOR_FONT_SIZE,
+} from "@/components/editor/editor";
 import { useSettingsStore, getMonoFont } from "@/lib/services/preferences/settings";
 
 const LARGE_FILE_BYTES = 500_000;
@@ -19,7 +19,7 @@ const HUGE_FILE_BYTES = 2_000_000;
 const BUFFER_SYNC_DEBOUNCE_MS = 300;
 
 const editorLoading = (
-  <div className="h-full w-full" style={{ backgroundColor: PANDORA_EDITOR_BG }} aria-hidden />
+  <div className="h-full w-full" style={{ backgroundColor: EDITOR_BG }} aria-hidden />
 );
 
 export default function PaneEditor({
@@ -39,9 +39,9 @@ export default function PaneEditor({
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
-      fontFamily: resolvedFont || PANDORA_EDITOR_FONT_FAMILY,
-      fontSize: editorFontSize || PANDORA_EDITOR_FONT_SIZE,
-      lineHeight: Math.round((editorFontSize || PANDORA_EDITOR_FONT_SIZE) * 1.6),
+      fontFamily: resolvedFont || EDITOR_FONT_FAMILY,
+      fontSize: editorFontSize || EDITOR_FONT_SIZE,
+      lineHeight: Math.round((editorFontSize || EDITOR_FONT_SIZE) * 1.6),
       wordWrap: "off" as const,
       scrollBeyondLastLine: false,
       automaticLayout: false,
@@ -127,7 +127,7 @@ export default function PaneEditor({
   const handleMount = useCallback<OnMount>(
     (editor, monaco) => {
       editorRef.current = editor;
-      monaco.editor.setTheme(MONACO_THEME_ID);
+      monaco.editor.setTheme(EDITOR_THEME_ID);
 
       // --- Ctrl+S: read from model directly, not from store ---
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -262,7 +262,7 @@ export default function PaneEditor({
     <div
       ref={containerRef}
       className="absolute inset-0 min-h-0"
-      style={{ backgroundColor: PANDORA_EDITOR_BG }}
+      style={{ backgroundColor: EDITOR_BG }}
     >
       {editorReady ? (
         <Editor
@@ -270,9 +270,9 @@ export default function PaneEditor({
           path={relativePath}
           {...(language === undefined ? {} : { language })}
           defaultValue={initialContent}
-          theme={MONACO_THEME_ID}
+          theme={EDITOR_THEME_ID}
           loading={editorLoading}
-          beforeMount={pandoraMonacoBeforeMount}
+          beforeMount={editorBeforeMount}
           onMount={handleMount}
           options={editorOptions}
           keepCurrentModel
