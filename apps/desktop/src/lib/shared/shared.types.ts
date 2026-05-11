@@ -3,15 +3,6 @@ export type SessionKind = "process" | "agent" | "terminal";
 export type PresentationMode = "single" | "tabs" | "split";
 export type SessionStatus = "stopped" | "running" | "crashed" | "restarting" | "paused";
 export type AggregateStatus = "stopped" | "running" | "crashed" | "restarting";
-export type AgentVendor =
-  | "claude-code"
-  | "codex"
-  | "opencode"
-  | "gemini"
-  | "cursor-agent"
-  | "github-copilot"
-  | "amp-code";
-export type AgentPhase = "idle" | "working" | "waiting_input" | "waiting_approval" | "finished";
 export type TerminalAgentStatus = "idle" | "working" | "permission" | "review";
 
 export interface ActionCapabilities {
@@ -21,16 +12,6 @@ export interface ActionCapabilities {
   canClear: boolean;
   canStop: boolean;
   canRestart: boolean;
-}
-
-export interface AgentActivityState {
-  vendor: AgentVendor;
-  phase: AgentPhase;
-  agentSessionID: string | null;
-  updatedAt: string;
-  message: string | null;
-  title: string | null;
-  toolName: string | null;
 }
 
 export type TerminalDisplayKind = "terminal" | "process";
@@ -67,9 +48,7 @@ export interface SessionState {
   port: number | null;
   startedAt: string | null;
   lastOutputAt: string | null;
-  foregroundProcess: string | null;
   ptyForegroundProcess: string | null;
-  agentActivity: AgentActivityState | null;
   capabilities: ActionCapabilities;
 }
 
@@ -146,7 +125,6 @@ export type RuntimeCommand =
   | { type: "input"; sessionID: string; data: string }
   | { type: "request_snapshot" }
   | { type: "resize"; sessionID: string; cols: number; rows: number }
-  | { type: "agent_cli_signal"; signal: any }
   // File tree
   | { type: "file_tree_subscribe"; expanded_paths?: string[] }
   | { type: "file_tree_set_expanded_paths"; paths: string[] }
@@ -192,7 +170,6 @@ export type RuntimeEvent =
   | { type: "session_opened"; session: SessionState }
   | { type: "session_closed"; sessionID: string }
   | { type: "ports_snapshot"; ports: DetectedPort[] }
-  | { type: "output_chunk"; sessionID: string; data: string }
   | { type: "error"; message: string }
   // File tree
   | { type: "file_tree_snapshot"; snapshot: FileTreeSnapshot }
@@ -349,4 +326,3 @@ export interface AppState {
   selectedProjectId: string | null;
   selectedWorkspaceId: string | null;
 }
-

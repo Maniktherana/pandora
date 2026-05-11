@@ -770,7 +770,6 @@ mod tests {
         DetectedPort, FileTreeEntry, FileTreeSnapshot, SessionState, SlotState,
     };
     use async_trait::async_trait;
-    use bytes::Bytes;
     use std::sync::Mutex as StdMutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -788,7 +787,6 @@ mod tests {
     #[async_trait]
     impl ScopeEmitter for CapturingEmitter {
         async fn session_state_changed(&self, _: SessionState) {}
-        async fn output_chunk(&self, _: &str, _: Bytes) {}
         async fn ports_changed(&self, _: Vec<DetectedPort>) {}
         async fn slot_snapshot(&self, _: Vec<SlotState>) {}
         async fn session_snapshot(&self, _: Vec<SessionState>) {}

@@ -22,7 +22,6 @@ use crate::surface_registry::SurfaceRegistry;
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
-use bytes::Bytes;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -51,9 +50,8 @@ impl DomainRegistries {
 // Tauri event emission
 // ---------------------------------------------------------------------------
 
-/// Publishes domain state changes and terminal output as typed Tauri events.
-/// Native terminal output uses `terminal_output_chunk` so renderer IPC batching
-/// does not add latency to the terminal surface.
+/// Publishes domain state changes as typed Tauri events and feeds terminal
+/// bytes directly into native terminal surfaces.
 struct TauriEventEmitter {
     app: AppHandle,
     scope_id: String,
@@ -89,13 +87,6 @@ impl ScopeEmitter for TauriEventEmitter {
         // directly so Ghostty doesn't inherit renderer event batching.
         self.surface_registry
             .feed_output(&self.app, session_id, data);
-    }
-
-    async fn output_chunk(&self, session_id: &str, data: Bytes) {
-        self.emit_event(ScopeEvent::OutputChunk {
-            session_id: session_id.to_string(),
-            data: BASE64_STANDARD.encode(&data),
-        });
     }
 
     async fn ports_changed(&self, ports: Vec<DetectedPort>) {
@@ -231,7 +222,10 @@ pub async fn write_to_session(
         .get(scope_id)
         .await
         .ok_or_else(|| format!("no terminal scope: {scope_id}"))?;
-    scope.process_manager.write_to_session(session_id, data).await;
+    scope
+        .process_manager
+        .write_to_session(session_id, data)
+        .await;
     Ok(())
 }
 
@@ -314,7 +308,10 @@ async fn dispatch(
         IpcCommand::CreateSessionDef { session } => {
             let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
             db.create_session_definition(scope_id, &session)?;
-            scope.process_manager.register_session_definition(session).await;
+            scope
+                .process_manager
+                .register_session_definition(session)
+                .await;
             scope.process_manager.emit_snapshots().await;
         }
         IpcCommand::UpdateSessionDef { session } => {
@@ -451,11 +448,6 @@ async fn dispatch(
         IpcCommand::RequestSnapshot => {
             ensure_terminal_with_snapshot(registries, &db, &app, scope_id).await?;
         }
-        IpcCommand::AgentCliSignal { signal } => {
-            let scope = ensure_terminal(registries, &db, &app, scope_id).await?;
-            scope.process_manager.record_agent_cli_signal(&signal).await;
-        }
-
         // ---- File tree -------------------------------------------------
         IpcCommand::FileTreeSubscribe { expanded_paths } => {
             let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
@@ -497,14 +489,16 @@ async fn dispatch(
             dest_relative_path,
         } => {
             let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
-            ft.move_entry(source_relative_path, dest_relative_path).await;
+            ft.move_entry(source_relative_path, dest_relative_path)
+                .await;
         }
         IpcCommand::FileTreeCopy {
             source_relative_path,
             dest_relative_path,
         } => {
             let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
-            ft.copy_entry(source_relative_path, dest_relative_path).await;
+            ft.copy_entry(source_relative_path, dest_relative_path)
+                .await;
         }
         IpcCommand::FileTreeImport {
             dest_relative_path,
@@ -527,7 +521,8 @@ async fn dispatch(
             contents,
         } => {
             let ft = ensure_file_tree(registries, &db, &app, scope_id).await?;
-            ft.write_text_file(request_id, relative_path, contents).await;
+            ft.write_text_file(request_id, relative_path, contents)
+                .await;
         }
 
         // ---- SCM -------------------------------------------------------
@@ -598,7 +593,8 @@ async fn dispatch(
             contents,
         } => {
             let eio = ensure_editor_io(registries, &db, &app, scope_id).await?;
-            eio.write_text_file(request_id, relative_path, contents).await;
+            eio.write_text_file(request_id, relative_path, contents)
+                .await;
         }
     }
     Ok(())
@@ -705,7 +701,9 @@ async fn ensure_file_tree(
     let emitter = make_emitter(app, scope_id);
     let (service, _) = registries
         .file_tree
-        .get_or_create(scope_id, || open_file_tree(scope_id, &context.root, emitter))
+        .get_or_create(scope_id, || {
+            open_file_tree(scope_id, &context.root, emitter)
+        })
         .await
         .map_err(|err| format!("open file tree scope failed for {scope_id}: {err}"))?;
     Ok(service)
@@ -738,7 +736,9 @@ async fn ensure_editor_io(
     let emitter = make_emitter(app, scope_id);
     let (service, _) = registries
         .editor_io
-        .get_or_create(scope_id, || open_editor_io(scope_id, &context.root, emitter))
+        .get_or_create(scope_id, || {
+            open_editor_io(scope_id, &context.root, emitter)
+        })
         .await
         .map_err(|err| format!("open editor IO scope failed for {scope_id}: {err}"))?;
     Ok(service)

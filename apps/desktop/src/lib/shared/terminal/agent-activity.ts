@@ -1,18 +1,5 @@
-import type {
-  AgentActivityState,
-  LayoutNode,
-  SessionState,
-  TerminalAgentStatus,
-} from "@/lib/shared/shared.types";
-import { findLeaf, getAllLeaves } from "@/lib/shared/utils";
-
-type ScopeAgentActivityContext = {
-  workspaceId: string;
-  sessions: SessionState[];
-  terminalAgentStatusBySlotId: Record<string, TerminalAgentStatus>;
-  root: LayoutNode | null;
-  focusedPaneID: string | null;
-};
+import type { LayoutNode, TerminalAgentStatus } from "@/lib/shared/shared.types";
+import { findLeaf } from "@/lib/shared/utils";
 
 /** Minimal shape needed to read per-slot agent status across all slots. */
 type SlotStatusReadable = {
@@ -29,12 +16,6 @@ type SlotStatusMutable = {
 type LayoutAwareMutable = SlotStatusMutable & {
   root: LayoutNode | null;
   focusedPaneID: string | null;
-};
-
-/** Minimal shape needed to rebuild agent statuses from sessions. */
-type SessionStatusMutable = LayoutAwareMutable & {
-  workspaceId: string;
-  sessions: SessionState[];
 };
 
 const STATUS_PRIORITY: Record<TerminalAgentStatus, number> = {
@@ -94,83 +75,6 @@ function selectedTerminalSlotId(root: LayoutNode | null, focusedPaneID: string |
   return selected?.kind === "terminal" ? selected.slotId : null;
 }
 
-export function isTerminalSlotSelected(
-  state: { root: LayoutNode | null; focusedPaneID: string | null },
-  slotId: string,
-) {
-  return selectedTerminalSlotId(state.root, state.focusedPaneID) === slotId;
-}
-
-export function isTerminalSlotVisibleInSelectedLeaf(
-  state: { root: LayoutNode | null; focusedPaneID: string | null },
-  slotId: string,
-) {
-  if (!state.root || !state.focusedPaneID) return false;
-  return getAllLeaves(state.root).some((leaf) => {
-    if (leaf.id !== state.focusedPaneID) return false;
-    const selected = leaf.tabs[leaf.selectedIndex];
-    return selected?.kind === "terminal" && selected.slotId === slotId;
-  });
-}
-
-export function hasAgentActivityChanged(
-  previous: AgentActivityState | null | undefined,
-  next: AgentActivityState | null | undefined,
-) {
-  return (
-    (previous?.updatedAt ?? null) !== (next?.updatedAt ?? null) ||
-    (previous?.phase ?? null) !== (next?.phase ?? null) ||
-    (previous?.vendor ?? null) !== (next?.vendor ?? null)
-  );
-}
-
-export function terminalAgentStatusForActivity(
-  activity: AgentActivityState,
-  options: { isSelectedTerminal: boolean },
-): TerminalAgentStatus {
-  switch (activity.phase) {
-    case "working":
-      return "working";
-    case "waiting_approval":
-      return "permission";
-    case "finished":
-    case "waiting_input":
-      return options.isSelectedTerminal ? "idle" : "review";
-    case "idle":
-    default:
-      return "idle";
-  }
-}
-
-export function applySessionAgentActivityStatus(
-  runtime: SessionStatusMutable,
-  session: SessionState,
-  options: { selectedWorkspaceId: string | null },
-) {
-  runtime.terminalAgentStatusBySlotId ??= {};
-  const activity = session.agentActivity;
-  if (!activity) {
-    clearEphemeralTerminalAgentStatus(runtime, session.slotID);
-    return;
-  }
-
-  runtime.terminalAgentStatusBySlotId[session.slotID] = terminalAgentStatusForActivity(activity, {
-    isSelectedTerminal:
-      runtime.workspaceId === options.selectedWorkspaceId &&
-      isTerminalSlotSelected(runtime, session.slotID),
-  });
-}
-
-export function rebuildTerminalAgentStatuses(
-  state: SessionStatusMutable,
-  options: { selectedWorkspaceId: string | null },
-) {
-  state.terminalAgentStatusBySlotId ??= {};
-  for (const session of state.sessions) {
-    applySessionAgentActivityStatus(state, session, options);
-  }
-}
-
 export function clearEphemeralTerminalAgentStatus(runtime: SlotStatusMutable, slotId: string) {
   const current = runtime.terminalAgentStatusBySlotId?.[slotId] ?? "idle";
   if (current === "working" || current === "permission") {
@@ -189,51 +93,4 @@ export function acknowledgeSelectedTerminalAgentStatus(runtime: LayoutAwareMutab
   if (slotId) {
     acknowledgeTerminalAgentStatus(runtime, slotId);
   }
-}
-
-export function sessionAgentActivity(
-  state: { sessions: SessionState[] },
-  session: SessionState,
-) {
-  return state.sessions.find((candidate) => candidate.id === session.id)?.agentActivity ?? null;
-}
-
-export function previousSessionAgentActivity(
-  sessions: SessionState[],
-  session: SessionState,
-): AgentActivityState | null {
-  return sessions.find((s) => s.id === session.id)?.agentActivity ?? null;
-}
-
-export function applySessionAgentActivityStatusToMap(
-  scope: ScopeAgentActivityContext,
-  session: SessionState,
-  options: { selectedWorkspaceId: string | null },
-): void {
-  const activity = session.agentActivity;
-  if (!activity) {
-    const current = scope.terminalAgentStatusBySlotId[session.slotID] ?? "idle";
-    if (current === "working" || current === "permission") {
-      scope.terminalAgentStatusBySlotId[session.slotID] = "idle";
-    }
-    return;
-  }
-  const isSelectedTerminal =
-    scope.workspaceId === options.selectedWorkspaceId &&
-    selectedTerminalSlotId(scope.root, scope.focusedPaneID) === session.slotID;
-  scope.terminalAgentStatusBySlotId[session.slotID] = terminalAgentStatusForActivity(activity, {
-    isSelectedTerminal,
-  });
-}
-
-export function rebuildTerminalAgentStatusesFromScope(
-  scope: ScopeAgentActivityContext,
-  options: { selectedWorkspaceId: string | null },
-): Record<string, TerminalAgentStatus> {
-  const statusMap: Record<string, TerminalAgentStatus> = { ...scope.terminalAgentStatusBySlotId };
-  const mutable: ScopeAgentActivityContext = { ...scope, terminalAgentStatusBySlotId: statusMap };
-  for (const session of scope.sessions) {
-    applySessionAgentActivityStatusToMap(mutable, session, options);
-  }
-  return statusMap;
 }

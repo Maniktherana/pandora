@@ -22,7 +22,6 @@ import { useLayoutStore } from "@/lib/services/layout/store";
 import { useEditorActions } from "@/hooks/use-editor-actions";
 import { useLayoutActions } from "@/hooks/use-layout-actions";
 import { useTerminalActions } from "@/hooks/use-terminal-actions";
-import { useWorkspaceActions } from "@/hooks/use-workspace-actions";
 import { useBranchContext } from "@/lib/services/git/store";
 import {
   useScmStatusCached,
@@ -121,7 +120,6 @@ export default function WorkspaceChangesPanel({
   const { openFile } = useEditorActions();
   const layoutCommands = useLayoutActions();
   const terminalCommands = useTerminalActions();
-  const workspaceCommands = useWorkspaceActions();
   const workspace = useWorkspaceView(workspaceId, (view) => view.workspace);
   const projectTerminalId = workspace ? projectTerminalKey(workspace.projectId) : null;
 
@@ -561,7 +559,6 @@ export default function WorkspaceChangesPanel({
       }
       const instruction = composePrInstruction(ctx, hasUncommittedChanges);
       await terminalCommands.sendInput(target.scopeId, target.sessionId, `${instruction}\n`);
-      workspaceCommands.setPrAwaiting(workspaceId, true);
       if (wsLayout?.root) {
         const leaves = getAllLeaves(wsLayout.root);
         for (const leaf of leaves) {
@@ -585,7 +582,6 @@ export default function WorkspaceChangesPanel({
     layoutCommands,
     projectTerminalId,
     terminalCommands,
-    workspaceCommands,
     workspaceId,
   ]);
 

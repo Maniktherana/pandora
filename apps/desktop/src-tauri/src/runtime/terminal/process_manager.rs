@@ -1,4 +1,4 @@
-//! Session lifecycle, restart policy, pause/resume, output coalescing.
+//! Session lifecycle, restart policy, pause/resume, and terminal output.
 //!
 //! One in-process `Pty` per session, one tokio task per session owning its
 //! output stream and feeding it through the configured `ScopeEmitter`.
@@ -16,14 +16,12 @@
 //!     UUID generated in `open_session_instance`. Multiple instances of the
 //!     same definition can be open at once (used by Cursor-style tab splits).
 //!
-//! Output batching
+//! Terminal output
 //! ---------------
-//! Renderer events use three flush triggers — 4 ms timer / 64 KB byte threshold
-//! / 256 KB ring-buffer drop policy. Native terminal surfaces receive a separate
-//! immediate byte stream from the same per-session reader task so terminal
-//! rendering does not inherit webview IPC batching latency. Pause/resume buffers
-//! locally rather than calling into the kernel because portable-pty doesn't
-//! expose a `pause()` on the reader handle.
+//! Native terminal surfaces receive an immediate byte stream from the
+//! per-session reader task. Pause/resume buffers locally rather than calling
+//! into the kernel because portable-pty doesn't expose a `pause()` on the
+//! reader handle.
 //!
 //! Restart policy
 //! --------------
@@ -46,15 +44,12 @@ use crate::models::{RestartPolicy, SessionDefinition, SlotDefinition};
 use super::port_manager::PortManager;
 use super::pty::{Pty, PtySpawnSpec};
 use crate::runtime::types::{
-    aggregate_slot_status, capabilities_for, ActionCapabilities, AgentCliSignal, AgentPhase,
-    DetectedPort, FileTreeEntry, FileTreeSnapshot, SessionInstance, SessionState, SessionStatus,
-    SlotState,
+    aggregate_slot_status, capabilities_for, ActionCapabilities, DetectedPort, FileTreeEntry,
+    FileTreeSnapshot, SessionInstance, SessionState, SessionStatus, SlotState,
 };
 
-/// Output batching constants. Tuned for terminal smoothness at 240 Hz.
-const OUTPUT_BUFFER_MAX: usize = 256 * 1024;
-const BATCH_INTERVAL: Duration = Duration::from_millis(4);
-const BATCH_MAX_BYTES: usize = 64 * 1024;
+/// Maximum bytes retained while output is paused.
+const PAUSED_OUTPUT_BUFFER_MAX: usize = 256 * 1024;
 
 /// SIGTERM → SIGKILL escalation timeout for `stop_session`.
 const STOP_ESCALATION: Duration = Duration::from_secs(5);
@@ -76,10 +71,8 @@ const DEFAULT_ROWS: u16 = 40;
 pub trait ScopeEmitter: Send + Sync {
     async fn session_state_changed(&self, state: SessionState);
     /// Immediate terminal-renderer lane. Implementations that do not own a
-    /// terminal surface can ignore this while still receiving batched
-    /// `output_chunk` events below.
+    /// terminal surface can ignore this.
     fn terminal_output_chunk(&self, _session_id: &str, _data: &[u8]) {}
-    async fn output_chunk(&self, session_id: &str, data: Bytes);
     async fn ports_changed(&self, ports: Vec<DetectedPort>);
     /// Bulk snapshot — used on first connect and on renderer-driven
     /// rehydration (RequestSnapshot). Default no-op so test impls don't
@@ -154,9 +147,7 @@ impl ManagedSession {
                 exit_code: None,
                 started_at: None,
                 last_output_at: None,
-                foreground_process: None,
                 pty_foreground_process: None,
-                agent_activity: None,
             },
             pty: None,
             reader_task: None,
@@ -603,7 +594,6 @@ impl ProcessManager {
                 return;
             }
             session.instance.status = SessionStatus::Stopped;
-            session.instance.foreground_process = None;
             session.instance.pty_foreground_process = None;
             let pty = session.pty.as_ref().map(Arc::clone);
             (pty, session_state_of(session))
@@ -630,9 +620,7 @@ impl ProcessManager {
                 return;
             };
             session.instance.status = SessionStatus::Restarting;
-            session.instance.foreground_process = None;
             session.instance.pty_foreground_process = None;
-            session.instance.agent_activity = None;
             let pty = session.pty.as_ref().map(Arc::clone);
             let has = pty.is_some();
             (pty, session_state_of(session), has)
@@ -642,9 +630,6 @@ impl ProcessManager {
         // ESC c — full screen reset. Clears the renderer buffer so the
         // restarted command writes to a clean canvas.
         self.emitter.terminal_output_chunk(session_id, b"\x1bc");
-        self.emitter
-            .output_chunk(session_id, Bytes::from_static(b"\x1bc"))
-            .await;
 
         if has_pty {
             if let Some(pty) = pty {
@@ -672,7 +657,6 @@ impl ProcessManager {
                 return;
             }
             session.instance.status = SessionStatus::Paused;
-            session.instance.foreground_process = None;
             session.instance.pty_foreground_process = None;
             let pty = session.pty.as_ref().map(Arc::clone);
             (pty, session_state_of(session))
@@ -756,34 +740,6 @@ impl ProcessManager {
         }
     }
 
-    /// Apply an agent CLI signal to the matching session in the slot.
-    /// Returns the updated state if a matching running/paused session was
-    /// found and the event was actionable.
-    pub async fn record_agent_cli_signal(&self, signal: &AgentCliSignal) -> Option<SessionState> {
-        let now = Utc::now().to_rfc3339();
-        let activity = super::agent_signal::next_agent_activity(signal, &now)?;
-
-        let state = {
-            let mut inner = self.inner.lock().await;
-            let candidate = inner.sessions.values_mut().find(|s| {
-                s.instance.slot_id == signal.slot_id
-                    && matches!(
-                        s.instance.status,
-                        SessionStatus::Running | SessionStatus::Paused
-                    )
-            })?;
-            candidate.instance.agent_activity = Some(activity.clone());
-            candidate.instance.foreground_process = match activity.phase {
-                AgentPhase::Finished | AgentPhase::Idle => None,
-                _ => Some(signal.source.as_str().to_string()),
-            };
-            session_state_of(candidate)
-        };
-
-        self.emitter.session_state_changed(state.clone()).await;
-        Some(state)
-    }
-
     // ---- internal: spawn / exit / batching -------------------------------
 
     async fn spawn(&self, session_id: &str) {
@@ -839,9 +795,7 @@ impl ProcessManager {
             session.instance.started_at = Some(Utc::now().to_rfc3339());
             session.instance.exit_code = None;
             session.instance.pid = pid.map(|p| p as i64);
-            session.instance.foreground_process = None;
             session.instance.pty_foreground_process = None;
-            session.instance.agent_activity = None;
             session_state_of(session)
         };
         self.emitter.session_state_changed(snapshot).await;
@@ -877,93 +831,52 @@ impl ProcessManager {
         let port_manager = self.port_manager.clone();
 
         tokio::spawn(async move {
-            let mut render_buffer = BytesMut::new();
             let mut terminal_buffer = BytesMut::new();
-            let mut flush_deadline: Option<tokio::time::Instant> = None;
 
-            loop {
-                let sleep_fut = async {
-                    match flush_deadline {
-                        Some(dl) => tokio::time::sleep_until(dl).await,
-                        None => std::future::pending().await,
+            while let Some(chunk) = rx.recv().await {
+                let now = Utc::now().to_rfc3339();
+                let paused = {
+                    let mut g = inner.lock().await;
+                    if let Some(s) = g.sessions.get_mut(&session_id) {
+                        s.instance.last_output_at = Some(now);
+                        s.output_paused
+                    } else {
+                        false
                     }
                 };
-
-                tokio::select! {
-                    biased;
-                    chunk = rx.recv() => {
-                        let Some(chunk) = chunk else { break };
-
-                        if render_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
-                            let drop = render_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
-                            let render_drop = drop.min(render_buffer.len());
-                            let _ = render_buffer.split_to(render_drop);
-                        }
-                        render_buffer.extend_from_slice(&chunk);
-
-                        let now = Utc::now().to_rfc3339();
-                        let paused = {
-                            let mut g = inner.lock().await;
-                            if let Some(s) = g.sessions.get_mut(&session_id) {
-                                s.instance.last_output_at = Some(now);
-                                s.output_paused
-                            } else {
-                                false
-                            }
-                        };
-                        if paused {
-                            if terminal_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
-                                let drop = terminal_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
-                                let terminal_drop = drop.min(terminal_buffer.len());
-                                let _ = terminal_buffer.split_to(terminal_drop);
-                            }
-                            terminal_buffer.extend_from_slice(&chunk);
-                            port_manager.check_output_for_hint(&chunk, &session_id).await;
-                            continue;
-                        }
-
-                        if terminal_buffer.is_empty() {
-                            emitter.terminal_output_chunk(&session_id, &chunk);
-                        } else {
-                            if terminal_buffer.len() + chunk.len() > OUTPUT_BUFFER_MAX {
-                                let drop = terminal_buffer.len() + chunk.len() - OUTPUT_BUFFER_MAX;
-                                let terminal_drop = drop.min(terminal_buffer.len());
-                                let _ = terminal_buffer.split_to(terminal_drop);
-                            }
-                            terminal_buffer.extend_from_slice(&chunk);
-                            emitter.terminal_output_chunk(&session_id, &terminal_buffer);
-                            terminal_buffer.clear();
-                        }
-
-                        port_manager.check_output_for_hint(&chunk, &session_id).await;
-
-                        if render_buffer.len() >= BATCH_MAX_BYTES {
-                            flush_deadline = None;
-                            let bytes = render_buffer.split().freeze();
-                            emitter.output_chunk(&session_id, bytes).await;
-                        } else if flush_deadline.is_none() {
-                            flush_deadline = Some(tokio::time::Instant::now() + BATCH_INTERVAL);
-                        }
+                if paused {
+                    if terminal_buffer.len() + chunk.len() > PAUSED_OUTPUT_BUFFER_MAX {
+                        let drop = terminal_buffer.len() + chunk.len() - PAUSED_OUTPUT_BUFFER_MAX;
+                        let terminal_drop = drop.min(terminal_buffer.len());
+                        let _ = terminal_buffer.split_to(terminal_drop);
                     }
-                    _ = sleep_fut => {
-                        flush_deadline = None;
-                        if render_buffer.is_empty() { continue; }
-                        let paused = {
-                            let g = inner.lock().await;
-                            g.sessions
-                                .get(&session_id)
-                                .map(|s| s.output_paused)
-                                .unwrap_or(false)
-                        };
-                        if paused { continue; }
-                        let bytes = render_buffer.split().freeze();
-                        emitter.output_chunk(&session_id, bytes).await;
-                    }
+                    terminal_buffer.extend_from_slice(&chunk);
+                    port_manager
+                        .check_output_for_hint(&chunk, &session_id)
+                        .await;
+                    continue;
                 }
+
+                if terminal_buffer.is_empty() {
+                    emitter.terminal_output_chunk(&session_id, &chunk);
+                } else {
+                    if terminal_buffer.len() + chunk.len() > PAUSED_OUTPUT_BUFFER_MAX {
+                        let drop = terminal_buffer.len() + chunk.len() - PAUSED_OUTPUT_BUFFER_MAX;
+                        let terminal_drop = drop.min(terminal_buffer.len());
+                        let _ = terminal_buffer.split_to(terminal_drop);
+                    }
+                    terminal_buffer.extend_from_slice(&chunk);
+                    emitter.terminal_output_chunk(&session_id, &terminal_buffer);
+                    terminal_buffer.clear();
+                }
+
+                port_manager
+                    .check_output_for_hint(&chunk, &session_id)
+                    .await;
             }
 
             // Final flush on EOF.
-            if !render_buffer.is_empty() || !terminal_buffer.is_empty() {
+            if !terminal_buffer.is_empty() {
                 let paused = {
                     let g = inner.lock().await;
                     g.sessions
@@ -972,14 +885,7 @@ impl ProcessManager {
                         .unwrap_or(false)
                 };
                 if !paused {
-                    if !terminal_buffer.is_empty() {
-                        emitter.terminal_output_chunk(&session_id, &terminal_buffer);
-                    }
-                    if !render_buffer.is_empty() {
-                        emitter
-                            .output_chunk(&session_id, render_buffer.split().freeze())
-                            .await;
-                    }
+                    emitter.terminal_output_chunk(&session_id, &terminal_buffer);
                 }
             }
         })
@@ -1100,9 +1006,8 @@ impl ProcessManager {
             }
             session.exit_handled = true;
 
-            // Cancel any pending escalation. Let the reader task drain naturally:
-            // it owns the renderer batch buffer, and aborting it here can drop
-            // the final bytes from fast-exiting commands before the 4 ms flush.
+            // Cancel any pending escalation. Let the reader task drain naturally
+            // so fast-exiting commands can still flush their final terminal bytes.
             if let Some(t) = session.escalation_task.take() {
                 t.abort();
             }
@@ -1112,9 +1017,7 @@ impl ProcessManager {
             session.output_paused = false;
             session.instance.pid = None;
             session.instance.exit_code = exit_code.map(|c| c as i64);
-            session.instance.foreground_process = None;
             session.instance.pty_foreground_process = None;
-            session.instance.agent_activity = None;
 
             let was_restarting = matches!(session.instance.status, SessionStatus::Restarting);
             if was_restarting {
@@ -1229,9 +1132,7 @@ impl ProcessManager {
         session.instance.status = SessionStatus::Stopped;
         session.instance.pid = None;
         session.instance.exit_code = None;
-        session.instance.foreground_process = None;
         session.instance.pty_foreground_process = None;
-        session.instance.agent_activity = None;
     }
 }
 
@@ -1417,7 +1318,6 @@ mod tests {
     struct CapturedEvent {
         states: Vec<SessionState>,
         terminal_outputs: Vec<(String, Vec<u8>)>,
-        outputs: Vec<(String, Vec<u8>)>,
     }
 
     #[derive(Clone, Default)]
@@ -1433,13 +1333,6 @@ mod tests {
                 .lock()
                 .unwrap()
                 .terminal_outputs
-                .push((session_id.to_string(), data.to_vec()));
-        }
-        async fn output_chunk(&self, session_id: &str, data: Bytes) {
-            self.0
-                .lock()
-                .unwrap()
-                .outputs
                 .push((session_id.to_string(), data.to_vec()));
         }
         async fn ports_changed(&self, _ports: Vec<DetectedPort>) {}
@@ -1578,17 +1471,6 @@ mod tests {
                 .any(|s| s.instance.status == SessionStatus::Running),
             "expected at least one Running state"
         );
-        let outputs: Vec<u8> = captured
-            .outputs
-            .iter()
-            .filter(|(id, _)| id == &sid)
-            .flat_map(|(_, b)| b.clone())
-            .collect();
-        assert!(
-            String::from_utf8_lossy(&outputs).contains("hi"),
-            "expected 'hi' in output: {:?}",
-            String::from_utf8_lossy(&outputs)
-        );
         let terminal_outputs: Vec<u8> = captured
             .terminal_outputs
             .iter()
@@ -1615,20 +1497,6 @@ mod tests {
         // Should be gone immediately.
         let states = pm.list_session_states().await;
         assert!(states.iter().all(|s| s.instance.id != sid));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn agent_signal_with_no_matching_session_returns_none() {
-        let slots = vec![slot("slot-1", false)];
-        let defs = vec![session_def("def-1", "slot-1", "echo hi")];
-        let (pm, _emitter) = make_pm(slots, defs);
-        let signal = AgentCliSignal {
-            slot_id: "slot-1".to_string(),
-            source: crate::runtime::types::AgentVendor::ClaudeCode,
-            payload_base64: None,
-        };
-        // No open sessions yet.
-        assert!(pm.record_agent_cli_signal(&signal).await.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

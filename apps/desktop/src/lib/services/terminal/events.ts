@@ -4,13 +4,10 @@ import {
   getAllTerminalSlotIds,
 } from "@/lib/shared/utils";
 import {
-  hasAgentActivityChanged,
-  previousSessionAgentActivity,
-  applySessionAgentActivityStatusToMap,
+  clearEphemeralTerminalAgentStatus,
 } from "@/lib/shared/terminal/agent-activity";
 import { removeTerminalFromPanel } from "@/lib/shared/terminal/panel";
 import { isProjectTerminalKey } from "@/lib/services/terminal/project-key";
-import type { TerminalAgentStatus } from "@/lib/shared/shared.types";
 import type { IpcQueueEvent } from "@/lib/services/ipc/events";
 import { reconcileProjectTerminalPanelState } from "@/lib/services/terminal/project-panel";
 import { useTerminalScopeStore } from "@/lib/services/terminal/store";
@@ -19,19 +16,8 @@ import { terminalSurfaceService } from "@/lib/services/terminal/surface";
 import { useLayoutStore } from "@/lib/services/layout/store";
 
 export interface TerminalEventHandlerContext {
-  getSelectedWorkspaceId: () => string | null;
   onSlotAdded: (scopeId: string) => void;
   onScopeUpdated?: (scopeId: string) => void;
-  onPrDetected: (workspaceId: string, prUrl: string, prNumber: number) => void;
-  getPrAwaitingWorkspaceIds: () => Set<string>;
-}
-
-function decodeOutputChunk(data: string): string {
-  try {
-    return atob(data);
-  } catch {
-    return data;
-  }
 }
 
 function ensureLayoutSlotsForNewTerminals(workspaceId: string) {
@@ -184,26 +170,6 @@ export function applyTerminalRuntimeEvent(
 
       useTerminalScopeStore.getState().replaceSessions(event.scopeId, event.sessions);
 
-      const scope = useTerminalScopeStore.getState().byScopeId[event.scopeId];
-      if (!scope) break;
-      const layout = useLayoutStore.getState().byWorkspaceId[event.scopeId];
-      const statusMap: Record<string, TerminalAgentStatus> = {
-        ...scope.terminalAgentStatusBySlotId,
-      };
-      const agentCtx = {
-        workspaceId: event.scopeId,
-        sessions: scope.sessions,
-        terminalAgentStatusBySlotId: statusMap,
-        root: layout?.root ?? null,
-        focusedPaneID: layout?.focusedPaneID ?? null,
-      };
-      for (const session of scope.sessions) {
-        applySessionAgentActivityStatusToMap(agentCtx, session, {
-          selectedWorkspaceId: ctx.getSelectedWorkspaceId(),
-        });
-      }
-      useTerminalScopeStore.getState().setAgentStatuses(event.scopeId, statusMap);
-
       for (const sessionId of deadSessionIds) {
         terminalSurfaceService.removeSurface(sessionId).catch((err) =>
           console.error("Failed to destroy surface for disappeared session:", err),
@@ -253,29 +219,11 @@ export function applyTerminalRuntimeEvent(
     case "session_state_changed": {
       const scopeStore = useTerminalScopeStore.getState();
       const scope = scopeStore.byScopeId[event.scopeId];
-      const layout = useLayoutStore.getState().byWorkspaceId[event.scopeId];
-
-      const previousSessions = scope?.sessions ?? [];
-      const previous = previousSessionAgentActivity(previousSessions, event.session);
-      const next = event.session.agentActivity;
-
-      const statusMap: Record<string, TerminalAgentStatus> = {
-        ...scope?.terminalAgentStatusBySlotId,
-      };
-
-      if (hasAgentActivityChanged(previous, next)) {
-        applySessionAgentActivityStatusToMap(
-          {
-            workspaceId: event.scopeId,
-            sessions: previousSessions,
-            terminalAgentStatusBySlotId: statusMap,
-            root: layout?.root ?? null,
-            focusedPaneID: layout?.focusedPaneID ?? null,
-          },
-          event.session,
-          { selectedWorkspaceId: ctx.getSelectedWorkspaceId() },
-        );
-      }
+      const statusMap = { ...scope?.terminalAgentStatusBySlotId };
+      clearEphemeralTerminalAgentStatus(
+        { terminalAgentStatusBySlotId: statusMap },
+        event.session.slotID,
+      );
 
       scopeStore.updateSession(event.scopeId, event.session);
       scopeStore.setAgentStatuses(event.scopeId, statusMap);
@@ -304,18 +252,6 @@ export function applyTerminalRuntimeEvent(
       }
 
       ctx.onScopeUpdated?.(event.scopeId);
-      break;
-    }
-
-    case "output_chunk": {
-      const prAwaitingIds = ctx.getPrAwaitingWorkspaceIds();
-      if (!prAwaitingIds.has(event.scopeId)) break;
-      const data = decodeOutputChunk(event.data);
-      const match = data.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/);
-      if (!match) break;
-      const prUrl = match[0];
-      const prNumber = parseInt(match[1], 10);
-      ctx.onPrDetected(event.scopeId, prUrl, prNumber);
       break;
     }
 

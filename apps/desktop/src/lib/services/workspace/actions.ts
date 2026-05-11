@@ -223,10 +223,6 @@ export const workspaceActions = {
     }
   },
 
-  setPrAwaiting(workspaceId: string, awaiting: boolean): void {
-    appBootstrapService.setPrAwaiting(workspaceId, awaiting);
-  },
-
   async archiveWorkspace(
     workspaceId: string,
     options?: { deleteWorktree?: boolean },

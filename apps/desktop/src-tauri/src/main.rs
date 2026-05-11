@@ -3,7 +3,6 @@
 
 #[macro_use]
 mod terminal_log;
-mod agent_cli;
 mod commands;
 mod database;
 mod git;
@@ -234,8 +233,6 @@ fn main() {
             commands::write_clipboard_file_paths,
         ])
         .setup(|app| {
-            let _ = agent_cli::ensure_agent_cli_integration();
-            agent_cli::start_agent_cli_bridge(app.handle().clone());
             native_shortcuts::init(app.handle().clone());
 
             let menu = build_app_menu(&app.handle())?;

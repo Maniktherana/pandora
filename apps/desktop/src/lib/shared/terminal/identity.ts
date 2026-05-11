@@ -24,11 +24,11 @@ function prettyLabel(name: string): string {
 }
 
 export function detectTerminalDisplayFromProcess(
-  foregroundProcess: string | null | undefined,
+  processName: string | null | undefined,
 ): TerminalDisplayState | null {
-  if (!foregroundProcess) return null;
-  if (AUTO_SHELL_NAME.test(foregroundProcess)) return null;
-  return { kind: "process", label: prettyLabel(foregroundProcess) };
+  if (!processName) return null;
+  if (AUTO_SHELL_NAME.test(processName)) return null;
+  return { kind: "process", label: prettyLabel(processName) };
 }
 
 function customSlotLabel(slot: SlotState | undefined): string | null {
@@ -41,9 +41,6 @@ function customSlotLabel(slot: SlotState | undefined): string | null {
 }
 
 function effectiveProcessName(session: SessionState | undefined): string | null {
-  // Agent CLI signal is the source of truth — use it when available.
-  if (session?.foregroundProcess) return session.foregroundProcess;
-  // Fall back to the raw PTY process name for non-agent commands.
   return session?.ptyForegroundProcess ?? null;
 }
 

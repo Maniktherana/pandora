@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::database::AppDatabase;
 use super::process_manager::{ProcessManager, ScopeEmitter};
+use crate::database::AppDatabase;
 
 /// Lightweight handle to a running `ProcessManager`.
 #[derive(Clone)]
@@ -101,7 +101,6 @@ mod tests {
     #[async_trait::async_trait]
     impl ScopeEmitter for NoopEmitter {
         async fn session_state_changed(&self, _state: crate::runtime::types::SessionState) {}
-        async fn output_chunk(&self, _session_id: &str, _data: bytes::Bytes) {}
         async fn ports_changed(&self, _ports: Vec<crate::runtime::types::DetectedPort>) {}
     }
 
@@ -151,8 +150,8 @@ mod tests {
         let db = Arc::new(AppDatabase::open(&home).expect("open db"));
         let emitter: Arc<dyn ScopeEmitter> = Arc::new(NoopEmitter::default());
 
-        let scope = open_terminal_scope(Arc::clone(&db), "runtime-1", "/tmp", emitter)
-            .expect("open scope");
+        let scope =
+            open_terminal_scope(Arc::clone(&db), "runtime-1", "/tmp", emitter).expect("open scope");
 
         assert!(scope.process_manager.list_slot_states().await.is_empty());
         assert!(scope.process_manager.list_session_states().await.is_empty());
@@ -174,8 +173,8 @@ mod tests {
             .expect("create session");
 
         let emitter: Arc<dyn ScopeEmitter> = Arc::new(NoopEmitter::default());
-        let scope = open_terminal_scope(Arc::clone(&db), runtime_id, "/tmp", emitter)
-            .expect("open scope");
+        let scope =
+            open_terminal_scope(Arc::clone(&db), runtime_id, "/tmp", emitter).expect("open scope");
 
         let slots = scope.process_manager.list_slot_states().await;
         let sessions = scope.process_manager.list_session_states().await;

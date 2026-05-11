@@ -36,8 +36,6 @@ export function useWorkspaceActions() {
         void workspaceActions.renameWorkspace(workspaceId, name).catch(console.error),
       updateWorkspacePrState: (workspaceId: string, prState: string) =>
         workspaceActions.updateWorkspacePrState(workspaceId, prState),
-      setPrAwaiting: (workspaceId: string, awaiting: boolean) =>
-        workspaceActions.setPrAwaiting(workspaceId, awaiting),
       archiveWorkspace: (workspaceId: string, options?: { deleteWorktree?: boolean }) =>
         workspaceActions.archiveWorkspace(workspaceId, options),
       restoreWorkspace: (workspaceId: string) =>

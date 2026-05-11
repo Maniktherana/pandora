@@ -5,8 +5,7 @@ import {
   patchWorkspaceRecord,
   applyAppState,
 } from "@/lib/services/workspace/view";
-import { loadAppState, prLink } from "@/lib/services/workspace/api";
-import { useCatalogStore } from "@/lib/services/catalog/store";
+import { loadAppState } from "@/lib/services/workspace/api";
 import { useNavigationStore } from "@/lib/services/navigation/store";
 import { DesktopStateLoadError } from "@/lib/services/errors";
 import {
@@ -29,16 +28,11 @@ import { gitInit, gitInitMany } from "@/lib/services/git/commands";
 let unsubscribeIpcEvents: (() => void) | null = null;
 let unlistenWorkspaceRecord: (() => void) | null = null;
 
-// ─── PR awaiting state ────────────────────────────────────────────────────────
-
-const prAwaitingWorkspaceIds = new Set<string>();
-
 // ─── IPC event routing ────────────────────────────────────────────────────────
 
 function startIpcEventRouting(): void {
   if (unsubscribeIpcEvents) return;
   unsubscribeIpcEvents = subscribeIpcEvents({
-    getSelectedWorkspaceId: () => useNavigationStore.getState().selectedWorkspaceID,
     onSlotAdded: (scopeId) => {
       terminalStartup.ensureWorkspaceDefaultTerminal(scopeId, (slotId) => {
         getWorkspaceSession(scopeId, updateWorkspaceLayout, mutateWorkspaceLayout).commands.addTerminalTab(slotId);
@@ -50,22 +44,6 @@ function startIpcEventRouting(): void {
     onScopeUpdated: (scopeId) => {
       terminalStartup.refreshScopeTerminalStartup(scopeId).catch((err) =>
         console.warn("Failed to refresh scope terminal startup:", err),
-      );
-    },
-    getPrAwaitingWorkspaceIds: () => prAwaitingWorkspaceIds,
-    onPrDetected: (workspaceId, detectedPrUrl, detectedPrNumber) => {
-      prAwaitingWorkspaceIds.delete(workspaceId);
-      const workspace = useCatalogStore.getState().workspaces.find((w) => w.id === workspaceId);
-      if (workspace) {
-        useCatalogStore.getState().patchWorkspace({
-          ...workspace,
-          prUrl: detectedPrUrl,
-          prNumber: detectedPrNumber,
-          prState: "open",
-        });
-      }
-      prLink(workspaceId, detectedPrUrl, detectedPrNumber).catch((err) =>
-        console.warn("Failed to persist PR link:", err),
       );
     },
   });
@@ -156,17 +134,6 @@ export const appBootstrapService = {
       );
     }
     await terminalStartup.refreshActiveScopeTerminalStartup({ rebuildHiddenQueues: true });
-  },
-
-  setPrAwaiting(workspaceId: string, awaiting: boolean): void {
-    if (awaiting) {
-      prAwaitingWorkspaceIds.add(workspaceId);
-      setTimeout(() => {
-        prAwaitingWorkspaceIds.delete(workspaceId);
-      }, 90_000);
-    } else {
-      prAwaitingWorkspaceIds.delete(workspaceId);
-    }
   },
 
   dispose(): void {

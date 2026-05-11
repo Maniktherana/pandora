@@ -39,45 +39,6 @@ pub enum AggregateStatus {
     Restarting,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentVendor {
-    ClaudeCode,
-    Codex,
-    Opencode,
-    Gemini,
-    CursorAgent,
-    GithubCopilot,
-    AmpCode,
-}
-
-impl AgentVendor {
-    /// String form used in foreground-process labels and as the
-    /// `signal.source` value on incoming agent CLI hook payloads
-    /// (kebab-case strings).
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::ClaudeCode => "claude-code",
-            Self::Codex => "codex",
-            Self::Opencode => "opencode",
-            Self::Gemini => "gemini",
-            Self::CursorAgent => "cursor-agent",
-            Self::GithubCopilot => "github-copilot",
-            Self::AmpCode => "amp-code",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentPhase {
-    Idle,
-    Working,
-    WaitingInput,
-    WaitingApproval,
-    Finished,
-}
-
 // ---------------------------------------------------------------------------
 // State carriers.
 // ---------------------------------------------------------------------------
@@ -91,29 +52,6 @@ pub struct ActionCapabilities {
     pub can_clear: bool,
     pub can_stop: bool,
     pub can_restart: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentActivityState {
-    pub vendor: AgentVendor,
-    pub phase: AgentPhase,
-    #[serde(rename = "agentSessionID")]
-    pub agent_session_id: Option<String>,
-    pub updated_at: String,
-    pub message: Option<String>,
-    pub title: Option<String>,
-    pub tool_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentCliSignal {
-    #[serde(rename = "slotID")]
-    pub slot_id: String,
-    pub source: AgentVendor,
-    #[serde(default)]
-    pub payload_base64: Option<String>,
 }
 
 /// Per-instance runtime state for an open session. Populated as the PTY
@@ -132,15 +70,11 @@ pub struct SessionInstance {
     pub exit_code: Option<i64>,
     pub started_at: Option<String>,
     pub last_output_at: Option<String>,
-    /// Set when an agent CLI is in a non-finished phase (e.g. "claude-code").
-    /// `null` otherwise — UI falls back to the session name.
-    pub foreground_process: Option<String>,
     /// Set by the PTY layer when the foreground process group changes
     /// (e.g. user typed `npm test`). Polled at 1 Hz via `tcgetpgrp` +
     /// `libproc` name resolution. `null` when no child process has taken
     /// the foreground group — UI falls back to the session name.
     pub pty_foreground_process: Option<String>,
-    pub agent_activity: Option<AgentActivityState>,
 }
 
 /// Wire shape emitted in snapshots: a `SessionInstance` plus the relevant
@@ -337,10 +271,6 @@ pub enum IpcCommand {
         cols: u16,
         rows: u16,
     },
-    AgentCliSignal {
-        signal: AgentCliSignal,
-    },
-
     // ---- File tree ------------------------------------------------------
     /// Initial subscription: seeds the expansion set and replies with a
     /// `FileTreeSnapshot`. Idempotent — safe to call after a renderer reload.
@@ -473,14 +403,6 @@ pub enum ScopeEvent {
     SessionClosed {
         #[serde(rename = "sessionID")]
         session_id: String,
-    },
-    OutputChunk {
-        #[serde(rename = "sessionID")]
-        session_id: String,
-        /// Base64-encoded PTY bytes. Routing raw UTF-8 strings through
-        /// Tauri events is fragile (lone surrogates in ANSI escape
-        /// sequences); base64 keeps the bytes intact end-to-end.
-        data: String,
     },
     PortsSnapshot {
         ports: Vec<DetectedPort>,
@@ -672,18 +594,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn agent_vendor_string_form_matches_signal_source() {
-        // The frontend sends signals with kebab-case source strings; serde
-        // must round-trip them.
-        let v: AgentVendor = serde_json::from_value(json!("claude-code")).unwrap();
-        assert_eq!(v, AgentVendor::ClaudeCode);
-        assert_eq!(
-            serde_json::to_value(AgentVendor::CursorAgent).unwrap(),
-            json!("cursor-agent")
-        );
-    }
-
-    #[test]
     fn client_message_input_round_trips() {
         let raw = json!({
             "type": "input",
@@ -714,38 +624,6 @@ mod tests {
         let raw = json!({"type":"request_snapshot"});
         let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
         assert_eq!(msg, IpcCommand::RequestSnapshot);
-        assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
-    }
-
-    #[test]
-    fn client_message_agent_cli_signal_uses_uppercase_id() {
-        let raw = json!({
-            "type": "agent_cli_signal",
-            "signal": {
-                "slotID": "slot-1",
-                "source": "claude-code",
-                "payloadBase64": null,
-            }
-        });
-        let msg: IpcCommand = serde_json::from_value(raw.clone()).unwrap();
-        if let IpcCommand::AgentCliSignal { signal } = &msg {
-            assert_eq!(signal.slot_id, "slot-1");
-            assert_eq!(signal.source, AgentVendor::ClaudeCode);
-        } else {
-            panic!("wrong variant");
-        }
-        assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
-    }
-
-    #[test]
-    fn runtime_message_output_chunk_round_trips() {
-        let raw = json!({
-            "type": "output_chunk",
-            "sessionID": "s",
-            "data": "aGVsbG8=",
-        });
-        let msg: ScopeEvent = serde_json::from_value(raw.clone()).unwrap();
-        assert!(matches!(msg, ScopeEvent::OutputChunk { .. }));
         assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
     }
 
@@ -789,9 +667,7 @@ mod tests {
                     exit_code: None,
                     started_at: None,
                     last_output_at: None,
-                    foreground_process: None,
                     pty_foreground_process: None,
-                    agent_activity: None,
                 },
                 kind: SessionKind::Process,
                 name: "n".into(),
